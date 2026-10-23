@@ -633,143 +633,6 @@ struct tagCAPTION {
 	ULONG Decomp_size;
 };
 
-enum {
-	CMOJI_00,
-	CMOJI_01,
-	CMOJI_02,
-	CMOJI_03,
-	CMOJI_04,
-	CMOJI_05,
-	CMOJI_06,
-	CMOJI_07,
-	CMOJI_08,
-	CMOJI_09,
-	CMOJI_10,
-	CMOJI_11,
-	CMOJI_12,
-	CMOJI_13,
-	CMOJI_14,
-	CMOJI_15,
-	CMOJI_16,
-	CMOJI_17,
-	EMESS_0,
-	EMESS_1,
-	EMESS_2,
-	EMESS_3,
-	EMESS_4,
-	EMESS_5,
-	EMESS_6,
-	EMESS_7,
-	EMESS_8,
-	MESS_LEON,
-	MESS_CLAIRE,
-	MESS_LEON_R,
-	MESS_CLAIRE_R,
-	MESS_SPY,
-	MESS_SAVE_CNT,
-	AREA_0,
-	AREA_1,
-	AREA_2,
-	AREA_3,
-	AREA_4,
-	AREA_5,
-	AREA_6,
-	AREA_7,
-	AREA_8,
-	AREA_9,
-	AREA_10,
-	AREA_11,
-	AREA_12,
-	AREA_13,
-	AREA_14,
-	AREA_15,
-	AREA_16,
-	AREA_17,
-};
-
-enum {
-	SLOT_CHECK,
-	USE_CARD,
-	SEL_SLOT,
-	ERR_MESS,
-	NOW_CHECKING,
-	CARD_CHECK,
-	FILE_SEL,
-	READY,
-	SAVE,
-	SAVE_DEMO,
-	LOAD,
-	LOAD2,
-	FORMAT_CHECK,
-	FORMAT,
-	ERR_MESS2,
-	OVERWRITE,
-	SCRL_UP,
-	SCRL_DOWN,
-	PAGE_CHANGE,
-};
-
-enum {
-	MES_A00,
-	MES_A10,
-	MES_A11,
-	MES_A20,
-	MES_A21,
-	MES_CARD00,
-	MES_CARD01,
-	MES_CARD10,
-	MES_CARD20,
-	MES_PRESS,
-};
-
-enum {
-	DUMMY0,
-	DUMMY1,
-	MES_613_0,
-	MES_613_1,
-	MES_613_2,
-	MES_613_3,
-	MES_613_4,
-	MES_613_5,
-	MES_613_6,
-	MES_613_7,
-	MES_613_8,
-	MES_613_9,
-};
-
-enum {
-	E1_INIT,
-	E1_A1,
-	E1_A3,
-	E1_A8,
-	E1_A9,
-	E1_A10,
-	E1_A11,
-	E1_A12,
-	E1_A13,
-	E1_PRESS_KEY,
-	E1_PRESS_KEY2,
-	E1_EXIT,
-	E1_EXIT2,
-	E1_EXIT3,
-};
-
-enum {
-	E2_INIT,
-	E2_SET_UP,
-	E2_SET_UP2,
-	E2_SET_UP3,
-	E2_INPUT1,
-	E2_INPUT2,
-	E2_NO_GUEST,
-	E2_GUEST,
-	E2_ENTRY_END,
-	E2_ENTRY_END2,
-	E2_ENTRY_END3,
-	E2_EXIT,
-	E2_EXIT2,
-};
-
 /* ------------------------------------------------------------------ */
 /* Globals used by MAIN.C (defined in their owning modules)            */
 /* ------------------------------------------------------------------ */
@@ -781,23 +644,23 @@ extern const RECT ClearImageRect;
  * Rect[0].w/h and Rect[1].x/y form the RECT passed to LoadImage in Swap_Cbuff. */
 extern RECT Rect[2];
 
-/* background-scroll RECT (Bg_draw); DS address not yet verified */
+/* background-scroll RECT (Bg_draw) */
 extern RECT Rect_bg;
 
 /* DS 0x8011a000: TIM buffer for TEX.TIM (Init_main) */
-extern ULONG Tex_tim_buf[];
+extern ULONG *Tex_tim_buf;
 
 /* DS 0x80190000: BS (background stream) load buffer */
-extern ULONG Bs_buf[0x3E39];
+extern ULONG *Bs_buf;
 
 /* DS 0x80198000: decoded background image / scroll strip buffer */
-extern ULONG Bg_img_buf[0xD800];
+extern ULONG *Bg_img_buf;
 
 /* DS 0x80199e00: MDEC input buffer for DecDCTin */
-#define Dct_in_buf ((ULONG *)Bs_buf + 0x2780)	/* view into Bs_buf at +0x9e00 */
+#define Dct_in_buf (Bg_img_buf + 0x780)	/* view into Bg_img_buf at +0x1e00 */
 
 /* DS 0x801a5800: background TIM buffer (Bg_draw) */
-extern ULONG Bg_tim_buf[0x1E00];
+extern ULONG *Bg_tim_buf;
 
 /* One entry of the per-(room,cut) Bs_info table (Bs_info_tbl below, 8 bytes each) */
 typedef struct tagBS_INFO {
@@ -812,7 +675,7 @@ typedef struct tagBS_INFO {
 /* SLD decompressor (engine code, not PsyQ). Unpacks compressed TIM data for the
  * OT depth textures that are overlaid on the prerendered backgrounds (faux 3D).
  * DS 0x80010000 (Desld_init) / DS 0x80010084 (Desld_proc), region 0x80010000-0x80010778.
- * Owner file not yet assigned. */
+ */
 void Desld_init(ULONG *pBuf);
 int  Desld_proc(void);
 
@@ -846,8 +709,9 @@ void Logo(void);
 /* Globals defined in MAIN.C */
 	extern MATRIX LIGHTMATRIX;							// 0x8009db64
 	extern MATRIX COLORMATRIX;							// 0x8009db84
+	extern UCHAR Pad_act_align[6];						// 0x8009dba4	// PadSetActAlign table (PAD.C Pad_set)
 	extern TILE Curtain[2][2];							// 0x8009dbac
-	extern TILE Pause[2];								// 0x8009dbac
+	extern TILE Pause[2];								// 0x8009dbec
 	extern LONG Scrl_h;									// 0x8009dc0c
 	extern ULONG Ev0;									// 0x800d7698
 	extern ULONG Ev1;									// 0x800d7828
@@ -972,6 +836,7 @@ struct tagGLOBAL {
 	UCHAR Font_type;
 	UCHAR Dummy8_3[3];
 	SAVE_DATA SaveData;
+	UCHAR Pad[12];				// 0x8a54, unreferenced; G ends at 0x800d4c48 (beta GLOBAL ends with Pad[12])
 };
 
 	extern tagGLOBAL G;									// 0x800cc1e8
@@ -981,6 +846,6 @@ struct tagGLOBAL {
 	extern PDEMO Demo;									// 0x800df390
 	extern UCHAR Key_idx_bak;							// 0x800dfad6
 
-/* Main work area (struct tagMAIN above); defined in CONFIG.C */
+/* Main work area (struct tagMAIN above); defined in MAIN.C */
 	extern tagMAIN Main;								// 0x800dfae0
 #endif /* MAIN_H_H */

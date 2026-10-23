@@ -33,13 +33,13 @@ struct DesldState {
 	ULONG	pending;	/* +0x14 parked control byte (SHORT_TAIL) or remaining
 	                     *       literal count (LIT_TAIL) */
 	UCHAR	*end;		/* +0x18 end of the input chunk (0x1f800400) */
-	ULONG	copy_base;	/* +0x1c retail jump base of the copy routine (DS 0x80010598); the C loop does not use it, so it is not set */
+	ULONG	copy_base;	/* +0x1c copy-routine base, DS 0x80010598: Desld_init stores it, Desld_proc loads it into s3 */
 	ULONG	saved_regs[8];	/* +0x20..+0x3c saved s0..s7 (asm register save only) */
 };
 
 extern DESLD_STATE Desld_st;	/* DS 0x80010738 */
 
-/* DS 0x80010000 */
+/* DS 0x80010000: start a new decompression into pBuf (see Desld_init in SLD.C). */
 VOID Desld_init(ULONG *pBuf);
 
 /* DS 0x80010084 (called from Bg_draw, see MAIN.C) */
@@ -50,6 +50,7 @@ VOID setexmask(VOID);
 
 
 
+/* Copies size bytes in 16-byte blocks (see SLD.C). */
 VOID memcpy16(ULONG *dest, ULONG *source, INT size);
 
 #endif /* SLD_H */

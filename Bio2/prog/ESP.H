@@ -4,8 +4,8 @@
  * ESP.H - Effect Sprite (ESP) work structures and ESP.C prototypes
  * D:\Bio2\prog\ESP.H
  *
- * Field offsets match the offset comments in the struct (CCPSX probe). Retail meaning
- * is checked for Routine0/1, Be_flg, Id, Type, pMat and DirY only. Free* names are unresolved.
+ * Field offsets match the offset comments in the struct. Retail meaning
+ * is known for Routine0/1, Be_flg, Id, Type, pMat and DirY; the Free* fields are named by offset only.
  */
 
 #include "TYPES.H"
@@ -23,9 +23,9 @@ struct MSEQUENCE {
 	UCHAR Free1;		/* 03 */
 	USHORT Transx;		/* 04 */
 	USHORT Transy;		/* 06 */
-	CHAR Add_x;		/* 08 */
-	CHAR Add_y;		/* 09 */
-	CHAR Add_z;		/* 0A */
+	signed char Add_x;	/* 08 */
+	signed char Add_y;	/* 09 */
+	signed char Add_z;	/* 0A */
 	UCHAR Free2;		/* 0B */
 	SHORT Speed_x;		/* 0C */
 	SHORT Speed_y;		/* 0E */
@@ -52,9 +52,9 @@ struct ESP_WORK {
 	UCHAR Free1;		/* 03 (timer / step counter) */
 	USHORT Transx;		/* 04 */
 	USHORT Transy;		/* 06 */
-	CHAR Add_x;		/* 08 */
-	CHAR Add_y;		/* 09 */
-	CHAR Add_z;		/* 0A */
+	signed char Add_x;	/* 08 */
+	signed char Add_y;	/* 09 */
+	signed char Add_z;	/* 0A */
 	UCHAR Free2;		/* 0B */
 	SHORT Speed_x;		/* 0C */
 	SHORT Speed_y;		/* 0E */
@@ -123,21 +123,20 @@ extern UCHAR Esp_call3D(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec, SVEC
 extern UCHAR Esp_call3D2(ULONG bit, ULONG dir_y_id2, MATRIX *pmat, SVECTOR *svec, SVECTOR *dsv);
 extern UCHAR Esp_kill(UCHAR id, UCHAR tp, MATRIX *pmat);
 extern UCHAR Esp_kill2(ULONG id2);
-extern VOID Esp_kill_all(VOID);		/* DS 0x8001d07c, name_registry.md */
+extern VOID Esp_kill_all(VOID);		/* DS 0x8001d07c */
 extern VOID Esp_die(VOID);
 extern UCHAR Esp_ctrl(UCHAR id, UCHAR tp, USHORT rtn, MATRIX *pmat);
-extern UCHAR Esp_ctrl2(USHORT wk_no, USHORT rtn);
+extern ULONG Esp_ctrl2(USHORT wk_no, USHORT rtn);
 extern UCHAR Esp_ctrl3(UCHAR id, UCHAR tp, USHORT magx, USHORT sinx, MATRIX *pmat);
 extern UCHAR Esp_ctrl4(UCHAR id, UCHAR tp, USHORT magy, USHORT siny, MATRIX *pmat);
 extern VOID Esp_move(VOID);
-extern UCHAR Esp_core_buf[0x217C];	/* DS 0x801fc400, CORE00.ESP load buffer */
 extern void Esp_pos(LONG Run_rtn0); 	/* Run_rtn0 != 0: run Routine0 first */
 /* Esp_pos_matrix temporaries: retail keeps them in the ScratchPad (0x1f800000 matw, 0x1f800020 vres, 0x1f80002c tmp). */
 #define ESP_PM_MATW	((MATRIX *)(ScratchPad + 0x00))
 #define ESP_PM_VRES	((VECTOR *)(ScratchPad + 0x20))
 #define ESP_PM_TMP	((SVECTOR *)(ScratchPad + 0x2c))
 
-extern VOID Esp_pos_matrix(VOID);	/* DS 0x8001d894, name_registry.md */
+extern VOID Esp_pos_matrix(VOID);	/* DS 0x8001d894 */
 
 
 #endif /* ESP_H_H */

@@ -8,7 +8,6 @@
 
 #include <LIBDS.H>
 #include <LIBSPU.H>
-#include <LIBAPI.H>
 #include <LIBSND.H>
 #include "TYPES.H"
 
@@ -34,7 +33,7 @@ struct tagFLOC {
 /* ---------------------------------------------------------------------------
  * tagCD  --  CD / XA streaming work area (0x880 bytes)       DS 0x800d5300
  *
- * Field offsets verified against the DS disassembly of CD.C.
+ * Field offsets follow the DS disassembly of CD.C.
  * (Ghidra calls the type "CD"; the C typedef uses the LOG tag name tagCD
  *  because the global variable itself is also called CD.)
  * ---------------------------------------------------------------------------*/
@@ -91,9 +90,9 @@ extern struct tagCD CD;
 /* DS 0x800988a4 */
 extern FLOC           floc[];
 /* DS 0x80010818  (rodata initialiser of Xa_play's local Xa_file[9]) */
-extern SHORT Xa_no[10];          // 0x80010818 (retail: 0x343..0x34b, 0)
+extern const SHORT Xa_no[10];    // 0x80010818 (retail: 0x343..0x34b, 0)
 /* DS 0x8009a37c */
-extern unsigned short Xa_sector00[][3];
+extern unsigned short Xa_sector00[16][3];
 
 /* ---------------------------------------------------------------------------
  * CD / XA interface (DS order)
@@ -114,7 +113,7 @@ unsigned long Cd_read(unsigned long File_no, unsigned long *Address,
 unsigned long Cd_read_s(unsigned long File_no, unsigned long Mode,
 						unsigned long *Address, unsigned long Vab_id,
 						unsigned char *Mess);                        /* 800132b0 */
-void          Cd_seek(unsigned char intr, unsigned char *result);    /* 80013714 */
+void          Cd_cdsync_cb(unsigned char intr, unsigned char *result);    /* 80013714 */
 void          Cd_ready_cb(unsigned char intr, unsigned char *result);/* 8001376c */
 void          Cd_set_stereo(unsigned long mode);                     /* 80013a7c */
 void          Set_volume(unsigned long vol);                         /* 80013ac8 */

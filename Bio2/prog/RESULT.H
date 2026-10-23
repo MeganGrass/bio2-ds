@@ -58,17 +58,17 @@ extern USHORT Result_time_ofs[3][4];	/* DS 0x80159908	// 24 bytes, X offsets [Va
 extern UCHAR Result_glyph[66][4];	/* DS 0x80159920	// 264 bytes, {u, v, w, h} per glyph */
 extern VOID *Result_state_tbl[4];	/* DS 0x80159A28	// 16 bytes, state handlers (Result_state) */
 extern VOID *Result_sel_tbl[4];		/* DS 0x80159A38	// 16 bytes, selector handlers (Result_sel) */
-extern POLY_FT4 Result_prim[2][128];	/* DS 0x80159A48	// 10240 bytes, one buffer per G.Cbuf_id */
+extern POLY_FT4 (*Result_prim)[128];	/* DS 0x80159A48	// 10240 bytes, one buffer per G.Cbuf_id */
 extern SHORT Result_timer;		/* DS 0x8015C248	// 2 bytes, frame counter for the timeline */
 extern UCHAR Result_state;		/* DS 0x8015C24A	// 1 byte, 0 init 1 fade-in 2 main 3 exit 4 done */
 extern UCHAR Result_sel;		/* DS 0x8015C24B	// 1 byte, index into Result_sel_tbl */
-extern RESULT_MOJI Result_moji[31];	/* DS 0x8015C250	// 372 bytes, text entries (0x8015C3C4 is end) */
+extern RESULT_MOJI Result_moji[32];	/* DS 0x8015C250	// 384 bytes, 31 text entries plus the slot at 0x8015C3C4 that retail also writes */
 
 /* Addresses used directly by the overlay (no typed global in MAIN.H) */
 #define RESULT_FREE_WORK_BASE	((UCHAR *)0x80160000)	/* G.pFree_work reset in Result_bgm_end */
 #define RESULT_SAVE_INIT_SRC	((ULONG *)0x8011C5F8)	/* 0x798-byte save template copied into G.SaveData */
 
-/* Table contents verified from the dispatch code: Result_state_tbl[0] = Result_init,
+/* Table contents, as the dispatch code shows: Result_state_tbl[0] = Result_init,
  * Result_sel_tbl[0] = Result_sel_rtn. Entries 1..3 of both tables are not readable
  * with the available tools (no overlay binary, no memory read). */
 

@@ -17,6 +17,7 @@
 #include "SPL_AUTO.H"
 #include "SUB.H"
 #include "flag.h"
+#include "SPL_TBL.H"
 
 /* Oma_ck_oba - 0x80036ef8
    Enemy/player AT box vs. object model box.
@@ -39,7 +40,6 @@ ULONG Oma_ck_oba(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm, ULONG Flg)
 	LONG    Ox, Oz;     /* object box centre */
 	LONG    Ep;         /* enemy box coordinate on the push axis */
 	LONG    Push;
-	LONG    Neg;        /* push toward the negative side */
 
 	if ((pEm->Be_flg & 0x40) != 0)
 		return 0;
@@ -70,23 +70,23 @@ ULONG Oma_ck_oba(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm, ULONG Flg)
 	Dold      = (ULONG)(((LONG)pOm->Old_y2 - (LONG)pEm->Old_y2) + Wy) < (ULONG)Dy2;
 	Y_flg_old = Dold;
 
-	/* not overlapping vertically last frame: resolve on the Y axis */
-	if (Dold != Y_flg)
+	/* the objects overlap vertically now but did not last frame: resolve on the Y axis */
+	if (((Dold ^ Y_flg) & Y_flg) != 0)
 	{
 		if (Flg != 0)
 		{
-			if (Dy < 0)
-				Wy = -Wy;
-			pOm->Pos_y    = (pEm->Atd[0].Y - pOm->Atd[0].Ofs_y) + Wy;
+			pOm->Pos_y    = (pEm->Atd[0].Y - pOm->Atd[0].Ofs_y) + ((Dy < 0) ? -Wy : Wy);
 			pOm->Atd[0].Y = pOm->Pos_y + pOm->Atd[0].Ofs_y;
-			return 1;
 		}
-		Bak = pOm->Atd[0].Y - pEm->Atd[0].Ofs_y;
-		if (Dy < 0)
-			pEm->Pos_y = Bak + 1 + Wy;
 		else
-			pEm->Pos_y = Bak - Wy;
-		pEm->Atd[0].Y = pEm->Pos_y + pEm->Atd[0].Ofs_y;
+		{
+			Bak = pOm->Atd[0].Y - pEm->Atd[0].Ofs_y;
+			if (Dy < 0)
+				pEm->Pos_y = Bak + 1 + Wy;
+			else
+				pEm->Pos_y = Bak - Wy;
+			pEm->Atd[0].Y = pEm->Pos_y + pEm->Atd[0].Ofs_y;
+		}
 		return 1;
 	}
 
@@ -96,17 +96,48 @@ ULONG Oma_ck_oba(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm, ULONG Flg)
 	if ((ULONG)(Wx * 2) < (ULONG)((Ox - pEm->Old_x2) + Wx))
 	{
 		/* was outside on X last frame */
-		Ep  = pEm->Atd[0].X;
-		Neg = (Ep - pEm->Old_x2) < 0;
-		goto push_x;
+		Ep = pEm->Atd[0].X;
+		Wx++;
+		if (Flg != 0)
+		{
+			if ((Ep - pEm->Old_x2) < 0)
+				Ep -= Wx;
+			else
+				Ep += Wx;
+			Push = Ep - Ox;
+			pOm->Atd[0].X += Push;
+			pOm->Pos_x    += Push;
+		}
+		else
+		{
+			Push = (((Ep - pEm->Old_x2) < 0) ? Ox + Wx : Ox - Wx) - Ep;
+			pEm->Atd[0].X += Push;
+			pEm->Pos_x    += Push;
+		}
 	}
-	if ((ULONG)(Wz * 2) < (ULONG)((Oz - pEm->Old_z2) + Wz))
+	else if ((ULONG)(Wz * 2) < (ULONG)((Oz - pEm->Old_z2) + Wz))
 	{
 		/* was outside on Z last frame */
-		Ep  = pEm->Atd[0].Z;
-		Neg = (Ep - pEm->Old_z2) < 0;
-		goto push_z;
+		Ep = pEm->Atd[0].Z;
+		Wz++;
+		if (Flg != 0)
+		{
+			if ((Ep - pEm->Old_z2) < 0)
+				Ep -= Wz;
+			else
+				Ep += Wz;
+			Push = Ep - Oz;
+			pOm->Atd[0].Z += Push;
+			pOm->Pos_z    += Push;
+		}
+		else
+		{
+			Push = (((Ep - pEm->Old_z2) < 0) ? Oz + Wz : Oz - Wz) - Ep;
+			pEm->Atd[0].Z += Push;
+			pEm->Pos_z    += Push;
+		}
 	}
+	else
 	{
 		LONG xz = Dx * Wz;
 		LONG zx = Dz * Wx;
@@ -115,39 +146,47 @@ ULONG Oma_ck_oba(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm, ULONG Flg)
 		if (zx < 0) zx = -zx;
 		if (zx < xz)
 		{
-			Ep  = pEm->Atd[0].X;
-			Neg = Dx < 0;
-			goto push_x;
+			Ep = pEm->Atd[0].X;
+			Wx++;
+			if (Flg != 0)
+			{
+				if (Dx < 0)
+					Ep -= Wx;
+				else
+					Ep += Wx;
+				Push = Ep - Ox;
+				pOm->Atd[0].X += Push;
+				pOm->Pos_x    += Push;
+			}
+			else
+			{
+				Push = ((Dx < 0) ? Ox + Wx : Ox - Wx) - Ep;
+				pEm->Atd[0].X += Push;
+				pEm->Pos_x    += Push;
+			}
 		}
-		Ep  = pEm->Atd[0].Z;
-		Neg = Dz < 0;
-		goto push_z;
+		else
+		{
+			Ep = pEm->Atd[0].Z;
+			Wz++;
+			if (Flg != 0)
+			{
+				if (Dz < 0)
+					Ep -= Wz;
+				else
+					Ep += Wz;
+				Push = Ep - Oz;
+				pOm->Atd[0].Z += Push;
+				pOm->Pos_z    += Push;
+			}
+			else
+			{
+				Push = ((Dz < 0) ? Oz + Wz : Oz - Wz) - Ep;
+				pEm->Atd[0].Z += Push;
+				pEm->Pos_z    += Push;
+			}
+		}
 	}
-
-push_x:
-	if (Flg == 0)
-	{
-		Push = (Ox + (Neg ? (Wx + 1) : -(Wx + 1))) - Ep;
-		pEm->Atd[0].X += Push;
-		pEm->Pos_x    += Push;
-		return 1;
-	}
-	Push = (Neg ? Ep - (Wx + 1) : Ep + (Wx + 1)) - Ox;
-	pOm->Atd[0].X += Push;
-	pOm->Pos_x    += Push;
-	return 1;
-
-push_z:
-	if (Flg == 0)
-	{
-		Push = (Oz + (Neg ? (Wz + 1) : -(Wz + 1))) - Ep;
-		pEm->Atd[0].Z += Push;
-		pEm->Pos_z    += Push;
-		return 1;
-	}
-	Push = (Neg ? Ep - (Wz + 1) : Ep + (Wz + 1)) - Oz;
-	pOm->Atd[0].Z += Push;
-	pOm->Pos_z    += Push;
 	return 1;
 }
 
@@ -157,13 +196,13 @@ push_z:
 /* DS 0x80037258 (Oma_ck_om) */
 ULONG Oma_ck_om(OBJ_MODEL_WORK *pOm, OBJ_MODEL_WORK *pOm2)
 {
+	/* retail reserves 16 more bytes of locals (Oma_ck_om frame 16); never read */
+	volatile int Rsv[4];
 	LONG    a, b, c, d, e, f, e2;
 	LONG    Flg, Flg_old;
 	LONG    Bak;
 	LONG    Ofs_y1, Ofs_y2;
-	LONG    Frame_pad[4];		/* DS 0x80037258 frame 0x10: stack slot kept by retail, never read */
 
-	(void)Frame_pad;
 	if (((pOm->Be_flg | pOm2->Be_flg) & 0x40) != 0)
 		return 0;
 	if ((pOm->Be_flg & pOm2->Be_flg & 0x200000) != 0)
@@ -235,11 +274,14 @@ ULONG Oma_ck_front(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 {
 	SVECTOR Svec;
 	LONG    X, Z;
+	LONG    Ax, Az;
 	LONG    W, D;
 
+	Svec.vx = (SHORT)((pEm->Atd[0].At_w * 0x78) / 100) + 0x80;
 	Svec.vz = 0;
-	Svec.vx = (SHORT)(((ULONG)pEm->Atd[0].At_w * 0x78) / 100) + 0x80;
 	Rot_vector(pEm->Cdir_y, &Svec, &Svec);
+	Svec.vx += pEm->Pos_x;
+	Svec.vz += pEm->Pos_z;
 
 	W = pOm->Atd[0].W - 0x80;
 	D = pOm->Atd[0].D - 0x80;
@@ -248,23 +290,25 @@ ULONG Oma_ck_front(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 	if (((ULONG)(X + W) > (ULONG)(W * 2)) && ((ULONG)(Z + D) > (ULONG)(D * 2)))
 		return 0;
 
-	if (X < 0) X = -X;
-	if (Z < 0) Z = -Z;
-	if (Z < X)
+	Ax = X;
+	if (Ax < 0) Ax = -Ax;
+	Az = Z;
+	if (Az < 0) Az = -Az;
+	if (Az < Ax)
 	{
-		X  = (SHORT)(Svec.vx + (SHORT)pEm->Pos_x) - pOm->Atd[0].X;
+		X  = Svec.vx - pOm->Atd[0].X;
 		Z  = pEm->Pos_z - pOm->Atd[0].Z;
 		D += pEm->Atd[0].W;
 	}
 	else
 	{
 		X  = pEm->Pos_x - pOm->Atd[0].X;
-		Z  = (SHORT)(Svec.vz + (SHORT)pEm->Pos_z) - pOm->Atd[0].Z;
+		Z  = Svec.vz - pOm->Atd[0].Z;
 		W += pEm->Atd[0].W;
 	}
-	if ((ULONG)(X + W) > (ULONG)(W << 1))
-		return 0;
-	return (ULONG)(Z + D) <= (ULONG)(D << 1);
+	if ((ULONG)(X + W) <= (ULONG)(W << 1))
+		return (ULONG)(Z + D) <= (ULONG)(D << 1);
+	return 0;
 }
 
 /* DS 0x800a2594 (Up_add_tbl) */
@@ -281,6 +325,13 @@ SHORT Down_add_tbl[20] = {
 	1000, 1000, 1000, 600,	/* +0x20 */
 };
 
+/* DS 0x800a25e4 (Box_sub_tbl) */
+SHORT Box_sub_tbl[20] = {
+	-128, -128, -128, -128, -128, -128, -128, -128,
+	-128, -128, -128, -128, -128, -128, -128, -128,
+	-128, -128, -128, -180
+};
+
 /* DS 0x800a260c */
 SHORT Up_add_Spl_tbl[32] = {
 	0x0320, 0x0320, 0x0320, 0x0320, 0x0320, 0x0258, 0x0320, 0x0320,
@@ -288,12 +339,6 @@ SHORT Up_add_Spl_tbl[32] = {
 	0x0320, 0x0320, 0x0320, 0x0320, 0x0320, 0x0320, 0x0320, 0x0320,
 	0x0320, 0x0320, 0x0320, 0x0320, 0x0320, 0x0320, 0x0320, 0x0258,
 };
-
-/* DS 0x800c3b7c (Gnd_y) */
-SHORT Gnd_y = 0x0000;
-
-/* DS 0x800dcbc8 (Ground_in_flg) */
-long Ground_in_flg = 0x00000000;
 
 /* Oma_pl_updown_ck - 0x800375c8
    Player climb-up / jump-down check in front of the player.
@@ -309,29 +354,28 @@ ULONG Oma_pl_updown_ck(ULONG Id)
 	OBJ_MODEL_WORK  *pOn_om;
 	ULONG           Hit;
 	LONG            Bak_y;
+	ENEMY_WORK      *pPl;
 
-	Cdir_y = (G.Player.Cdir_y + 0x200) & 0xfc00;
+	pPl = &G.Player;
+	Cdir_y = (pPl->Cdir_y + 0x200) & 0xfc00;
 
 	/* climb up */
-	if (G.Player.nFloor < 0x1f)
+	if (pPl->nFloor < 0x1f)
 	{
 		Sv.vx = Up_add_tbl[Id];
 		Sv.vz = 0;
 		Rot_vector(Cdir_y, &Sv, &Sv);
-		Add_pos.vx = Sv.vx + G.Player.Pos_x;
-		Add_pos.vy = G.Player.Pos_y - 0x708;
-		Add_pos.vz = Sv.vz + G.Player.Pos_z;
-		Hit    = Sca_ck_hit(&Add_pos, 0, 1 << (G.Player.nFloor & 0x1f), 0x8000);
-		pOn_om = Oma_on_check((ENEMY_WORK *)&G.Player);
-		if ((((Hit & 2) != 0) || (pOn_om != NULL)) &&
-			((SHORT)Sca_get_ground(&Add_pos, G.Player.Atd[0].At_w, 0x8000, 0) <= Add_pos.vy) &&
-			((Ground_in_flg & 1) == 0) &&
-			(Oma_obj_ck_all(&Add_pos, (ENEMY_WORK *)&G.Player) == 0))
+		Add_pos.vx = Sv.vx + pPl->Pos_x;
+		Add_pos.vy = pPl->Pos_y - 0x708;
+		Add_pos.vz = Sv.vz + pPl->Pos_z;
+		Hit    = Sca_ck_hit(&Add_pos, 0, 1 << (pPl->nFloor & 0x1f), 0x8000);
+		pOn_om = Oma_on_check(pPl);
+		if ((((Hit & 2) != 0) || (pOn_om != NULL)) && ((SHORT)Sca_get_ground(&Add_pos, pPl->Atd[0].At_w, 0x8000, 0) <= Add_pos.vy) && ((Ground_in_flg & 1) == 0) && (Oma_obj_ck_all(&Add_pos, pPl) == 0))
 		{
-			G.Player.pOn_om    = pOn_om;
-			G.Player.Routine_1 = 8;
-			G.Player.Routine_2 = 0;
-			G.Player.Routine_3 = 0;
+			pPl->pOn_om    = pOn_om;
+			pPl->Routine_1 = 8;
+			pPl->Routine_2 = 0;
+			pPl->Routine_3 = 0;
 			return 1;
 		}
 	}
@@ -340,40 +384,40 @@ ULONG Oma_pl_updown_ck(ULONG Id)
 	Sv.vx = Down_add_tbl[Id];
 	Sv.vz = 0;
 	Rot_vector(Cdir_y, &Sv, &Sv);
-	Add_pos.vx = Sv.vx + G.Player.Pos_x;
-	Add_pos.vz = Sv.vz + G.Player.Pos_z;
-	Add_pos.vy = G.Player.Pos_y;
-	Add_pos.vy = Sca_get_ground(&Add_pos, G.Player.Atd[0].At_w, (ULONG)G.Player.Sc_id << 8, 0);
-	if (Gnd_y < Add_pos.vy)
-		Add_pos.vy = Gnd_y;
-	Hit = Sca_ck_hit(&Add_pos, 0, 1 << (G.Player.nFloor & 0x1f), (ULONG)G.Player.Sc_id << 8);
+	Add_pos.vx = Sv.vx + pPl->Pos_x;
+	Add_pos.vz = Sv.vz + pPl->Pos_z;
+	Add_pos.vy = pPl->Pos_y;
+	Add_pos.vy = Sca_get_ground(&Add_pos, pPl->Atd[0].At_w, (ULONG)pPl->Sc_id << 8, 0);
+	if (Ground_in_pos < Add_pos.vy)
+		Add_pos.vy = Ground_in_pos;
+	Hit = Sca_ck_hit(&Add_pos, 0, 1 << (pPl->nFloor & 0x1f), (ULONG)pPl->Sc_id << 8);
 
-	if (G.Player.Pos_y >= Add_pos.vy)
+	if (pPl->Pos_y >= Add_pos.vy)
 		return 0;
-	if (((Hit & 4) == 0) && (G.Player.pOn_om == NULL))
+	if (((Hit & 4) == 0) && (pPl->pOn_om == NULL))
 		return 0;
 
 	for (pOm = G.Ob_model; pOm < G.pObj_work_end; pOm++)
 	{
-		if (((pOm->Be_flg & 1) != 0) && ((pOm->Be_flg & 2) == 0) && (pOm != G.Player.pOn_om))
+		if (((pOm->Be_flg & 1) != 0) && ((pOm->Be_flg & 2) == 0) && (pOm != pPl->pOn_om))
 		{
-			if (Omd_in_check(&Add_pos, pOm, G.Player.Atd[0].At_w, 1) != 0)
+			if (Omd_in_check(&Add_pos, pOm, pPl->Atd[0].At_w, 1) != 0)
 				return 0;
 			Bak_y      = Add_pos.vy;
-			Add_pos.vy = G.Player.Pos_y;
-			if (Omd_in_check(&Add_pos, pOm, G.Player.Atd[0].At_w, 1) != 0)
+			Add_pos.vy = pPl->Pos_y;
+			if (Omd_in_check(&Add_pos, pOm, pPl->Atd[0].At_w, 1) != 0)
 				return 0;
 			Add_pos.vy = (SHORT)Bak_y;
 		}
 	}
-	if (Oma_obj_ck_all(&Add_pos, (ENEMY_WORK *)&G.Player) != 0)
+	if (Oma_obj_ck_all(&Add_pos, pPl) != 0)
 		return 0;
 
-	if (G.Player.pOn_om != NULL)
-		G.Player.pOn_om = NULL;
-	G.Player.Routine_1 = 8;
-	G.Player.Routine_2 = 2;
-	G.Player.Routine_3 = 0;
+	if (pPl->pOn_om != NULL)
+		pPl->pOn_om = NULL;
+	pPl->Routine_1 = 8;
+	pPl->Routine_2 = 2;
+	pPl->Routine_3 = 0;
 	return 1;
 }
 
@@ -419,10 +463,7 @@ ULONG Oma_Spl_updown_ck(ENEMY_WORK *pEm)
 		Type = 0x1000;
 	Hit = Sca_ck_hit(&Add_pos, 0, 1 << (pEm->nFloor & 0x1f), Type);
 
-	if (((Hit & 2) != 0) && (pEm->nFloor < 0x1f) &&
-		(Add_pos.vy >= (SHORT)Sca_get_ground(&Add_pos, pEm->Atd[0].At_w, (ULONG)pEm->Sc_id << 8, 0)) &&
-		((Ground_in_flg & 1) == 0) &&
-		(Oma_obj_ck_all(&Add_pos, pEm) == 0))
+	if (((Hit & 2) != 0) && (pEm->nFloor < 0x1f) && (Add_pos.vy >= (SHORT)Sca_get_ground(&Add_pos, pEm->Atd[0].At_w, (ULONG)pEm->Sc_id << 8, 0)) && ((Ground_in_flg & 1) == 0) && (Oma_obj_ck_all(&Add_pos, pEm) == 0))
 	{
 		if (((G.Status_flg & STAT_SUB_PLAYER) != 0) && (pEm == G.pEnemy[1]))
 			Rtn = 8;
@@ -496,11 +537,14 @@ ULONG Oma_front_ck(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 {
 	SVECTOR Svec;
 	LONG    X, Z;
+	LONG    Ax, Az;
 	LONG    W, D;
 
+	Svec.vx = (SHORT)((pEm->Atd[0].At_w * 0x87) / 100) + 0x80;
 	Svec.vz = 0;
-	Svec.vx = (SHORT)(((ULONG)pEm->Atd[0].At_w * 0x87) / 100) + 0x80;
 	Rot_vector(pEm->Cdir_y, &Svec, &Svec);
+	Svec.vx += pEm->Pos_x;
+	Svec.vz += pEm->Pos_z;
 
 	X = pOm->Pos_x - pEm->Pos_x;
 	Z = pOm->Pos_z - pEm->Pos_z;
@@ -509,21 +553,23 @@ ULONG Oma_front_ck(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 	if (((ULONG)(X + W) > (ULONG)(W * 2)) && ((ULONG)(Z + D) > (ULONG)(D * 2)))
 		return 0;
 
-	if (X < 0) X = -X;
-	if (Z < 0) Z = -Z;
-	if (Z < X)
+	Ax = X;
+	if (Ax < 0) Ax = -Ax;
+	Az = Z;
+	if (Az < 0) Az = -Az;
+	if (Az < Ax)
 	{
-		X = (SHORT)(Svec.vx + (SHORT)pEm->Pos_x);
-		Z = pEm->Pos_z;
+		X = Svec.vx - pOm->Atd[0].X;
+		Z = pEm->Pos_z - pOm->Atd[0].Z;
 	}
 	else
 	{
-		X = pEm->Pos_x;
-		Z = (SHORT)(Svec.vz + (SHORT)pEm->Pos_z);
+		X = pEm->Pos_x - pOm->Atd[0].X;
+		Z = Svec.vz - pOm->Atd[0].Z;
 	}
-	if ((ULONG)((X - pOm->Atd[0].X) + W) > (ULONG)(W * 2))
-		return 0;
-	return (ULONG)((Z - pOm->Atd[0].Z) + D) <= (ULONG)(D * 2);
+	if ((ULONG)(X + W) <= (ULONG)(W * 2))
+		return (ULONG)(Z + D) <= (ULONG)(D * 2);
+	return 0;
 }
 
 /* Oma_on_check - 0x80037eac
@@ -533,23 +579,13 @@ ULONG Oma_front_ck(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 OBJ_MODEL_WORK *Oma_on_check(ENEMY_WORK *pEm)
 {
 	OBJ_MODEL_WORK  *pOm;
-	OBJ_MODEL_WORK  *pEnd;      /* G.pObj_work_end, kept in a register as retail does */
 
-	pEnd = G.pObj_work_end;
-	pOm = G.Ob_model;
-	if (pOm >= pEnd) {
-		return NULL;
-	}
-/* goto loop: a do/while form compiles to a larger frame in this build */
-on_loop:
-	if (((pOm->Be_flg & 0x101) == 0x101) &&
-		(pEm->nFloor == pOm->nFloor) &&
-		(pEm->pOn_om != pOm) &&
-		(Oma_front_ck(pEm, pOm) != 0))
-		return pOm;
-	pOm++;
-	if (pOm < pEnd) {
-		goto on_loop;
+/* Be_flg 0x101 means the object is live (bit 0) and climbable (bit 8). The match also needs the same
+ * floor, pEm not already standing on it, and the enemy in front of it. */
+	for (pOm = G.Ob_model; pOm < G.pObj_work_end; pOm++)
+	{
+		if (((pOm->Be_flg & 0x101) == 0x101) && (pEm->nFloor == pOm->nFloor) && (pEm->pOn_om != pOm) && (Oma_front_ck(pEm, pOm) != 0))
+			return pOm;
 	}
 	return NULL;
 }
@@ -561,6 +597,7 @@ on_loop:
 /* DS 0x80037f60 (Oma_pull) */
 void Oma_pull(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 {
+	/* retail reserves 24 more bytes of locals (Oma_pull frame 104); never read */
 	LONG            X, Z, W, D;
 	LONG            X2, Z2;
 	LONG            Now_at, Old_at;
@@ -572,10 +609,9 @@ void Oma_pull(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 	LONG            WW, DD1, DD2, Flg;
 	LONG            DD, WW1, WW2;
 	LONG            Ep, Old_pos, Ww;
-	ULONG           Frame_pad[6];		/* retail reserves 0x68 bytes and reads only sp+0x10..0x17 and sp+0x28 */
 	SVECTOR         Dead_vec = { 200, 0, 0, 0 };	/* DS builds this from rodata and adds Atd.At_w to vx; never read */
+	volatile int Rsv[6];
 
-	(void)Frame_pad;
 	Dead_vec.vx += pEm->Atd->At_w;
 	if ((pEm->Be_flg & 0x40) != 0)
 		return;
@@ -656,8 +692,7 @@ void Oma_pull(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 				return;
 			}
 			Old_pos = pEm->Old_z2 + pEat->Ofs_z;
-			if (((ULONG)((X - Old_pos) + DD1) < (ULONG)(DD1 * 2)) &&
-				((ULONG)((pOat2->Z - Old_pos) + DD2) < (ULONG)(DD2 * 2)))
+			if (((ULONG)((X - Old_pos) + DD1) < (ULONG)(DD1 * 2)) && ((ULONG)((pOat2->Z - Old_pos) + DD2) < (ULONG)(DD2 * 2)))
 			{
 				Oma_pull_hosei_z(pEm, pOat, Z2, D);
 				return;
@@ -721,8 +756,7 @@ void Oma_pull(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm)
 				return;
 			}
 			Old_pos = pEm->Old_x2 + pEat->Ofs_x;
-			if (((ULONG)((X - Old_pos) + WW1) < (ULONG)(WW1 * 2)) &&
-				((ULONG)((pOat2->X - Old_pos) + WW2) < (ULONG)(WW2 * 2)))
+			if (((ULONG)((X - Old_pos) + WW1) < (ULONG)(WW1 * 2)) && ((ULONG)((pOat2->X - Old_pos) + WW2) < (ULONG)(WW2 * 2)))
 			{
 				Oma_pull_hosei_x(pEm, pOat, X2, W);
 				return;
@@ -760,10 +794,12 @@ void Oma_pull_hosei_x(ENEMY_WORK *pEm, AT_DATA *pOat, LONG X2, LONG W)
 
 	pEat = pEm->Atd;
 	Bak  = pEm->Pos_x;
-	if (X2 < 0)
-		pEm->Pos_x = (pOat->X - pEat->Ofs_x) + W;
-	else
-		pEm->Pos_x = (pOat->X - pEat->Ofs_x) - W;
+	/* Pos_x is set so that Pos_x + Ofs_x lies W from pOat->X: on the +X side when X2 (pOat->X minus the
+	   hit-box X) is negative, otherwise on the -X side. DS computes pOat->X - Ofs_x once, before the X2
+	   test (bltz a2 with that subu in its delay slot), then adds W on the taken path and subtracts it on
+	   the fall-through path. The conditional W operand gives that order with only the two locals the
+	   beta debug data lists for this function (Bak, pEat). */
+	pEm->Pos_x = (pOat->X - pEat->Ofs_x) + ((X2 < 0) ? W : -W);
 	pEat->X += pEm->Pos_x - Bak;
 	pEm->pOn_om = Oma_get_on_om(pEm, pEat);
 }
@@ -771,15 +807,16 @@ void Oma_pull_hosei_x(ENEMY_WORK *pEm, AT_DATA *pOat, LONG X2, LONG W)
 /* DS 0x800386d0 (Oma_pull_hosei_z) */
 void Oma_pull_hosei_z(ENEMY_WORK *pEm, AT_DATA *pOat, LONG Z2, LONG D)
 {
-	LONG    Bak;
+	LONG    Bak, Z;
 	AT_DATA *pEat;
 
 	pEat = pEm->Atd;
 	Bak  = pEm->Pos_z;
-	if (Z2 < 0)
-		pEm->Pos_z = (pOat->Z - pEat->Ofs_z) + D;
+	Z    = pOat->Z - pEat->Ofs_z;
+	if (Z2 >= 0)
+		pEm->Pos_z = Z - D;
 	else
-		pEm->Pos_z = (pOat->Z - pEat->Ofs_z) - D;
+		pEm->Pos_z = Z + D;
 	pEat->Z += pEm->Pos_z - Bak;
 	pEm->pOn_om = Oma_get_on_om(pEm, pEat);
 }
@@ -796,9 +833,7 @@ OBJ_MODEL_WORK *Oma_get_on_om(ENEMY_WORK *pEm, AT_DATA *pEat)
 
 	for (pOm2 = G.Ob_model; pOm2 < G.pObj_work_end; pOm2++)
 	{
-		if (((pOm2->Be_flg & 0x101) == 0x101) &&
-			((pOm2->Be_flg & 2) == 0) &&
-			(pEm->Pos_y == pOm2->Atd[0].Y - pOm2->Atd[0].At_h))
+		if (((pOm2->Be_flg & 0x101) == 0x101) && ((pOm2->Be_flg & 2) == 0) && (pEm->Pos_y == pOm2->Atd[0].Y - pOm2->Atd[0].At_h))
 		{
 			W   = -(LONG)(pEat->W >> 1) + pOm2->Atd[0].W;
 			D   = -(LONG)(pEat->W >> 1) + pOm2->Atd[0].D;
@@ -821,6 +856,7 @@ void Oma_ob_pull2(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm, ULONG Id, ULONG Spd)
 	LONG    X, Z, W, D;
 	LONG    Flg;
 	ULONG   Spd_x;
+	ULONG   Over;
 
 	if ((pEm->Be_flg & 0x40) != 0)
 		return;
@@ -840,8 +876,9 @@ void Oma_ob_pull2(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm, ULONG Id, ULONG Spd)
 	if ((Flg & 1) != 0)
 	{
 		Spd_x = Spd;
-		if ((ULONG)(((X < 0) ? -X : X) - W) < Spd)
-			Spd_x = ((X < 0) ? -X : X) - W;
+		Over = ((X < 0) ? -X : X) - W;
+		if (Over < Spd)
+			Spd_x = Over;
 		if (X >= 0)
 			Spd_x = -Spd_x;
 		pEm->Pos_x    -= Spd_x;
@@ -849,8 +886,9 @@ void Oma_ob_pull2(ENEMY_WORK *pEm, OBJ_MODEL_WORK *pOm, ULONG Id, ULONG Spd)
 	}
 	if ((Flg & 2) != 0)
 	{
-		if ((ULONG)(((Z < 0) ? -Z : Z) - D) < Spd)
-			Spd = ((Z < 0) ? -Z : Z) - D;
+		Over = ((Z < 0) ? -Z : Z) - D;
+		if (Over < Spd)
+			Spd = Over;
 		if (Z >= 0)
 			Spd = -Spd;
 		pEm->Pos_z    -= Spd;
@@ -892,17 +930,13 @@ ULONG Oma_obj_ck_all(VECTOR *pPos, ENEMY_WORK *pEm)
 
 	if ((pEm->Be_flg & 2) != 0)
 		return 0;
-	ppEm = G.pEnemy;
-	if (ppEm == G.ppEnemy_end)
-		return 0;
-/* goto loop: a do/while form compiles to a larger frame in this build */
-enemy_loop:
-	pEm2 = *ppEm;
-	if ((pEm != pEm2) && ((pEm2->Be_flg & 1) != 0) && (Oba_ck_only(pPos, pEm, pEm2) != 0))
-		return 1;
-	ppEm++;
-	if (ppEm != G.ppEnemy_end)
-		goto enemy_loop;
+	/* Walk the live enemy pointer list G.pEnemy up to G.ppEnemy_end; DS tests
+	   for an empty list once before the loop and again at the bottom. */
+	for (ppEm = G.pEnemy; ppEm != G.ppEnemy_end; ppEm++) {
+		pEm2 = *ppEm;
+		if ((pEm != pEm2) && ((pEm2->Be_flg & 1) != 0) && (Oba_ck_only(pPos, pEm, pEm2) != 0))
+			return 1;
+	}
 	return 0;
 }
 
@@ -934,8 +968,7 @@ OBJ_MODEL_WORK *Oma_hit_ck_all(VECTOR *pV, ENEMY_WORK *pEm)
 		W = R + pOm->Atd[0].W;
 		D = R + pOm->Atd[0].D;
 		Z = pOm->Atd[0].Z - pV->vz;
-		if (((ULONG)((X - pV->vx) + W) < (ULONG)(W * 2)) &&
-			((ULONG)(Z + D) < (ULONG)(D * 2)))
+		if (((ULONG)((X - pV->vx) + W) < (ULONG)(W * 2)) && ((ULONG)(Z + D) < (ULONG)(D * 2)))
 			return pOm;
 	}
 	return NULL;
@@ -947,13 +980,12 @@ OBJ_MODEL_WORK *Oma_hit_ck_all(VECTOR *pV, ENEMY_WORK *pEm)
 /* DS 0x80038b84 (Om_Jump_ck) */
 void Om_Jump_ck(ENEMY_WORK *pEm)
 {
+	/* retail reserves 16 bytes below and 16 bytes above the table (Om_Jump_ck frame 40); never read */
+	volatile int Rsv_lo[4];
 	/* DS 0x80038b84: retail body is empty but reserves a 0x28-byte frame. Stack 0x10-0x17
 	   receives the 8-byte table {200,0} copied from 0x80010b9c; nothing reads it. */
-	LONG  Frame_pad0[4];
 	SHORT Frame_tbl[4] = {200, 0};
-	LONG  Frame_pad1[4];
+	volatile int Rsv_hi[4];
 
-	(void)Frame_pad0;
 	(void)Frame_tbl;
-	(void)Frame_pad1;
 }

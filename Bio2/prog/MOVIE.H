@@ -24,7 +24,7 @@ struct tagV_STR {
 };
 
 /* ------------------------------------------------------------------ */
-/* Structures (offsets verified against the DS disassembly)             */
+/* Structures (offsets follow the DS disassembly)             */
 /* ------------------------------------------------------------------ */
 
 /* Movie table entry (32 bytes) */

@@ -33,7 +33,7 @@ struct tagMOJIDISP {
 	UCHAR Mess_type;
 	UCHAR Mess_item;
 	UCHAR Mess_wait;
-	CHAR Mess_time;
+	signed char Mess_time;
 	UCHAR Mcol_init;
 	UCHAR Mcol_next;
 	UCHAR* Mess_top;
@@ -44,7 +44,7 @@ struct tagMOJIDISP {
 	USHORT Pos_x_def;
 	USHORT Pos_y_def;
 	USHORT Mess_attr;
-	CHAR Timer;
+	signed char Timer;
 	UCHAR dummy0;
 	ULONG Stop_keep;
 	ULONG Stop_data;
@@ -84,7 +84,7 @@ struct tagSCE_EM_SET_WORK {
 
 /*
  * DOOR_WORK - per-door instance work area (0x14c bytes)
- * Offsets verified against the DS disassembly of Door_init / Door_Trans /
+ * Offsets follow the DS disassembly of Door_init / Door_Trans /
  * DoorSort / Door_model_set / Door_model_init.  (Ghidra's DOOR_WORK labels
  * are shifted: it calls 0x144 "Free", 0x146 "Free2", 0x74 "Cdir_z",
  * 0x7c "pSuper", 0x80 "Atd[0].X" - the field names below are the correct
@@ -215,8 +215,8 @@ extern DOOR_WORK  *pDwork[10];
 /* DS .data owned by DOOR.C (initialiser contents not recovered from the binary) */
 /* DS 0x8009a42c */
 extern UCHAR       door_msg[0x3c];
-/* DS 0x8009a468 */
-extern USHORT      door_msg_ptr[4];
+/* DS 0x8009a468 (declared without a size: DS reaches it through a full address register, not gp-relative) */
+extern USHORT      door_msg_ptr[];
 /* DS 0x8009a470 */
 extern MATRIX      D_LIGHTMATRIX;
 /* DS 0x8009a490 */
@@ -227,27 +227,47 @@ extern USHORT      Dtex_file[56];
 extern DOOR_INFO   Dinfo[55];
 
 /* Fixed work memory (no symbol in the binary) */
-/* DS 0x801a1000 */
-extern DOOR_DATA     Door_data;
+/* DS 0x801a1000: the door file header followed by the texture and sound block read after it (81,336 bytes,
+ * the largest DOOR*_DO2 floc) */
+typedef union {
+	DOOR_DATA hdr;
+	UCHAR     raw[0x13DB8];
+} DOOR_DATA_BUF;
+extern DOOR_DATA_BUF *Door_data;
 /* DS 0x801bd000 */
-extern DOOR          Door_mem;
+extern DOOR *Door_mem;
 /* DS 0x801bd24c .. 0x801bdf44: 10 DOOR_WORK slots (0x14c each), pDwork[9] at 0x801bddf8 */
 #define DOOR_WORK_SLOT9  ((DOOR_WORK *)0x801bddf8)
 /* DS 0x801fb700 */
-extern DOOR_SND_HEAD Door_snd_head;
+extern DOOR_SND_HEAD *Door_snd_head;
 
 /* Door_init camera initialiser (rodata) - DS 0x8001082c */
 extern const RCUT    Door_camera;
 
-/* Extended door / clear-time sequence ------------------------------- */
+/* Extreme Battle door sequence (DOOR_EX.C) -------------------------- */
 
-/* DS 0x800dcc1e  (also written/read by Set_door in GAME.C) */
-extern UCHAR       Door_ex_rno;
-
-/* DS 0x800dcbe0 */
-extern RCUT        Ex_battle_rcut;
+/* Extreme Battle door state, DS 0x800dcbe0-0x800dcc2b. Set_door in GAME.C reads rno. */
+typedef struct {
+	RCUT    rcut;               /* 000  clear-sequence camera cut                    */
+	LONG    dist;               /* 020  camera-target distance (XZ)                  */
+	USHORT  dir;                /* 024  camera direction (start)                     */
+	USHORT  dir_add;            /* 026  orbit sweep                                  */
+	LONG    dist_step;          /* 028  per-frame distance change                    */
+	LONG    py_add;             /* 02c  eye height delta                             */
+	LONG    ry_add;             /* 030  target height delta                          */
+	LONG    py;                 /* 034  eye height (start)                           */
+	LONG    ry;                 /* 038  target height (start)                        */
+	UCHAR   cnt;                /* 03c  frames left in current phase                 */
+	UCHAR   cnt_max;            /* 03d  frames in current phase                      */
+	UCHAR   rno;                /* 03e  index into pDoor_proc_tbl_ex                 */
+	UCHAR   flg;                /* 03f  0x40 zapping, 0x80 fade done                 */
+	LONG    cx;                 /* 040  orbit centre x                               */
+	LONG    cz;                 /* 044  orbit centre z                               */
+	ULONG   clear_time;         /* 048  clear time in frames                         */
+} DOOR_EX_WORK;
+extern DOOR_EX_WORK Door_ex;
 /* DS 0x800dcc50 */
-extern VCUT       Ex_battle_vcut;
+extern VCUT        Ex_battle_vcut;
 
 /* DS .data (contents not recovered) */
 /* DS 0x800a23c0  "clear time" line, digits patched at [0xb..0x12] */
@@ -259,18 +279,11 @@ extern UCHAR       Door_ex_mess1a[0x1f];
 /* DS 0x800a2406  second line, (Ex_flg & 0x1f) != 0 */
 extern UCHAR       Door_ex_mess1b[0x26];
 
-/* DS 0x800c3ac0 / 0x800c3ad8  text being revealed */
-extern UCHAR       Door_ex_buf0[0x18];
-extern UCHAR       Door_ex_buf1[0x18];
-
 /* DS 0x80190000  overlay area: clear screen TIM + VAB (file 0xdc) */
-extern ULONG       Door_ex_data[0x18EA];
+extern ULONG *Door_ex_data;
 /* DS 0x80198000  clear1/clear2 TIM */
 /* DS 0x80010b10  Cd_read message for file 0xdc */
 extern UCHAR       StgNxt[];
-
-/* SND.C: counter reset before Snd_cd_watchdog loops - DS 0x800a7fac */
-extern int         Snd_cd_watchdog_ctr;
 
 /* ------------------------------------------------------------------ */
 /* Prototypes (DS order)                                                */
@@ -289,12 +302,9 @@ void  Door_snd_trans(void);                                         /* 80014cd0 
 void  Door_texture_load(void);                                      /* 80015064 */
 void  Bgm_unlock_ck(void);                                          /* 80015128 */
 /* libgte, not declared in LIBGTE.H (PSY-Q LibRef 4.7, p.8-44) */
-u_long *DivideGT3(SVECTOR *v0, SVECTOR *v1, SVECTOR *v2,
-		u_long *uv0, u_long *uv1, u_long *uv2,
-		CVECTOR *rgb0, CVECTOR *rgb1, CVECTOR *rgb2,
-		POLY_GT3 *s, u_long *ot, DIVPOLYGON3 *divp);
+u_long *DivideGT3(SVECTOR *v0, SVECTOR *v1, SVECTOR *v2, u_long *uv0, u_long *uv1, u_long *uv2, CVECTOR *rgb0, CVECTOR *rgb1, CVECTOR *rgb2, POLY_GT3 *s, u_long *ot, DIVPOLYGON3 *divp);
 
-/* Extended door / clear-time sequence (separate code block in DS) */
+/* Extreme Battle door sequence (DOOR_EX.C; its own object in DS, between MOVIE and OBA) */
 void  Door_main_ex(void);                                           /* 800335c0 */
 void  Door_proc_ex_init(void);                                      /* 80033674 */
 void  Door_proc_ex_move(void);                                      /* 800339a4 */

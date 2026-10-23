@@ -4,7 +4,6 @@
  * Source: D:\Bio2\prog\MOJIDISP.C
  */
 #include "TYPES.H"
-#include <LIBAPI.H>
 #include <LIBGPU.H>
 #include <LIBGTE.H>
 #include <STRINGS.H>
@@ -20,13 +19,17 @@
 #include "SUB.H"
 #include "flag.h"
 
+/* Print14 forwards &pPtr to Print_main, which reads the format and its arguments from consecutive words.
+ * DS passes one extra zero word after the string in the three Print14 calls below (sw zero,0x14(sp)). */
+typedef long (*PRINT14_VA)(ULONG x, ULONG y, ULONG c, ULONG p, UCHAR *pPtr, ...);
+
 /* DS 0x80010a1c */
-UCHAR s_Moji_next_mark_80010a1c[] = {
+UCHAR s_Moji_next_mark_80010a1c[8] = {
 	47, 0, 0, 0, 0, 0, 0, 0
 };
 
 /* DS 0x80010a40 */
-UCHAR s_Moji_sel_cursor_80010a40[] = {
+UCHAR s_Moji_sel_cursor_80010a40[4] = {
 	38, 0, 0, 0
 };
 
@@ -45,12 +48,16 @@ long Print8(ULONG x, ULONG y, ULONG c, ULONG p, UCHAR *pPtr)
     return Len;
 }
 
+/* Print8 and Print14 differ only in the font flag: Print14 adds 0x200 to the attribute word, which
+ * selects the 14-dot glyph set (Print8 leaves it clear). Both return the length printed. */
 /* DS 0x8002fa28 (Print14) */
 long Print14(ULONG x, ULONG y, ULONG c, ULONG p, UCHAR *pPtr)
 {
     long Len;
 
-    Len = Print_main(x, y, c << 4 | p | 0x200, &pPtr);
+    c <<= 4;
+    p |= 0x200;
+    Len = Print_main(x, y, c | p, &pPtr);
     return Len;
 }
 
@@ -67,7 +74,6 @@ typedef struct {
 /* DS 0x8002fa54 (Print_main) */
 long Print_main(ULONG x, ULONG y, ULONG attr, UCHAR **pSave)
 {
-    LONG Frame_pad[2];      /* DS 0x8002fa54: retail frame 0x18 keeps 8 unread bytes at 0x0; saves start at 0x8 */
     UCHAR ch;
     UCHAR *pEntry;          /* start of this entry in Moji_buff */
     UCHAR *pFmt;            /* format string cursor */
@@ -88,8 +94,9 @@ long Print_main(ULONG x, ULONG y, ULONG attr, UCHAR **pSave)
     LONG Pad;
     LONG Digit;
     LONG Len;               /* return value: characters written */
+    CHAR *pDigit = ascii_tbl[0];   /* digit table for the two digit-store loops */
+    volatile UCHAR Pad_stack[12];  /* retail frame is 24 bytes; 12 of them are its s0-s2 saves and the other 12 are never addressed. This array is never read or written and only supplies those bytes. */
 
-    (void)Frame_pad;
     Len = 0;
     pFmt = *pSave;
     if (*pFmt != 0 && Moji.pBuff_ptr < Moji.Moji_buff + 0x2c0) {
@@ -116,7 +123,25 @@ long Print_main(ULONG x, ULONG y, ULONG attr, UCHAR **pSave)
                 }
                 ch = *pRem;
                 pFmt = pRem + 1;
-                if (ch == 100) {
+                switch (ch) {
+                case 0x25:
+                    *pOut = 0x25;
+                    pOut++;
+                    break;
+                case 0x73:
+                    ch = *pArg;
+                    while (ch != 0) {
+                        pArg++;
+                        *pOut = ch;
+                        pOut++;
+                        ch = *pArg;
+                    }
+                    break;
+                case 99:
+                    *pOut = (UCHAR)(ULONG)pArg;
+                    pOut++;
+                    break;
+                case 100:
                     Val = (LONG)pArg;
                     Sign = 1;
                     if (Val < 0) {
@@ -139,7 +164,7 @@ long Print_main(ULONG x, ULONG y, ULONG attr, UCHAR **pSave)
                             Val %= Div;
                             Div /= 10;
                             Keta--;
-                            *pOut = ascii_tbl[0][(Digit % 10) * Sign];
+                            *pOut = pDigit[(Digit % 10) * Sign];
                             pOut++;
                         } while (Keta != 0);
                     }
@@ -166,43 +191,23 @@ long Print_main(ULONG x, ULONG y, ULONG attr, UCHAR **pSave)
                             Digit = Val / Div;
                             Val %= Div;
                             Div /= 10;
-                            *pOut = ascii_tbl[0][(Digit % 10) * Sign];
+                            *pOut = pDigit[(Digit % 10) * Sign];
                             pOut++;
                         }
                     }
-                }
-                else {
-                    if (ch < 0x65) {
-                        if (ch == 0x25) {
-                            *pOut = 0x25;
-                        }
-                        else {
-                            if (ch != 99) goto spec_invalid;
-                            *pOut = (UCHAR)(ULONG)pArg;
-                        }
-                        goto spec_done;
+                    break;
+                default:
+                    /* retail: argument slot is recounted from j and the format
+                     * pointer is replaced by that count (kept as decompiled) */
+                    pAp = pSave + 1;
+                    pFmt = (UCHAR *)0;
+                    if (0 < j) {
+                        do {
+                            pFmt++;
+                            pAp++;
+                        } while ((LONG)pFmt < j);
                     }
-                    if (ch != 0x73) {
-spec_invalid:
-                        /* retail: argument slot is recounted from j and the format
-                         * pointer is replaced by that count (kept as decompiled) */
-                        pAp = pSave + 1;
-                        pFmt = (UCHAR *)0;
-                        if (0 < j) {
-                            do {
-                                pFmt++;
-                                pAp++;
-                            } while ((LONG)pFmt < j);
-                        }
-                        goto plain_char;
-                    }
-                    ch = *pArg;
-                    while (ch != 0) {
-                        pArg++;
-                        *pOut = ch;
-                        pOut++;
-                        ch = *pArg;
-                    }
+                    goto plain_char;
                 }
             }
             else {
@@ -228,126 +233,110 @@ spec_done:
 /* DS 0x8002fe38 (Mess_set) */
 long Mess_set(ULONG Pos_xy, USHORT Attr, ULONG Mess_no, ULONG Stop_data)
 {
-	tagGLOBAL *pG = &G;
+    MOJIDISP *pMoji = &Moji;
+    tagGLOBAL *pG = &G;
     UCHAR *pTop;
-    long Ret;
-    USHORT attrBits;
 
+    /* A message is already on screen (Mess_flg bit 0x80): report -1 and change nothing. */
     if ((Moji.Mess_flg & 0x80) != 0) {
-        Ret = -1;
-        Pos_xy = *(ULONG *)&Moji.Pos_x_def;     /* DS MOJIDISP+0x5ca4 (Pos_x_def and Pos_y_def as one word) */
-        goto set_pos_store;
+        return -1;
     }
+    Moji.Mess_attr = 3;
     Moji.Mess_flg = 0x80;
-    Moji.Mess_r_no0 = 0;
-    pG->Status_flg |= STAT_PL_BUSY;
-    Moji.Stop_keep = pG->Stop_flg;
-    attrBits = Attr & 0x300;
     Moji.Stop_data = Stop_data;
-    if (attrBits == 0x200) {
+    Moji.Mess_r_no0 = 0;
+    G.Status_flg |= STAT_PL_BUSY;
+    Moji.Stop_keep = G.Stop_flg;
+    /* Attribute bits 0x300 pick a fixed message box (0x100 upper, 0x200 lower, 0x300 room message); the
+     * other values take the caller's position and attribute. System_flg bits 0x840 == 0x40 switch the
+     * text source to the second table set (mess_etc_data, mess_u_data) and set attribute bit 0x4000. */
+    switch (Attr & 0x300) {
+    case 0x100:
+        Moji.Pos_x_def = 0x22;
+        Moji.Pos_y_def = 0xb9;
+        Moji.Mess_attr = 0x2003;
+        Moji.Mess_type = 0x80;
+        if ((G.System_flg & 0x840) == 0x40) {
+            Moji.Mess_attr = 0x6003;
+            Moji.Mess_top = mess_u_data + mess_u_ofs[Mess_no];
+        }
+        else {
+            Moji.Mess_top = mess_tbl_data + mess_tbl_ofs[Mess_no];
+        }
+        return 0;
+    case 0x200:
+        Moji.Pos_x_def = 0x22;
         Moji.Pos_y_def = 0xba;
         Moji.Mess_attr = 0x403;
-        if ((pG->System_flg & 0x840) == 0x40) {
+        Moji.Mess_type = 0x80;
+        if ((G.System_flg & 0x840) == 0x40) {
             Moji.Mess_attr = 0x4403;
             Moji.Mess_top = mess_etc_data + mess_etc_ofs[Mess_no];
         }
         else {
             Moji.Mess_top = mess_sub_data + mess_sub_ofs[Mess_no];
         }
-        goto set_pos_default;
-    }
-    if (attrBits < 0x201) {
-        if (attrBits == 0x100) {
-            Moji.Pos_y_def = 0xb9;
-            Moji.Mess_attr = 0x2003;
-            if ((pG->System_flg & 0x840) == 0x40) {
-                Moji.Mess_attr = 0x6003;
-                Moji.Mess_top = mess_u_data + mess_u_ofs[Mess_no];
-            }
-            else {
-                Moji.Mess_top = mess_tbl_data + mess_tbl_ofs[Mess_no];
-            }
-            goto set_pos_default;
+        return 0;
+    case 0x300:
+        Moji.Pos_x_def = 0x22;
+        Moji.Pos_y_def = 0xb9;
+        Moji.Mess_attr = 0x803;
+        Moji.Mess_type = 0x80;
+        if ((Attr & 1) != 0) {
+            Moji.Mess_attr = 0x4803;
         }
-        goto attr_generic;
-    }
-    if (attrBits != 0x300) goto attr_generic;
-    Pos_xy = 0xb90022;
-    Moji.Mess_attr = 0x803;
-    Moji.Mess_type = 0x80;
-    if ((Attr & 1) != 0) {
-        Moji.Mess_attr = 0x4803;
-    }
-    if ((pG->System_flg & 0x840) == 0x40) {
-        Moji.Mess_attr |= 0x4000;
-        Moji.Mess_top = (pG->pRoom)->pMessage_sub;
-    }
-    else {
-        Moji.Mess_top = (pG->pRoom)->pMessage;
-    }
-    goto top_from_room;
-
-attr_generic:
-    Moji.Mess_type = (UCHAR)((Attr >> 8) & 0x80);
-    attrBits = Attr & 0xc00;
-    Moji.Mess_attr = Attr;
-    if (attrBits == 0x400) {
-        if ((pG->System_flg & 0x840) == 0x40) {
-            Moji.Mess_attr = Attr | 0x4000;
-            pTop = mess_etc_data + mess_etc_ofs[Mess_no];
+        if ((G.System_flg & 0x840) == 0x40) {
+            Moji.Mess_attr |= 0x4000;
+            Moji.Mess_top = (G.pRoom)->pMessage_sub;
         }
         else {
-            pTop = mess_sub_data + mess_sub_ofs[Mess_no];
+            Moji.Mess_top = (G.pRoom)->pMessage;
         }
-    }
-    else if (attrBits < 0x401) {
-        if ((Attr & 0xc00) != 0) {
-            Ret = 0;
-            goto set_pos_store;
-        }
-        if ((pG->System_flg & 0x840) == 0x40) {
-            Moji.Mess_attr = Attr | 0x4000;
-            pTop = mess_u_data + mess_u_ofs[Mess_no];
-        }
-        else {
-            pTop = mess_tbl_data + mess_tbl_ofs[Mess_no];
-        }
-    }
-    else {
-        if (attrBits == 0x800) {
-            Moji.Mess_attr = Attr | 0x4000;
-            if ((pG->System_flg & 0x840) == 0x40) {
-                Moji.Mess_top = (pG->pRoom)->pMessage_sub;
+        goto top_from_room;
+    default:
+        pMoji->Pos_y_def = (USHORT)(Pos_xy >> 16);
+        pMoji->Mess_type = (Attr & 0x8000) >> 8;
+        pMoji->Pos_x_def = (USHORT)Pos_xy;
+        pMoji->Mess_attr = Attr;
+        switch (Attr & 0xc00) {
+        case 0x400:
+            if ((G.System_flg & 0x840) == 0x40) {
+                pMoji->Mess_attr = Attr | 0x4000;
+                pTop = mess_etc_data + mess_etc_ofs[Mess_no];
             }
             else {
-                Moji.Mess_top = (pG->pRoom)->pMessage;
-                Moji.Mess_attr = Attr;
+                pTop = mess_sub_data + mess_sub_ofs[Mess_no];
             }
-            goto top_from_room;
-        }
-        Ret = 0;
-        pTop = (UCHAR *)Mess_no;
-        if (attrBits != 0xc00) goto set_pos_store;
-    }
-    Moji.Mess_top = pTop;
-    Ret = 0;
-    goto set_pos_store;
-
+            break;
+        case 0:
+            if ((G.System_flg & 0x840) == 0x40) {
+                pMoji->Mess_attr = Attr | 0x4000;
+                pTop = mess_u_data + mess_u_ofs[Mess_no];
+            }
+            else {
+                pTop = mess_tbl_data + mess_tbl_ofs[Mess_no];
+            }
+            break;
+        case 0x800:
+            if ((G.System_flg & 0x840) == 0x40) {
+                pMoji->Mess_attr = Attr | 0x4000;
+                pMoji->Mess_top = (pG->pRoom)->pMessage_sub;
+            }
+            else {
+                pMoji->Mess_top = (pG->pRoom)->pMessage;
+            }
 top_from_room:
-    pTop = Moji.Mess_top + *(USHORT *)(Moji.Mess_top + Mess_no * 2);
-    Moji.Mess_top = pTop;
-    Ret = 0;
-    goto set_pos_store;
-
-set_pos_default:
-    Pos_xy = ((ULONG)Moji.Pos_y_def << 16) | 0x22;
-    Moji.Mess_type = 0x80;
-    Ret = 0;
-
-set_pos_store:
-    Moji.Pos_y_def = (USHORT)(Pos_xy >> 16);
-    Moji.Pos_x_def = (USHORT)Pos_xy;
-    return Ret;
+            pMoji->Mess_top = pMoji->Mess_top + *(USHORT *)(pMoji->Mess_top + Mess_no * 2);
+            return 0;
+        case 0xc00:
+            pMoji->Mess_top = (UCHAR *)Mess_no;
+            return 0;
+        default:
+            return 0;
+        }
+        pMoji->Mess_top = pTop;
+        return 0;
+    }
 }
 
 /* DS 0x8003022c (Moji_trans_main) */
@@ -368,8 +357,9 @@ void Mess_disp(MOJIDISP *pMoji)
 {
     UINT Vloop_ck;
     UCHAR D0;
-    UCHAR msgCh;
+    LONG msgCh;
     CHAR timeLeft;
+    signed char Blink_t;
     UINT Item_id;
     UCHAR *pMess_end;
     UCHAR *pMess_p;
@@ -398,76 +388,55 @@ void Mess_disp(MOJIDISP *pMoji)
             pMoji->Mess_time = msgCh;
             if (0 < (LONG)((ULONG)msgCh << 24)) break;
             msgCh = pMoji->Mess_wait;
-            if (msgCh == 2) {
-                Loop_ctr = 2;
-            }
-            else if (msgCh < 3) {
+            switch (msgCh) {
+            case 0:
+            case 1:
                 Loop_ctr = 4;
-            }
-            else {
+                break;
+            case 2:
                 Loop_ctr = 2;
-                if (msgCh != 3) Loop_ctr = 1;
+                break;
+            case 3:
+                Loop_ctr = 2;
+                break;
+            default:
+                Loop_ctr = 1;
+                break;
             }
         }
-        if (pMoji->Mess_time > 0) {
+        if ((signed char)pMoji->Mess_time > 0) {
             pMoji->Mess_end = pMess_end;
             goto mess_trans_call;
         }
-text_scan:
-        while (*pMess_end != 0 && *pMess_end < 0xee) {
-text_advance:
-            if (*pMess_end != 0) {
-                pMoji->Mess_flg |= 0x40;
-            }
-            pMess_end++;
-            if ((pMoji->Mess_flg & 0x40) != 0) {
-                Loop_ctr--;
-            }
-            if (Loop_ctr == 0) {
-                pMoji->Mess_time = pMoji->Mess_wait;
+        goto text_scan;
+        for (;;) {
+            msgCh = *pMess_end;
+            switch (msgCh) {
+            case 0xfe:
+                pMess_end++;
+                if (*pMess_end == 0) {
+                    pMoji->Mess_r_no0 = 5;
+                }
+                else {
+                    pMoji->Mess_r_no0 = 6;
+                    pMoji->Mess_time = (CHAR)(*pMess_end << Vloop_ck);
+                }
                 goto mess_end_set;
-            }
-        }
-        msgCh = *pMess_end;
-        if (msgCh == 0xf8) {
-            pMoji->Mess_svp = pMess_end;
-            msgCh = pMess_end[1];
-            if (msgCh == 0) {
-                msgCh = pMoji->Mess_item;
-            }
-            pMess_end = name_ptr_set(msgCh);
-            goto text_scan;
-        }
-        if (msgCh < 0xf9) {
-            if (msgCh < 0xf1) {
-                if (msgCh > 0xed) {
-                    pMess_end++;
-                    goto text_advance;
+            case 0xfd:
+                if (pMess_end[1] == 0) {
+                    pMoji->Mess_r_no0 = 2;
                 }
-                if (msgCh != 0) goto text_scan;
-            }
-            else if (msgCh != 0xf5) {
-                if (msgCh == 0xf7) {
-                    pMess_end = pMoji->Mess_svp + 2;
+                else {
+                    pMoji->Mess_r_no0 = 3;
+                    pMoji->Mess_time = (CHAR)(pMess_end[1] << Vloop_ck);
                 }
-                goto text_scan;
-            }
-text_skip:
-            pMess_end++;
-            goto text_scan;
-        }
-        if (msgCh == 0xfb) {
-            pMoji->Mess_r_no0 = 4;
-            pMoji->Timer = (CHAR)(8 << Vloop_ck);
-            break;
-        }
-        if (msgCh < 0xfc) {
-            if (msgCh == 0xf9) {
-                pMess_p = pMess_end + 1;
                 pMess_end += 2;
-                pMoji->Mcol_next = *pMess_p;
-            }
-            else if (msgCh == 0xfa) {
+                goto mess_end_set;
+            case 0xfb:
+                pMoji->Mess_r_no0 = 4;
+                pMoji->Timer = (CHAR)(8 << Vloop_ck);
+                goto mess_end_set;
+            case 0xfa:
                 pMess_p = pMess_end + 1;
                 if (*pMess_p == 0) {
                     pMess_end += 2;
@@ -488,47 +457,55 @@ text_skip:
                 pMoji->Mess_wait = (UCHAR)(Item_id << Vloop_ck);
                 pMess_end = pMess_p;
                 goto text_skip;
+            case 0:
+            case 0xf5:
+            case 0xfc:
+text_skip:
+                pMess_end++;
+                goto text_scan;
+            case 0xf9:
+                pMess_p = pMess_end + 1;
+                pMess_end += 2;
+                pMoji->Mcol_next = *pMess_p;
+                goto text_scan;
+            case 0xf8:
+                pMoji->Mess_svp = pMess_end;
+                msgCh = pMess_end[1];
+                if (msgCh == 0) {
+                    msgCh = pMoji->Mess_item;
+                }
+                pMess_end = name_ptr_set(msgCh);
+                goto text_scan;
+            case 0xf7:
+                pMess_end = pMoji->Mess_svp + 2;
+                goto text_scan;
+            case 0xee:
+            case 0xef:
+            case 0xf0:
+                pMess_end++;
+                goto text_advance;
+            default:
+                break;
             }
-            goto text_scan;
-        }
-        if (msgCh == 0xfd) {
-            if (pMess_end[1] == 0) {
-                pMoji->Mess_r_no0 = 2;
+text_scan:
+            if (*pMess_end != 0 && *pMess_end < 0xee) {
+text_advance:
+                if (*pMess_end != 0) {
+                    pMoji->Mess_flg |= 0x40;
+                }
+                pMess_end++;
+                if ((pMoji->Mess_flg & 0x40) != 0) {
+                    Loop_ctr--;
+                }
+                if (Loop_ctr == 0) {
+                    pMoji->Mess_time = pMoji->Mess_wait;
+                    goto mess_end_set;
+                }
+                goto text_scan;
             }
-            else {
-                pMoji->Mess_r_no0 = 3;
-                pMoji->Mess_time = (CHAR)(pMess_end[1] << Vloop_ck);
-            }
-            pMess_end += 2;
-            break;
         }
-        if (msgCh < 0xfd) goto text_skip;
-        if (msgCh != 0xfe) goto text_scan;
-        pMess_end++;
-        if (*pMess_end == 0) {
-            pMoji->Mess_r_no0 = 5;
-        }
-        else {
-            pMoji->Mess_r_no0 = 6;
-            pMoji->Mess_time = (CHAR)(*pMess_end << Vloop_ck);
-        }
-        break;
     case 2:
-        if ((G.Key_trg & 0x1000) == 0) {
-            timeLeft = pMoji->Mess_time - 1;
-            pMoji->Mess_time = timeLeft;
-            if (((LONG)timeLeft & (0x18 << Vloop_ck)) != 0) {
-                if ((pMoji->Mess_attr & 0x400) == 0) {
-                    Print14(0x99, pMoji->Pos_y_def + 0x1c, 0, 3, s_Moji_next_mark_80010a1c);
-                }
-                else {
-                    Print14(0x6b, pMoji->Pos_y_def + 0x2a, 0, 3, s_Moji_next_mark_80010a1c);
-                }
-                pMoji->Mess_end = pMess_end;
-                goto mess_trans_call;
-            }
-        }
-        else {
+        if ((G.Key_trg & 0x1000) != 0) {
             G.Key = 0xffff;
             pMoji->Mess_r_no0 = 1;
             D0 = pMoji->Mcol_next;
@@ -536,6 +513,20 @@ text_skip:
             pMoji->Mess_top = pMess_end;
             pMoji->Mess_time = timeLeft;
             pMoji->Mcol_init = D0;
+        }
+        else {
+            Blink_t = pMoji->Mess_time - 1;
+            pMoji->Mess_time = Blink_t;
+            if (((LONG)Blink_t & (0x18 << Vloop_ck)) != 0) {
+                if ((pMoji->Mess_attr & 0x400) != 0) {
+                    ((PRINT14_VA)Print14)(0x6b, pMoji->Pos_y_def + 0x2a, 0, 3, s_Moji_next_mark_80010a1c, 0);
+                }
+                else {
+                    ((PRINT14_VA)Print14)(0x99, pMoji->Pos_y_def + 0x1c, 0, 3, s_Moji_next_mark_80010a1c, 0);
+                }
+                pMoji->Mess_end = pMess_end;
+                goto mess_trans_call;
+            }
         }
         break;
     case 3:
@@ -590,18 +581,18 @@ void Branch_disp(MOJIDISP *pMoji, BRANCH_TBL *pBtbl, ULONG Flg, ULONG Mode)
     UINT Num;
     UINT Skip;
     ULONG M_ofs;
-    USHORT Pos_x_sv;
-    USHORT Pos_y_sv;
+    ULONG Se_no;
+    UINT Pos_x_sv;
+    UINT Pos_y_sv;
     UINT Sel_no;
     ULONG Y;
     UINT Cur_x;
     UINT Pos_x;
+    UINT Item_x;
     UINT i;
     INT Str_idx;
     INT Idx;
-    LONG Frame_pad[12];     /* retail frame 0x70: stack offsets 0x2c-0x47 never read */
 
-    (void)Frame_pad;
     Num = (UINT)pBtbl->Select_num;
     Skip = (UINT)pBtbl->Skip_size;
     M_ofs = (ULONG)pBtbl->Mess_ofs;
@@ -632,24 +623,24 @@ void Branch_disp(MOJIDISP *pMoji, BRANCH_TBL *pBtbl, ULONG Flg, ULONG Mode)
     }
     else if (pMoji->Timer == 0) {
         G.Key = 0xffff;
-        G.Stop_flg = pMoji->Stop_keep;
         pMoji->Mess_flg &= 0x7f;
+        G.Stop_flg = pMoji->Stop_keep;
         if (((pMoji->Mess_attr & 0x2000) == 0) && ((Flg & 0x60) == 0)) {
             return;
         }
         if ((pMoji->Mess_flg & 0xf) == 0) {
-            M_ofs = 0x4060000;
+            Se_no = 0x4060000;
             if ((Flg & 0x20) != 0) {
                 return;
             }
         }
         else {
-            M_ofs = 0x4050000;
+            Se_no = 0x4050000;
             if ((pMoji->Mess_flg & 0xf) != 1) {
-                M_ofs = 0x4060000;
+                Se_no = 0x4060000;
             }
         }
-        Snd_se_stad(M_ofs, (VECTOR *)0x0);
+        Snd_se_stad(Se_no, (VECTOR *)0x0);
         return;
     }
     D0 = pMoji->Mess_time - 1;
@@ -667,18 +658,19 @@ void Branch_disp(MOJIDISP *pMoji, BRANCH_TBL *pBtbl, ULONG Flg, ULONG Mode)
             Y = pMoji->Pos_y_def + 0x10;
             Cur_x = (UINT)M_ofs;
         }
-        Print14(Cur_x + Skip * Sel_no - 0xe, Y, 0, 0, s_Moji_sel_cursor_80010a40);
+        ((PRINT14_VA)Print14)(Cur_x + Skip * Sel_no - 0xe, Y, 0, 0, s_Moji_sel_cursor_80010a40, 0);
     }
     Str_idx = (INT)((UINT)pBtbl->Str_no << 1);
     if ((Flg & 0x80) == 0) {
         i = 0;
         if (Num != 0) {
+            Item_x = M_ofs;
             do {
                 Idx = Str_idx + Mode;
                 Str_idx += 2;
                 i++;
-                Mess_print(M_ofs, pMoji->Pos_y_def + 0x10, branch_data + branch_ofs[Idx], Mode << 14 | 3);
-                M_ofs += Skip;
+                Mess_print(Item_x, pMoji->Pos_y_def + 0x10, branch_data + branch_ofs[Idx], Mode << 14 | 3);
+                Item_x += Skip;
             } while (i < Num);
         }
     }
@@ -725,8 +717,8 @@ UCHAR *name_ptr_set(UCHAR Item_id)
 void mess_trans(MOJIDISP *pMoji)
 {
     SPRT *pP;
+    SPRT *pEnd;
     UCHAR *pMp;
-    UCHAR *pMp_next;
     UCHAR *pMp_keep;
     DR_MODE *pOt;
     DR_MODE *pDr_mode;
@@ -739,19 +731,18 @@ void mess_trans(MOJIDISP *pMoji)
     LONG Adv;
     LONG Glyph_v;
     UINT Msg_idx;
-    LONG Frame_pad[4];      /* retail frame 0x50: stack offsets 0x00-0x0f never read */
 
-    (void)Frame_pad;
     pP = Moji.pPrim14_cur;
     Clt = 0x7810;
     Pos_xy = (LONG)(((ULONG)pMoji->Pos_y_def << 16) | pMoji->Pos_x_def);
     Cbuf = G.Cbuf_id;
+    pEnd = Moji.Prim_sprt[Cbuf + 1];
     pMoji->Mess_pos_y = pMoji->Pos_y_def;
-    if ((pMoji->Mess_attr & 0xf) == 0) {
-        Adv = 6;
+    if ((pMoji->Mess_attr & 0xf) != 0) {
+        Adv = (pMoji->Mess_attr & 7) << 1;
     }
     else {
-        Adv = (pMoji->Mess_attr & 7) << 1;
+        Adv = 6;
     }
     pDr_mode = pMoji->Moji_mode[G.Cbuf_id] + Adv;
     Attr = pMoji->Mess_attr;
@@ -759,52 +750,8 @@ void mess_trans(MOJIDISP *pMoji)
         pMp = pMoji->Mess_top;
         do {
             Adv = 14;
-            if (*pMp == 0) {
-                if ((Attr & 0x4000) != 0) {
-                    Pos_xy = Pos_xy - (signed char)msg_space[0];
-                    Adv = (signed char)msg_space[1] + (signed char)msg_space[0];
-                }
-                goto mess_adv;
-            }
+            if (*pMp == 0) goto mess_zero;
             switch (*pMp) {
-            case 0xee:
-                pMp++;
-                Glyph_v = (*pMp / 0x12) * 14 - 0x2e;
-                pOt = pDr_mode;
-                goto mess_glyph;
-            case 0xef:
-                pMp++;
-                Glyph_v = (*pMp / 0x12) * 14;
-                pOt = pDr_mode + 1;
-                goto mess_glyph;
-            case 0xf0:
-                pMp++;
-                Glyph_v = (*pMp / 0x12) * 14 - 0x3c;
-                pOt = pDr_mode + 1;
-                goto mess_glyph;
-            case 0xf5:
-                goto mess_adv;
-            case 0xf7:
-                pMp_next = pMp_keep + 2;
-                break;
-            case 0xf8:
-                D0 = pMp[1];
-                if (D0 == 0) {
-                    D0 = pMoji->Mess_item;
-                }
-                pMp_next = name_ptr_set(D0);
-                pMp_keep = pMp;
-                break;
-            case 0xf9:
-                pMp_next = pMp + 2;
-                Clt = ((UINT)pMp[1] << 7) | 0x7810;
-                break;
-            case 0xfc:
-                pMp_next = pMp + 1;
-                nextY = pMoji->Mess_pos_y + 0x10;
-                Pos_xy = (LONG)(((ULONG)nextY << 16) | pMoji->Pos_x_def);
-                pMoji->Mess_pos_y = nextY;
-                break;
             case 0xfd:
                 pMoji->Mess_pos_y = pMoji->Pos_y_def;
                 /* fall through */
@@ -812,11 +759,51 @@ void mess_trans(MOJIDISP *pMoji)
                 pMp++;
                 /* fall through */
             case 0xfe:
-                pMp_next = pMp + 1;
+                pMp++;
                 pMoji->Mess_pos_y = pMoji->Pos_y_def;
                 break;
+            case 0xf9:
+                pMp++;
+                Clt = ((UINT)*pMp << 7) | 0x7810;
+                pMp++;
+                break;
+            case 0xfc:
+                pMp++;
+                nextY = pMoji->Mess_pos_y + 0x10;
+                Pos_xy = (LONG)(((ULONG)nextY << 16) | pMoji->Pos_x_def);
+                pMoji->Mess_pos_y = nextY;
+                break;
+            case 0xee:
+                pMp++;
+                pOt = pDr_mode;
+                pP->v0 = (UCHAR)((*pMp / 0x12) * 14 - 0x2e);
+                goto mess_glyph;
+            case 0xef:
+                pMp++;
+                pOt = pDr_mode + 1;
+                pP->v0 = (UCHAR)((*pMp / 0x12) * 14);
+                goto mess_glyph;
+            case 0xf0:
+                pMp++;
+                pOt = pDr_mode + 1;
+                pP->v0 = (UCHAR)((*pMp / 0x12) * 14 - 0x3c);
+                goto mess_glyph;
+            case 0xf8:
+                D0 = pMp[1];
+                if (D0 == 0) {
+                    D0 = pMoji->Mess_item;
+                }
+                pMp_keep = pMp;
+                pMp = name_ptr_set(D0);
+                break;
+            case 0xf7:
+                pMp = pMp_keep + 2;
+                break;
+            case 0xf5:
+                goto mess_adv;
             default:
                 Glyph_v = (*pMp / 0x12) * 14 + 0x1c;
+                pP->v0 = (UCHAR)Glyph_v;
                 pOt = pDr_mode;
 mess_glyph:
                 if ((Attr & 0x4000) != 0 && *pMp < 0x57 && 1 < (UINT)(pMp[-1] - 0xee) && pMp[-1] != 0xf0) {
@@ -824,29 +811,28 @@ mess_glyph:
                     Pos_xy = Pos_xy - (signed char)msg_space[Msg_idx];
                     Adv = (signed char)msg_space[Msg_idx + 1] + (signed char)msg_space[Msg_idx];
                 }
-                pP->x0 = (SHORT)Pos_xy;
-                pP->y0 = (SHORT)(Pos_xy >> 16);
-                pP->r0 = 0x80;
-                pP->g0 = 0x80;
-                pP->b0 = 0x80;
-                pP->code = 0x64;
-                pP->v0 = (UCHAR)Glyph_v;
                 pP->u0 = (UCHAR)((*pMp % 0x12) * 14);
                 pP->clut = (USHORT)Clt;
-                pP->w = 14;
-                pP->h = 14;
+                *(LONG *)&pP->x0 = Pos_xy;
+                *(ULONG *)&pP->r0 = 0x64808080;
+                *(ULONG *)&pP->w = 0xe000e;
                 AddPrim(pOt, pP);
                 pP++;
-                if (pP == Moji.Prim_sprt[Cbuf + 1]) {
+                if (pP == pEnd) {
                     goto message_exit;
                 }
+                goto mess_adv;
+mess_zero:
+                if ((Attr & 0x4000) != 0) {
+                    Pos_xy = Pos_xy - (signed char)msg_space[0];
+                    Adv = (signed char)msg_space[1] + (signed char)msg_space[0];
+                }
 mess_adv:
-                pMp_next = pMp + 1;
+                pMp++;
                 Pos_xy += Adv;
                 break;
             }
-            pMp = pMp_next;
-        } while (pMp_next != pMoji->Mess_end);
+        } while (pMp != pMoji->Mess_end);
     }
 message_exit:
     Moji.pPrim14_cur = pP;
@@ -860,19 +846,20 @@ void Name_disp(long Pos_x, long Pos_y, ULONG Attr, ULONG Item_id)
     UCHAR *pName;
     UCHAR D0;
     LONG Adv;
-    LONG Glyph_v;
     UINT Msg_idx;
     DR_MODE *pOt;
     UINT Prio;
     SPRT *pP;
     DR_MODE *pDr_mode;
+    SPRT *pEnd;
+    ULONG Y_hi;
     USHORT Clt;
-    LONG Frame_pad[6];      /* retail frame 0x58: 24 bytes of reserved stack never read (offsets 0x00-0x0f, 0x14, 0x1c, 0x24, 0x2c unreferenced) */
 
-    (void)Frame_pad;
     pP = Moji.pPrim14_cur;
     Adv = (Attr & 7) << 1;
     Prio = G.Cbuf_id;
+    pEnd = Moji.Prim_sprt[Prio + 1];
+    Y_hi = (ULONG)Pos_y << 16;
     if ((Attr & 7) == 0) {
         Adv = 6;
     }
@@ -884,48 +871,45 @@ void Name_disp(long Pos_x, long Pos_y, ULONG Attr, ULONG Item_id)
         do {
             Adv = 14;
             pOt = pDr_mode;
-            if (D0 == 0xee) {
+            switch (D0) {
+            case 0:
+                if ((Attr & 0x4000) != 0) {
+                    Pos_x = Pos_x - (signed char)msg_space[0];
+                    Adv = (signed char)msg_space[1] + (signed char)msg_space[0];
+                }
+                goto name_next;
+            case 0xee:
                 pName++;
-                Glyph_v = (*pName / 0x12) * 14 - 0x2e;
-                goto name_glyph;
-            }
-            if (D0 == 0xef) {
+                pP->v0 = (UCHAR)((*pName / 0x12) * 14 - 0x2e);
+                break;
+            case 0xef:
                 pName++;
-                Glyph_v = (*pName / 0x12) * 14;
+                pP->v0 = (UCHAR)((*pName / 0x12) * 14);
                 pOt = pDr_mode + 1;
-                goto name_glyph;
-            }
-            if (D0 == 0xf0) {
+                break;
+            case 0xf0:
                 pName++;
-                Glyph_v = (*pName / 0x12) * 14 - 0x3c;
+                pP->v0 = (UCHAR)((*pName / 0x12) * 14 - 0x3c);
                 pOt = pDr_mode + 1;
-                goto name_glyph;
-            }
-            if (D0 != 0) {
-                Glyph_v = (*pName / 0x12) * 14 + 0x1c;
+                break;
+            default:
+                pP->v0 = (UCHAR)((*pName / 0x12) * 14 + 0x1c);
                 if ((Attr & 0x4000) != 0 && *pName < 0x57) {
                     Msg_idx = (UINT)*pName * 2;
                     Pos_x = Pos_x - (signed char)msg_space[Msg_idx];
                     Adv = (signed char)msg_space[Msg_idx + 1] + (signed char)msg_space[Msg_idx];
                 }
-                goto name_glyph;
+                break;
             }
-            if ((Attr & 0x4000) != 0) {
-                Pos_x = Pos_x - (signed char)msg_space[0];
-                Adv = (signed char)msg_space[1] + (signed char)msg_space[0];
-            }
-            goto name_next;
-name_glyph:
             /* DS stores the sprite as words: rgb+code, x0|y0, w|h */
-			*(ULONG *)&pP->r0 = 0x64808080;
-			*(ULONG *)&pP->x0 = ((ULONG)Pos_y << 16) | ((ULONG)Pos_x & 0xffff);
-			*(ULONG *)&pP->w = 0x000e000e;
-			pP->v0 = (UCHAR)Glyph_v;
-			pP->clut = Clt;
-			pP->u0 = (UCHAR)((*pName % 0x12) * 14);
+            *(ULONG *)&pP->r0 = 0x64808080;
+            *(ULONG *)&pP->w = 0x000e000e;
+            *(ULONG *)&pP->x0 = ((ULONG)Pos_x & 0xffff) | Y_hi;
+            pP->u0 = (UCHAR)((*pName % 0x12) * 14);
+            pP->clut = Clt;
             AddPrim(pOt, pP);
             pP++;
-            if (pP == Moji.Prim_sprt[Prio + 1]) {
+            if (pP == pEnd) {
                 Moji.pPrim14_cur = pP;
                 return;
             }
@@ -947,14 +931,26 @@ void Mess_print(ULONG Pos_x, ULONG Pos_y, UCHAR *pMess, ULONG Attr)
     LONG Glyph_v;
     UINT Clt;
     UINT Msg_idx;
+    UINT Clut;
+    ULONG Y_hi;
+    ULONG Tag_hi;
+    ULONG Tag_lo;
     SPRT *pP;
+    SPRT *pEnd;
     DR_MODE *pOt;
     DR_MODE *pDr_mode;
+    DR_MODE *pDr_alt;
 
     Clt = (UINT)G.Cbuf_id;
     D0 = *pMess;
     pDr_mode = Moji.Moji_mode[Clt] + (Attr & 7) * 2;
     pP = Moji.pPrim14_cur;
+    pEnd = Moji.Prim_sprt[Clt + 1];
+    pDr_alt = pDr_mode + 1;
+    Clut = ((Attr & 0xf0) << 3) | 0x7810;
+    Tag_hi = 0xff000000;
+    Tag_lo = 0xffffff;
+    Y_hi = Pos_y << 16;
     if (D0 != 0xfe) {
         do {
             Adv = 14;
@@ -975,12 +971,12 @@ void Mess_print(ULONG Pos_x, ULONG Pos_y, UCHAR *pMess, ULONG Attr)
             case 0xef:
                 pMess++;
                 Glyph_v = (*pMess / 0x12) * 14;
-                pOt = pDr_mode + 1;
+                pOt = pDr_alt;
                 break;
             case 0xf0:
                 pMess++;
                 Glyph_v = (*pMess / 0x12) * 14 - 0x3c;
-                pOt = pDr_mode + 1;
+                pOt = pDr_alt;
                 break;
             case 0xf5:
                 goto moji_next;
@@ -1007,13 +1003,15 @@ void Mess_print(ULONG Pos_x, ULONG Pos_y, UCHAR *pMess, ULONG Attr)
             pP->b0 = 0x80;
             pP->code = 0x64;
             /* DS stores x0/y0 as one word (Pos_x | Pos_y << 16), so a negative Pos_x also fills y0 */
-            *(ULONG *)&pP->x0 = Pos_x | (Pos_y << 16);
+            *(ULONG *)&pP->x0 = Pos_x | Y_hi;
             D0 = *pMess;
-            pP->clut = (USHORT)(((Attr & 0xf0) << 3) | 0x7810);
+            pP->clut = (USHORT)Clut;
             pP->u0 = (UCHAR)((D0 % 0x12) * 14);
-            addPrim(pOt, pP);
+            /* addPrim() expanded: keep the tag high byte, splice in the 24-bit address */
+            *(ULONG *)pP = (*(ULONG *)pP & Tag_hi) | (pOt->tag & Tag_lo);
+            pOt->tag = (pOt->tag & Tag_hi) | ((ULONG)pP & Tag_lo);
             pP++;
-            if (pP == Moji.Prim_sprt[Clt + 1]) {
+            if (pP == pEnd) {
                 Moji.pPrim14_cur = pP;
                 return;
             }
@@ -1030,24 +1028,28 @@ moji_next:
 /* DS 0x800316a8 (moji_trans_main) */
 void moji_trans_main(MOJIDISP *pMoji)
 {
-    UCHAR *pBuff1;
-    SHORT *pBuffEnd;
     UCHAR *pBuff0;
+    UCHAR *pBuffEnd;
+    LONG X;
+    LONG Y;
     ULONG Pos;
 
-    pBuffEnd = (SHORT *)pMoji->pBuff_ptr;
-    pBuff1 = pMoji->Moji_buff;
-    if (pBuffEnd != (SHORT *)pBuff1) {
+    pBuffEnd = pMoji->pBuff_ptr;
+    pBuff0 = pMoji->Moji_buff;
+    if (pBuffEnd != pBuff0) {
         do {
-            pBuff0 = (UCHAR *)&((MOJI_ENTRY *)pBuff1)->Attr;
-            Pos = (ULONG)((LONG)((MOJI_ENTRY *)pBuff1)->X + (LONG)((MOJI_ENTRY *)pBuff1)->Y * 0x10000);
-            if ((*(USHORT *)pBuff0 & 0x200) == 0) {
-                pBuff1 = moji_trans_8(pBuff0, Pos, pMoji);
+            X = *(SHORT *)pBuff0;
+            pBuff0 += sizeof(SHORT);
+            Y = *(SHORT *)pBuff0;
+            pBuff0 += sizeof(SHORT);
+            Pos = X + (Y << 16);
+            if ((*(USHORT *)pBuff0 & 0x200) != 0) {
+                pBuff0 = moji_trans_14(pBuff0, Pos, pMoji);
             }
             else {
-                pBuff1 = moji_trans_14(pBuff0, Pos, pMoji);
+                pBuff0 = moji_trans_8(pBuff0, Pos, pMoji);
             }
-        } while (pBuff1 < (UCHAR *)pBuffEnd);
+        } while (pBuff0 < pBuffEnd);
     }
     return;
 }
@@ -1118,9 +1120,11 @@ UCHAR *moji_trans_14(UCHAR *pBuff0, ULONG Pos, MOJIDISP *pMoji)
     SPRT *pSp_cur;
     SPRT *pBank_end;
     ULONG Keep_tag;
+    ULONG Rgbc;
+    ULONG Uv_clut;
 
-    pBank_end = pMoji->Prim_sprt[G.Cbuf_id + 1];
-    if (pMoji->pPrim14_cur == pBank_end) {
+    pBank_end = Moji.Prim_sprt[G.Cbuf_id + 1];
+    if (Moji.pPrim14_cur == pBank_end) {
         pNextBuf = pMoji->pBuff_ptr;
     }
     else {
@@ -1129,7 +1133,9 @@ UCHAR *moji_trans_14(UCHAR *pBuff0, ULONG Pos, MOJIDISP *pMoji)
         D1 = (Clt >> 8) & 1;
         pDr_mode = pMoji->Moji_mode[G.Cbuf_id] + (Clt & 7) * 2;
         Keep_tag = pDr_mode->tag;
-        pSp = pMoji->pPrim14_cur;
+        pSp = Moji.pPrim14_cur;
+        Rgbc = 0x64808080UL | ((ULONG)D1 << 25);
+        Uv_clut = (ULONG)(USHORT)(((((Clt & 0xf0) >> 3) + D1 + 0x1e0) * 0x40) | 0x10) << 16;
         do {
             pSp_cur = pSp;
             Adv = 14;
@@ -1146,22 +1152,16 @@ UCHAR *moji_trans_14(UCHAR *pBuff0, ULONG Pos, MOJIDISP *pMoji)
                     Pos = Pos - (signed char)msg_space[i];
                     Adv = (signed char)msg_space[i + 1] + (signed char)msg_space[i];
                 }
-                pSp_cur->r0 = 0x80;
-                pSp_cur->g0 = 0x80;
-                pSp_cur->b0 = 0x80;
-                pSp_cur->code = (UCHAR)(0x64 | (D1 << 1));
-                pSp_cur->x0 = (SHORT)Pos;
-                pSp_cur->y0 = (SHORT)(Pos >> 16);
+                /* DS builds the SPRT words: r0/g0/b0/code, x0/y0, w/h, then u0/v0/clut */
+                *(ULONG *)&pSp_cur->r0 = Rgbc;
+                *(ULONG *)&pSp_cur->x0 = Pos;
                 D0 = *pP;
-                pSp_cur->u0 = (UCHAR)((D0 % 0x12) * 14);
-                pSp_cur->v0 = (UCHAR)((D0 / 0x12) * 14);
-                pSp_cur->clut = (USHORT)(((((Clt & 0xf0) >> 3) + D1 + 0x1e0) * 0x40) | 0x10);
-                pSp_cur->w = 14;
-                pSp_cur->h = 14;
+                *(ULONG *)&pSp_cur->w = 0xe000e;
+                *(ULONG *)&pSp_cur->u0 = (UCHAR)(D0 % 0x12) * 14 + (((UCHAR)(D0 / 0x12) * 14) << 8) + Uv_clut;
                 pDr_mode->tag = (pDr_mode->tag & 0xff000000UL) | ((ULONG)pSp_cur & 0xffffffUL);
                 pDr_mode = (DR_MODE *)pSp_cur;
                 pSp = pSp_cur + 1;
-                pMoji->pPrim14_cur = pSp;
+                Moji.pPrim14_cur = pSp;
                 if (pSp == pBank_end) break;
             }
             pP++;
@@ -1196,6 +1196,7 @@ void Moji_init(void)
     USHORT tpage;
     int i;
     int j;
+    int k;
     DR_MODE *pDr_mode;
     SPRT *pSpr;
     SPRT_8 *pSpr8;
@@ -1207,31 +1208,25 @@ void Moji_init(void)
         SetDrawMode(pDr_mode, 0, 0, tpage, (RECT *)0x0);
         tpage = GetTPage(0, 0, 0x340, 0x100);
         SetDrawMode(pDr_mode + 1, 0, 0, tpage, (RECT *)0x0);
-        i--;
         pDr_mode += 2;
+        i--;
     } while (i != 0);
     pSpr = Moji.Prim_sprt[0];
     pSpr8 = Moji.Prim_sprt_8[0];
-    i = 0x200;
-    j = 0x300;
+    j = 0x200;
+    k = 0x300;
     do {
         pSpr->tag = 0x4000000;
-        pSpr->r0 = 0x80;
-        pSpr->g0 = 0x80;
-        pSpr->b0 = 0x80;
-        pSpr->code = 100;
-        i--;
+        *(ULONG *)&pSpr->r0 = 0x64808080;
+        j--;
         pSpr++;
-    } while (i != 0);
+    } while (j != 0);
     do {
         pSpr8->tag = 0x3000000;
-        pSpr8->r0 = 0x80;
-        pSpr8->g0 = 0x80;
-        pSpr8->b0 = 0x80;
-        pSpr8->code = 116;
-        j--;
+        *(ULONG *)&pSpr8->r0 = 0x74808080;
+        k--;
         pSpr8++;
-    } while (j != 0);
+    } while (k != 0);
     Moji_buff_init();
     Moji_mode_init();
     return;
@@ -1258,6 +1253,27 @@ void Moji_mode_init(void)
     Moji.pPrim8_cur = Moji.Prim_sprt_8[G.Cbuf_id];
     return;
 }
+
+/* DS 0x8009de34 (msg_space) */
+UCHAR msg_space[264] = {
+	0x00, 0x08, 0x02, 0x05, 0x04, 0x07, 0x04, 0x06, 0x05, 0x06, 0x05, 0x07, 0x03, 0x07, 0x03, 0x08,
+	0x04, 0x07, 0x06, 0x08, 0x01, 0x08, 0x02, 0x0a, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c,
+	0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x04, 0x07, 0x00, 0x0e,
+	0x02, 0x05, 0x02, 0x0b, 0x04, 0x06, 0x02, 0x0a, 0x01, 0x0d, 0x00, 0x0e, 0x01, 0x0d, 0x01, 0x0c,
+	0x01, 0x0c, 0x01, 0x0c, 0x02, 0x0b, 0x01, 0x0d, 0x00, 0x0e, 0x04, 0x07, 0x01, 0x0d, 0x01, 0x0d,
+	0x01, 0x0d, 0x00, 0x0f, 0x00, 0x0e, 0x01, 0x0c, 0x01, 0x0c, 0x00, 0x0d, 0x00, 0x0e, 0x01, 0x0c,
+	0x01, 0x0d, 0x01, 0x0d, 0x01, 0x0d, 0x00, 0x0f, 0x01, 0x0d, 0x01, 0x0d, 0x01, 0x0d, 0x03, 0x08,
+	0x00, 0x0f, 0x03, 0x08, 0x04, 0x07, 0x00, 0x0e, 0x00, 0x0e, 0x02, 0x0a, 0x02, 0x0a, 0x03, 0x09,
+	0x02, 0x0a, 0x03, 0x09, 0x03, 0x09, 0x02, 0x0a, 0x02, 0x0b, 0x04, 0x06, 0x04, 0x06, 0x02, 0x0b,
+	0x04, 0x06, 0x00, 0x0e, 0x02, 0x0b, 0x02, 0x0a, 0x02, 0x0a, 0x02, 0x0a, 0x03, 0x08, 0x03, 0x09,
+	0x03, 0x08, 0x02, 0x0b, 0x02, 0x0b, 0x00, 0x0e, 0x02, 0x0b, 0x02, 0x0b, 0x03, 0x09, 0x00, 0x00,
+	0x02, 0xbc, 0x46, 0x00, 0x00, 0x00, 0x03, 0x92, 0x2a, 0x00, 0x02, 0x00, 0x06, 0x84, 0x1c, 0x00,
+	0x05, 0x00, 0x02, 0xca, 0x2a, 0x00, 0x0b, 0x00, 0x03, 0x84, 0x2a, 0x00, 0x0d, 0x00, 0x03, 0x5a,
+	0x46, 0x00, 0x10, 0x00, 0x02, 0x5a, 0x62, 0x00, 0x13, 0x00, 0x00, 0x00, 0x02, 0xd2, 0x32, 0x00,
+	0x00, 0x00, 0x03, 0x7e, 0x46, 0x00, 0x02, 0x00, 0x06, 0x84, 0x1c, 0x00, 0x05, 0x00, 0x02, 0xc4,
+	0x2a, 0x00, 0x0b, 0x00, 0x03, 0x5a, 0x46, 0x00, 0x0d, 0x00, 0x03, 0x70, 0x38, 0x00, 0x10, 0x00,
+	0x02, 0x30, 0x90, 0x00, 0x13, 0x00, 0x00, 0x00
+};
 
 /* DS 0x8009df3c (namelist_tbl_data) */
 UCHAR namelist_tbl_data[1276] = {
@@ -2371,26 +2387,8 @@ CHAR ascii_tbl[2][17] = {
 	{ 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x00 }
 };
 
-/* DS 0x8009de34 (msg_space) */
-UCHAR msg_space[264] = {
-	0x00, 0x08, 0x02, 0x05, 0x04, 0x07, 0x04, 0x06, 0x05, 0x06, 0x05, 0x07, 0x03, 0x07, 0x03, 0x08,
-	0x04, 0x07, 0x06, 0x08, 0x01, 0x08, 0x02, 0x0a, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c,
-	0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x01, 0x0c, 0x04, 0x07, 0x00, 0x0e,
-	0x02, 0x05, 0x02, 0x0b, 0x04, 0x06, 0x02, 0x0a, 0x01, 0x0d, 0x00, 0x0e, 0x01, 0x0d, 0x01, 0x0c,
-	0x01, 0x0c, 0x01, 0x0c, 0x02, 0x0b, 0x01, 0x0d, 0x00, 0x0e, 0x04, 0x07, 0x01, 0x0d, 0x01, 0x0d,
-	0x01, 0x0d, 0x00, 0x0f, 0x00, 0x0e, 0x01, 0x0c, 0x01, 0x0c, 0x00, 0x0d, 0x00, 0x0e, 0x01, 0x0c,
-	0x01, 0x0d, 0x01, 0x0d, 0x01, 0x0d, 0x00, 0x0f, 0x01, 0x0d, 0x01, 0x0d, 0x01, 0x0d, 0x03, 0x08,
-	0x00, 0x0f, 0x03, 0x08, 0x04, 0x07, 0x00, 0x0e, 0x00, 0x0e, 0x02, 0x0a, 0x02, 0x0a, 0x03, 0x09,
-	0x02, 0x0a, 0x03, 0x09, 0x03, 0x09, 0x02, 0x0a, 0x02, 0x0b, 0x04, 0x06, 0x04, 0x06, 0x02, 0x0b,
-	0x04, 0x06, 0x00, 0x0e, 0x02, 0x0b, 0x02, 0x0a, 0x02, 0x0a, 0x02, 0x0a, 0x03, 0x08, 0x03, 0x09,
-	0x03, 0x08, 0x02, 0x0b, 0x02, 0x0b, 0x00, 0x0e, 0x02, 0x0b, 0x02, 0x0b, 0x03, 0x09, 0x00, 0x00,
-	0x02, 0xbc, 0x46, 0x00, 0x00, 0x00, 0x03, 0x92, 0x2a, 0x00, 0x02, 0x00, 0x06, 0x84, 0x1c, 0x00,
-	0x05, 0x00, 0x02, 0xca, 0x2a, 0x00, 0x0b, 0x00, 0x03, 0x84, 0x2a, 0x00, 0x0d, 0x00, 0x03, 0x5a,
-	0x46, 0x00, 0x10, 0x00, 0x02, 0x5a, 0x62, 0x00, 0x13, 0x00, 0x00, 0x00, 0x02, 0xd2, 0x32, 0x00,
-	0x00, 0x00, 0x03, 0x7e, 0x46, 0x00, 0x02, 0x00, 0x06, 0x84, 0x1c, 0x00, 0x05, 0x00, 0x02, 0xc4,
-	0x2a, 0x00, 0x0b, 0x00, 0x03, 0x5a, 0x46, 0x00, 0x0d, 0x00, 0x03, 0x70, 0x38, 0x00, 0x10, 0x00,
-	0x02, 0x30, 0x90, 0x00, 0x13, 0x00, 0x00, 0x00
-};
-
-/* DS 0x800e2ab0 (Moji) */
+/* DS 0x800e2ab0 (Moji)
+ * The whole message display state, 0x5cb4 bytes. The retail sorted label list has no label between Moji
+ * (0x800e2ab0) and _svm_envx_ptr (0x800e8764), and the last field Stop_data (MOJIDISP+0x5cb0) is written by
+ * Mess_set (0x8002fe90, DS 0x800e8760), so the struct ends at the next label. */
 MOJIDISP Moji;

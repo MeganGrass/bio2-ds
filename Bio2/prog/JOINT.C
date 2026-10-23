@@ -7,12 +7,10 @@
 #include "GTE_OPS.H"
 #include <ASM.H>
 #include <INLINE_C.H>
-#include <LIBAPI.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <GTEMAC.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBSPU.H>
 #include <MALLOC.H>
 #include <STDIO.H>
@@ -34,7 +32,7 @@ typedef struct tagKAN_FRAME {
 	SHORT Pos_y;		/* +0x02 high half of the first frame word */
 	SHORT Pos_z;		/* +0x04 low half of the second frame word (J_seq, J_seq2: Pos_z) */
 	SHORT Unk_06;		/* +0x06 high half of the second frame word (not read) */
-	UINT  Unk_08;		/* +0x08 third frame word; Rot_adr = Fr+8 (retail 0x80029ef8: addiu s2,s0,-0x4) */
+	UINT  Unk_08;		/* +0x08 third frame word; pRot_a = Fr+8 in Joint_move_p (retail 0x80029ef8: addiu s2,s0,-0x4) */
 	UINT  Unk_0c;		/* +0x0c first packed rotation word, pRot_w (retail 0x80029ee8: addiu s0,s0,0xc) */
 } KAN_FRAME;
 
@@ -47,21 +45,6 @@ typedef struct tagKAN_ROT_LANES {
 	UCHAR Unk_03;		/* +3 bits 24-31, low 8 bits of a 12-bit Z field (J_seq). Retail 0x80029f6c: lbu v1,0x3(s0), s0 = pRot_w */
 } KAN_ROT_LANES;
 
-/* One rotation group as Joint_move_p walks it. Rot_adr is the frame word before the group,
-   so Unk_04 is the group's first rotation word (pRot_w[0]) and Unk_24 is pRot_w[8]. */
-typedef struct tagKAN_ROT_GRP {
-	UINT Unk_00;		/* +0x00 frame word before the group (Rot_adr itself; not read) */
-	UINT Unk_04;		/* +0x04 rotation word 0 (pRot_w[0]) */
-	UINT Unk_08;		/* +0x08 rotation word 1 (pRot_w[1]). Retail 0x80029f68: lw v0,0x8(s2), s2 = Rot_adr */
-	UINT Unk_0c;		/* +0x0c rotation word 2 (pRot_w[2]). Retail 0x8002a018: lbu v0,0x8(s2), s2 = Rot_adr+4 (lane 0) */
-	UINT Unk_10;		/* +0x10 rotation word 3 (pRot_w[3]). Retail 0x8002a070: lw v0,0x8(s2), s2 = Rot_adr+8 */
-	UINT Unk_14;		/* +0x14 rotation word 4 (pRot_w[4]). Retail 0x8002a0b8: lw v0,0x8(s2), s2 = Rot_adr+12 */
-	UINT Unk_18;		/* +0x18 rotation word 5 (pRot_w[5]). Retail 0x8002a138: lw v0,0x8(s2), s2 = Rot_adr+16 (lane 0: 0x8002a120 lbu) */
-	UINT Unk_1c;		/* +0x1c rotation word 6 (pRot_w[6]). Retail 0x8002a174: lw v0,0x8(s2), s2 = Rot_adr+20; lane 3 (+0x1f) is 0x8002a1cc: lbu a0,0x3(s2), s2 = Rot_adr+28 */
-	UINT Unk_20;		/* +0x20 rotation word 7 (pRot_w[7]). Retail 0x8002a228: lw v1,0x0(s2), s2 = Rot_adr+32 */
-	UINT Unk_24;		/* +0x24 rotation word 8 (pRot_w[8]) */
-} KAN_ROT_GRP;
-
 /* Joint_trans2 - 0x80027160
    Transforms enemy object parts using rotation/scale matrices.
    Handles super-matrix composition, light setup, and dispatches
@@ -71,16 +54,19 @@ typedef struct tagKAN_ROT_GRP {
 /* DS 0x80027160 (Joint_trans2) */
 void Joint_trans2(ENEMY_WORK *pEm, PARTS_W *pP_ptr, ULONG Be_flg, VECTOR *pPos)
 {
-	MATRIX M;
 	VECTOR v;
+	MATRIX M;
 	UCHAR i;
 
-	if ((Be_flg & 0x2000000) == 0) {
-		RotMatrix((SVECTOR *)&pEm->Cdir_x, (MATRIX *)pEm->M);
-	}
-	else {
+	if ((Be_flg & 0x2000000) != 0) {
 		RotMatrix((SVECTOR *)&pEm->Cdir_x, &M);
-		if ((Be_flg & 0x1000000) == 0) {
+		if ((Be_flg & 0x1000000) != 0) {
+			M.t[0] = pEm->Pos_x;
+			M.t[1] = pEm->Pos_y;
+			M.t[2] = pEm->Pos_z;
+			CompM((MATRIX *)pEm->pSuper, &M, (MATRIX *)pEm->M);
+		}
+		else {
 			gte_SetRotMatrix((MATRIX *)pEm->pSuper);
 			gte_ldclmv(&M);
 			gte_rtir();
@@ -93,12 +79,9 @@ void Joint_trans2(ENEMY_WORK *pEm, PARTS_W *pP_ptr, ULONG Be_flg, VECTOR *pPos)
 			gte_rtir();
 			gte_stclmv((MATRIX *)&pEm->M[0][2]);
 		}
-		else {
-			M.t[0] = pEm->Pos_x;
-			M.t[1] = pEm->Pos_y;
-			M.t[2] = pEm->Pos_z;
-			CompM((MATRIX *)pEm->pSuper, &M, (MATRIX *)pEm->M);
-		}
+	}
+	else {
+		RotMatrix((SVECTOR *)&pEm->Cdir_x, (MATRIX *)pEm->M);
 	}
 
 	if ((Be_flg & 0x800) != 0) {
@@ -117,25 +100,23 @@ void Joint_trans2(ENEMY_WORK *pEm, PARTS_W *pP_ptr, ULONG Be_flg, VECTOR *pPos)
 			if ((pP_ptr->Be_flg & 1) != 0) {
 				ko_joint_trans2(pEm, pP_ptr, pP_ptr->Be_flg, &pP_ptr->Workm);
 			}
-			i--;
 			pP_ptr++;
-		} while (i != 0);
+		} while (--i != 0);
 		return;
 	}
 
 	do {
 		ULONG be = pP_ptr->Be_flg;
-		if ((be & 0x9000) == 0) {
+		if ((be & 0x9000) != 0) {
 			if ((be & 1) != 0) {
-				ko_joint_trans3(pEm, pP_ptr, be, &pP_ptr->Workm);
+				ko_joint_trans2(pEm, pP_ptr, be, &pP_ptr->Workm);
 			}
 		}
 		else if ((be & 1) != 0) {
-			ko_joint_trans2(pEm, pP_ptr, be, &pP_ptr->Workm);
+			ko_joint_trans3(pEm, pP_ptr, be, &pP_ptr->Workm);
 		}
-		i--;
 		pP_ptr++;
-	} while (i != 0);
+	} while (--i != 0);
 }
 
 /* A MATRIX rotation part (3x3 shorts plus pad) viewed as five words, as DS copies it. */
@@ -275,9 +256,7 @@ void ko_joint_trans2(ENEMY_WORK *pEm, PARTS_W *pP_ptr, ULONG be_flg, MATRIX *wm)
 			SortGT3_neo(tmd,  pPacket,  Poly_rgb, (Att & 2) >> 1);
 			SortGT4_neo(tmd2, pPacket2, Poly_rgb, (Att & 2) >> 1);
 			if ((be_flg & 0x80) != 0)
-				Model_color_plus((MODEL_WORK *)&pP_ptr->Attribute,
-								 *(ULONG *)pP_ptr->Free,
-								 *(ULONG *)&pP_ptr->Free[2]);
+				Model_color_plus((MODEL_WORK *)&pP_ptr->Attribute, *(ULONG *)pP_ptr->Free, *(ULONG *)&pP_ptr->Free[2]);
 			return;
 		}
 		if ((be_flg & 8) != 0) {
@@ -526,23 +505,23 @@ ULONG PartsWork_set(ENEMY_WORK *pEm, ULONG work_top)
 /* DS 0x80028368 (PartsWork_link) */
 ULONG PartsWork_link(ENEMY_WORK *pEm, ULONG Packet_top, ULONG *pKan_t_ptr, ULONG Flg)
 {
+	/* retail reserves 120 more bytes of locals (PartsWork_link frame 216); never read */
+	volatile int Rsv[30];
+	UINT     link_cnt;
+	UINT     part_no;
 	PARTS_W *pTop;
 	PARTS_W *pCur;
-	USHORT  *pPos;
-	UINT    *pLink;
 	UCHAR   *pLinkBase;
 	UCHAR   *pChild;
 	ULONG   *pTmd_cur;
 	ULONG   *pG_packet;
-	UINT     link_cnt;
-	UINT     n;
-	UINT     cnt;
-	UCHAR    part_no;
-	ULONG    Frame_pad[38];		/* retail reserves 0xd8 bytes and uses only the top (spills at 0x88-0xa8) */
+	ULONG    n;
+	ULONG    cnt;
+	UINT    *pLink;
+	SHORT   *pPos;
 
-	(void)Frame_pad;
 	part_no   = 0;
-	pPos      = &((USHORT *)pKan_t_ptr)[4];
+	pPos      = &((SHORT *)pKan_t_ptr)[4];
 	n         = pEm->Parts_num;
 	pCur      = pEm->pSin_parts_ptr;
 	pTmd_cur  = pEm->pTmd;
@@ -553,40 +532,30 @@ ULONG PartsWork_link(ENEMY_WORK *pEm, ULONG Packet_top, ULONG *pKan_t_ptr, ULONG
 	/* part 0 hangs off pEm (M, Be_flg); the ENEMY_WORK super-matrix/vector are reset */
 	pCur->pSuper     = (ULONG *)pEm->M;
 	pCur->pOya_parts = &pEm->Be_flg;
-	pEm->Super_vector.vx = 0;
-	pEm->Super_vector.vy = 0;
+	*(UINT *)&pEm->Super_vector.vx = 0;
 	pEm->Super_vector.vz = 0;
 	pEm->Super_matrix = GsIDMATRIX;
 	pEm->pSuper = (ULONG *)&pEm->Super_matrix;
 
 	pTop = pCur;
-	for (; n != 0; n--) {
+	while (n-- != 0) {
 		pCur->Poly_rgb = 0x808080;
-		/* identity working matrix (Workm) and identity rotation (M) */
-		pCur->Workm.m[0][0] = 0x1000;
-		pCur->Workm.m[0][1] = 0;
-		pCur->Workm.m[0][2] = 0;
-		pCur->Workm.m[1][0] = 0;
-		pCur->Workm.m[1][1] = 0x1000;
-		pCur->Workm.m[1][2] = 0;
-		pCur->Workm.m[2][0] = 0;
-		pCur->Workm.m[2][1] = 0;
-		pCur->Workm.m[2][2] = 0x1000;
+		/* identity working matrix (Workm) and identity rotation (M); DS writes the 16-bit entries as paired word stores */
+		*(UINT *)&pCur->Workm.m[0][0] = 0x1000;
+		*(UINT *)&pCur->Workm.m[0][2] = 0;
+		*(UINT *)&pCur->Workm.m[1][1] = 0x1000;
+		*(UINT *)&pCur->Workm.m[2][0] = 0;
+		*(UINT *)&pCur->Workm.m[2][2] = 0x1000;
 		pCur->Workm.t[0] = 0;
 		pCur->Workm.t[1] = 0;
 		pCur->Workm.t[2] = 0;
-		pCur->M[0][0] = 0x1000;
-		pCur->M[0][1] = 0;
-		pCur->M[0][2] = 0;
-		pCur->M[1][0] = 0;
-		pCur->M[1][1] = 0x1000;
-		pCur->M[1][2] = 0;
-		pCur->M[2][0] = 0;
-		pCur->M[2][1] = 0;
-		pCur->M[2][2] = 0x1000;
+		*(UINT *)&pCur->M[0][0] = 0x1000;
+		*(UINT *)&pCur->M[0][2] = 0;
+		*(UINT *)&pCur->M[1][1] = 0x1000;
+		*(UINT *)&pCur->M[2][0] = 0;
+		*(UINT *)&pCur->M[2][2] = 0x1000;
 		pCur->Attribute = 0;
-		pCur->Cdir_x = 0;
-		pCur->Cdir_y = 0;
+		*(UINT *)&pCur->Cdir_x = 0;
 		pCur->Cdir_z = 0;
 		pCur->Free[0] = 0;
 		pCur->Free[1] = 0;
@@ -595,6 +564,8 @@ ULONG PartsWork_link(ENEMY_WORK *pEm, ULONG Packet_top, ULONG *pKan_t_ptr, ULONG
 		pCur->Free[4] = 0;
 		pCur->Free[5] = 0;
 		pCur->Be_flg = 1;
+		/* DS clears the low half of Workm.t[0] a second time here */
+		*(SHORT *)&pCur->Workm.t[0] = 0;
 		pCur->Parts_no = part_no;
 		pCur->pTmd  = pTmd_cur;
 		pCur->pTmd2 = (ULONG *)((TMD_MEM *)pTmd_cur + 1);
@@ -603,29 +574,29 @@ ULONG PartsWork_link(ENEMY_WORK *pEm, ULONG Packet_top, ULONG *pKan_t_ptr, ULONG
 		Packet_top = (ULONG)PresetObjectGT4_neo((MODEL_WORK *)&pCur->Attribute, pG_packet, Flg);
 
 		/* position triple (x,y,z) from kan data */
-		pCur->Pos_x = (SHORT)pPos[0];
-		pCur->Old_x = (SHORT)pPos[0];
-		pCur->Pos_y = (SHORT)pPos[1];
-		pCur->Old_y = (SHORT)pPos[1];
-		pCur->Pos_z = (SHORT)pPos[2];
-		pCur->Old_z = (SHORT)pPos[2];
+		pCur->Pos_x = (LONG)pPos[0];
+		pCur->Old_x = (SHORT)pCur->Pos_x;
+		pCur->Pos_y = (LONG)pPos[1];
+		pCur->Old_y = (SHORT)pCur->Pos_y;
+		pCur->Pos_z = (LONG)pPos[2];
+		pCur->Old_z = (SHORT)pCur->Pos_z;
 		pPos += 3;
 
-		if (link_cnt == 0) {
-			pCur->pSuper     = (ULONG *)&GsIDMATRIX;
-			pCur->pOya_parts = NULL;
-		} else {
+		if (link_cnt != 0) {
 			/* parent link: list of child indices for this part.
 			   The child offset is relative to the start of the link table. */
 			pChild = pLinkBase + (*pLink >> 16);
 			cnt = *pLink & 0xffff;
-			for (; cnt != 0; cnt--) {
+			while (cnt-- != 0) {
 				pTop[*pChild].pSuper     = (ULONG *)&pCur->Workm;
 				pTop[*pChild].pOya_parts = &pCur->Be_flg;
 				pChild++;
 			}
 			pLink++;
 			link_cnt--;
+		} else {
+			pCur->pSuper     = (ULONG *)&GsIDMATRIX;
+			pCur->pOya_parts = NULL;
 		}
 		pCur++;
 		pTmd_cur = (ULONG *)((TMD_MEM *)pTmd_cur + 2);
@@ -641,14 +612,11 @@ ULONG PartsWork_link(ENEMY_WORK *pEm, ULONG Packet_top, ULONG *pKan_t_ptr, ULONG
 /* DS 0x80028648 (Init_Parts_work) */
 void Init_Parts_work(ENEMY_WORK *pEm)
 {
+	/* retail reserves 120 more bytes of locals (Init_Parts_work frame 120); never read */
+	volatile int Rsv[30];
 	USHORT *pPos;
 	PARTS_W *pCur;
-	UINT n;
-	UINT k;
-	UINT r, c;
-	UCHAR Frame_pad[120];
-
-	(void)Frame_pad;
+	ULONG n;
 
 	n      = pEm->Parts_num;
 	pPos   = &((USHORT *)pEm->pKan_t_ptr)[4];
@@ -656,37 +624,45 @@ void Init_Parts_work(ENEMY_WORK *pEm)
 
 	pCur->pSuper     = (ULONG *)pEm->M;
 	pCur->pOya_parts = &pEm->Be_flg;
-	pEm->Super_vector.vx = 0;
-	pEm->Super_vector.vy = 0;
+	*(UINT *)&pEm->Super_vector.vx = 0;
 	pEm->Super_vector.vz = 0;
 	pEm->Super_matrix = GsIDMATRIX;
 	pEm->pSuper = (ULONG *)&pEm->Super_matrix;
 
-	for (k = 0; k < n; k++) {
-		for (r = 0; r < 3; r++) {
-			for (c = 0; c < 3; c++) {
-				pCur->M[r][c]       = (r == c) ? 0x1000 : 0;
-				pCur->Workm.m[r][c] = (r == c) ? 0x1000 : 0;
-			}
-		}
+	while (n-- != 0) {
+		/* identity rotation in Workm and M; DS writes the 16-bit entries as paired word stores */
+		*(UINT *)&pCur->Workm.m[0][0] = 0x1000;
+		*(UINT *)&pCur->Workm.m[0][2] = 0;
+		*(UINT *)&pCur->Workm.m[1][1] = 0x1000;
+		*(UINT *)&pCur->Workm.m[2][0] = 0;
+		*(UINT *)&pCur->Workm.m[2][2] = 0x1000;
 		pCur->Workm.t[0] = 0;
 		pCur->Workm.t[1] = 0;
 		pCur->Workm.t[2] = 0;
+		*(UINT *)&pCur->M[0][0] = 0x1000;
+		*(UINT *)&pCur->M[0][2] = 0;
+		*(UINT *)&pCur->M[1][1] = 0x1000;
+		*(UINT *)&pCur->M[2][0] = 0;
+		*(UINT *)&pCur->M[2][2] = 0x1000;
 		pCur->Attribute  = 0;
 		pCur->Poly_rgb   = 0x808080;
-		for (r = 0; r < 6; r++) {
-			pCur->Free[r] = 0;
-		}
-		pCur->Cdir_x = 0;
-		pCur->Cdir_y = 0;
+		*(UINT *)&pCur->Cdir_x = 0;
 		pCur->Cdir_z = 0;
 		pCur->Be_flg = 1;
+		/* DS clears the low half of Workm.t[0] a second time here */
+		*(SHORT *)&pCur->Workm.t[0] = 0;
+		pCur->Free[0] = 0;
+		pCur->Free[1] = 0;
+		pCur->Free[2] = 0;
+		pCur->Free[3] = 0;
+		pCur->Free[4] = 0;
+		pCur->Free[5] = 0;
 
 		pCur->Pos_x = (LONG)(SHORT)pPos[0];
-		pCur->Pos_y = (LONG)(SHORT)pPos[1];
-		pCur->Pos_z = (LONG)(SHORT)pPos[2];
 		pCur->Old_x = (SHORT)pCur->Pos_x;
+		pCur->Pos_y = (LONG)(SHORT)pPos[1];
 		pCur->Old_y = (SHORT)pCur->Pos_y;
+		pCur->Pos_z = (LONG)(SHORT)pPos[2];
 		pCur->Old_z = (SHORT)pCur->Pos_z;
 		pPos += 3;
 		pCur++;
@@ -701,23 +677,24 @@ void Init_Parts_work(ENEMY_WORK *pEm)
 /* DS 0x80028794 (Parts_work_kan_init) */
 void Parts_work_kan_init(ENEMY_WORK *pEm, USHORT *pKan)
 {
+	/* retail reserves 120 more bytes of locals (Parts_work_kan_init frame 128); never read */
+	volatile int Rsv[30];
+	UINT     link_cnt;
+	UINT     part_no;
 	PARTS_W *pTop;
 	PARTS_W *pCur;
-	USHORT  *pPos;
-	UINT    *pLink;
 	UCHAR   *pLinkBase;
 	UCHAR   *pChild;
-	UINT     link_cnt;
-	UINT     n;
-	UINT     cnt;
-	UCHAR    part_no;
-	UCHAR    Frame_pad[120];	/* retail reserves sp+0x00..0x77 and never reads it (as in Init_Parts_work) */
+	ULONG    n;
+	ULONG    cnt;
+	UINT    *pLink;
+	USHORT  *pPos;
 
-	(void)Frame_pad;
 	part_no   = 0;
 	pPos      = &pKan[4];
 	n         = pEm->Parts_num;
 	pCur      = pEm->pSin_parts_ptr;
+	pTop      = pCur;
 	link_cnt  = ((KAN_HEAD *)pKan)->Parts_cnt;
 	pLinkBase = (UCHAR *)pKan + (pKan[0] & 0xfffc);
 	pLink     = (UINT *)pLinkBase;
@@ -725,40 +702,29 @@ void Parts_work_kan_init(ENEMY_WORK *pEm, USHORT *pKan)
 	/* part 0 hangs off pEm (M, Be_flg); the ENEMY_WORK super-matrix/vector are reset */
 	pCur->pSuper     = (ULONG *)pEm->M;
 	pCur->pOya_parts = &pEm->Be_flg;
-	pEm->Super_vector.vx = 0;
-	pEm->Super_vector.vy = 0;
+	*(UINT *)&pEm->Super_vector.vx = 0;
 	pEm->Super_vector.vz = 0;
 	pEm->Super_matrix = GsIDMATRIX;
 	pEm->pSuper = (ULONG *)&pEm->Super_matrix;
 
-	pTop = pCur;
-	for (; n != 0; n--) {
+	while (n-- != 0) {
 		pCur->Poly_rgb = 0x808080;
-		/* identity working matrix (Workm) and identity rotation (M) */
-		pCur->Workm.m[0][0] = 0x1000;
-		pCur->Workm.m[0][1] = 0;
-		pCur->Workm.m[0][2] = 0;
-		pCur->Workm.m[1][0] = 0;
-		pCur->Workm.m[1][1] = 0x1000;
-		pCur->Workm.m[1][2] = 0;
-		pCur->Workm.m[2][0] = 0;
-		pCur->Workm.m[2][1] = 0;
-		pCur->Workm.m[2][2] = 0x1000;
+		/* identity working matrix (Workm) and identity rotation (M); DS writes the 16-bit entries as paired word stores */
+		*(UINT *)&pCur->Workm.m[0][0] = 0x1000;
+		*(UINT *)&pCur->Workm.m[0][2] = 0;
+		*(UINT *)&pCur->Workm.m[1][1] = 0x1000;
+		*(UINT *)&pCur->Workm.m[2][0] = 0;
+		*(UINT *)&pCur->Workm.m[2][2] = 0x1000;
 		pCur->Workm.t[0] = 0;
 		pCur->Workm.t[1] = 0;
 		pCur->Workm.t[2] = 0;
-		pCur->M[0][0] = 0x1000;
-		pCur->M[0][1] = 0;
-		pCur->M[0][2] = 0;
-		pCur->M[1][0] = 0;
-		pCur->M[1][1] = 0x1000;
-		pCur->M[1][2] = 0;
-		pCur->M[2][0] = 0;
-		pCur->M[2][1] = 0;
-		pCur->M[2][2] = 0x1000;
+		*(UINT *)&pCur->M[0][0] = 0x1000;
+		*(UINT *)&pCur->M[0][2] = 0;
+		*(UINT *)&pCur->M[1][1] = 0x1000;
+		*(UINT *)&pCur->M[2][0] = 0;
+		*(UINT *)&pCur->M[2][2] = 0x1000;
 		pCur->Attribute = 0;
-		pCur->Cdir_x = 0;
-		pCur->Cdir_y = 0;
+		*(UINT *)&pCur->Cdir_x = 0;
 		pCur->Cdir_z = 0;
 		pCur->Free[0] = 0;
 		pCur->Free[1] = 0;
@@ -767,29 +733,31 @@ void Parts_work_kan_init(ENEMY_WORK *pEm, USHORT *pKan)
 		pCur->Free[4] = 0;
 		pCur->Free[5] = 0;
 		pCur->Be_flg = 1;
+		/* DS clears the low half of Workm.t[0] a second time here */
+		*(SHORT *)&pCur->Workm.t[0] = 0;
 		pCur->Parts_no = part_no;
-		pCur->Pos_x = (SHORT)pPos[0];
-		pCur->Old_x = (SHORT)pPos[0];
-		pCur->Pos_y = (SHORT)pPos[1];
-		pCur->Old_y = (SHORT)pPos[1];
-		pCur->Pos_z = (SHORT)pPos[2];
-		pCur->Old_z = (SHORT)pPos[2];
+		pCur->Pos_x = (LONG)(SHORT)pPos[0];
+		pCur->Old_x = (SHORT)pCur->Pos_x;
+		pCur->Pos_y = (LONG)(SHORT)pPos[1];
+		pCur->Old_y = (SHORT)pCur->Pos_y;
+		pCur->Pos_z = (LONG)(SHORT)pPos[2];
+		pCur->Old_z = (SHORT)pCur->Pos_z;
 		pPos += 3;
 
-		if (link_cnt == 0) {
-			pCur->pSuper     = (ULONG *)&GsIDMATRIX;
-			pCur->pOya_parts = NULL;
-		} else {
+		if (link_cnt != 0) {
 			/* children point their pSuper at this part's Workm and pOya_parts at this part */
 			pChild = pLinkBase + (*pLink >> 16);
 			cnt = *pLink & 0xffff;
-			for (; cnt != 0; cnt--) {
+			while (cnt-- != 0) {
 				pTop[*pChild].pSuper     = (ULONG *)&pCur->Workm;
 				pTop[*pChild].pOya_parts = &pCur->Be_flg;
 				pChild++;
 			}
 			pLink++;
 			link_cnt--;
+		} else {
+			pCur->pSuper     = (ULONG *)&GsIDMATRIX;
+			pCur->pOya_parts = NULL;
 		}
 		pCur++;
 		part_no++;
@@ -803,11 +771,12 @@ void Parts_work_kan_init(ENEMY_WORK *pEm, USHORT *pKan)
 ULONG Mem_ck_Parts_work(ENEMY_WORK *pEm)
 {
 	ULONG sum = 0;
-	UINT  k;
+	ULONG n = pEm->Parts_num;
 	PARTS_W *pP = pEm->pSin_parts_ptr;
 
-	for (k = 0; k < pEm->Parts_num; k++) {
-		sum += 0xc + ((TMD_MEM *)pP[k].pTmd)->n_poly * 0x14 + ((TMD_MEM *)pP[k].pTmd2)->n_poly * 0x1a;
+	while (n-- != 0) {
+		sum = sum + 0xc + ((TMD_MEM *)pP->pTmd)->n_poly * 0x14 + ((TMD_MEM *)pP->pTmd2)->n_poly * 0x1a;
+		pP++;
 	}
 	return sum;
 }
@@ -833,9 +802,8 @@ void Joint_pos_trans(ENEMY_WORK *pEm)
 	i = pEm->Parts_num;
 	do {
 		ko_joint_trans3(pEm, pP_ptr, pP_ptr->Be_flg, &pP_ptr->Workm);
-		i--;
 		pP_ptr++;
-	} while (i != 0);
+	} while (--i != 0);
 }
 
 /* Parts_down - 0x80028ad8
@@ -844,18 +812,16 @@ void Joint_pos_trans(ENEMY_WORK *pEm)
 /* DS 0x80028ad8 (Parts_down) */
 void Parts_down(PARTS_W *pP_ptr, MATRIX *wm)
 {
-	ENEMY_WORK *pEm;
+	ENEMY_WORK *pEm = G.pEm;
 	MATRIX M;
 	SVECTOR Sv;
-	MATRIX M0;
+	MATRIX M0[3];
 	LONG floor_y;
 	ULONG wall_hit;
-	UCHAR rnd;
-	MATRIX Frame_pad[2];
+	LONG rnd;
+	LONG neg_y;
 
-	(void)Frame_pad;
 
-	pEm = G.pEm;
 	if (pP_ptr->Timer3 == 0) {
 		Sv.vy = pP_ptr->Old_x;
 		Sv.vz = 0;
@@ -878,13 +844,12 @@ void Parts_down(PARTS_W *pP_ptr, MATRIX *wm)
 		if (floor_y < wm->t[1]) {
 			pP_ptr->Timer3--;
 			wm->t[1] = floor_y;
-			pP_ptr->Old_y = (SHORT)(-pP_ptr->Old_y) >> 2;
+			neg_y = pP_ptr->Old_y;
+			pP_ptr->Old_y = (SHORT)(-neg_y) >> 2;
 			pP_ptr->Old_x >>= 2;
 			pP_ptr->Old_z >>= 2;
-			rnd = Rnd();
-			Esp_call((pEm->Be_flg >> 0x13 & 0x18) << 0x10 | 2000,
-					 (SHORT)rnd << 4,
-					 &pP_ptr->Workm, NULL);
+			rnd = ((LONG (*)(VOID))Rnd)();
+			Esp_call((pEm->Be_flg >> 0x13 & 0x18) << 0x10 | 2000, rnd << 4, &pP_ptr->Workm, NULL);
 			if ((pP_ptr->Be_flg & 0x10) != 0) {
 				pP_ptr->Be_flg |= 0x2000;
 				pP_ptr->Size_x = 7000;
@@ -898,9 +863,7 @@ void Parts_down(PARTS_W *pP_ptr, MATRIX *wm)
 			}
 		}
 
-		wall_hit = Sca_ck_hit((VECTOR *)pP_ptr->Workm.t, 100,
-							  1 << (-(pP_ptr->Workm.t[1] / 0x708) & 0x1f),
-							  0x2000);
+		wall_hit = Sca_ck_hit((VECTOR *)pP_ptr->Workm.t, 100, 1 << (-(pP_ptr->Workm.t[1] / 0x708) & 0x1f), 0x2000);
 		if (wall_hit != 0) {
 			pP_ptr->Old_x >>= 2;
 			pP_ptr->Old_z >>= 2;
@@ -913,8 +876,8 @@ void Parts_down(PARTS_W *pP_ptr, MATRIX *wm)
 		Sv.vx = pP_ptr->Old_x2;
 		Sv.vy = pP_ptr->Old_y2;
 		Sv.vz = pP_ptr->Old_z2;
-		RotMatrix(&Sv, &M0);
-		HMatrix(&pP_ptr->Workm, &M0, &pP_ptr->Workm, (signed char)pP_ptr->Timer2 * -0x100 + 0x1000);
+		RotMatrix(&Sv, M0);
+		HMatrix(&pP_ptr->Workm, M0, &pP_ptr->Workm, 0x1000 - (signed char)pP_ptr->Timer2 * 0x100);
 		pP_ptr->Timer2--;
 	}
 }
@@ -930,15 +893,15 @@ void Parts_bomb(PARTS_W *pP_ptr)
 	SHORT new_cnt;
 	USHORT r;
 
-	if ((pP_ptr->Free[4] & 0x7fff) < 0x1d)
-		pP_ptr->Free[4]++;
-	else
+	if (((UINT)pP_ptr->Free[4] & 0x7fff) >= 0x1d)
 		pP_ptr->Be_flg = 0;
+	else
+		pP_ptr->Free[4]++;
 
-	Sv.vy = pP_ptr->Free[0];
 	new_cnt = pP_ptr->Free[1] + pP_ptr->Free[3];
 	pP_ptr->Free[1] = new_cnt;
 	pP_ptr->Workm.t[1] += (LONG)new_cnt;
+	Sv.vy = pP_ptr->Free[0];
 	Sv.vz = 0;
 	Sv.vx = 0;
 	RotMatrix(&Sv, &M);
@@ -1031,10 +994,14 @@ void HMatrix(MATRIX *pM0, MATRIX *pM1, MATRIX *pM2, ULONG Late)
 void HMatrix1(MATRIX *pM0, MATRIX *pM1, MATRIX *pM2, ULONG Late)
 {
 	SVECTOR Sv0;
-	/* DS: LoadAverageShort12 on m[0][0..2] (GPF12/GPL12 weighted average, writes only those three shorts) */
-	gte_LoadAverageShort12((SVECTOR *)pM0->m, (SVECTOR *)pM1->m, 0x1000 - Late, Late, (SVECTOR *)pM2->m);
+	ULONG inv;
+	SVECTOR *pSv;
+	inv = 0x1000 - Late;
 
-	gte_ldIR0((0x1000 - Late));
+	/* DS: LoadAverageShort12 on m[0][0..2] (GPF12/GPL12 weighted average, writes only those three shorts) */
+	gte_LoadAverageShort12((SVECTOR *)pM0->m, (SVECTOR *)pM1->m, inv, Late, (SVECTOR *)pM2->m);
+
+	gte_ldIR0((inv));
 	gte_ldsv((SVECTOR *)&pM0->m[1][1]);
 	gte_gpf12();
 	gte_ldIR0(Late);
@@ -1045,16 +1012,18 @@ void HMatrix1(MATRIX *pM0, MATRIX *pM1, MATRIX *pM2, ULONG Late)
 	Sv0.vx = pM0->m[1][0];
 	Sv0.vy = pM0->m[2][1];
 	Sv0.vz = pM0->m[2][2];
-	gte_ldIR0((0x1000 - Late));
-	gte_ldsv(&Sv0);
+	gte_ldIR0((inv));
+	/* DS: &Sv0 is formed after the first IR0 load (addiu s3,sp,0x10 follows mtc2), not before it */
+	pSv = &Sv0;
+	gte_ldsv(pSv);
 	gte_gpf12();
 	Sv0.vx = pM1->m[1][0];
 	Sv0.vy = pM1->m[2][1];
 	Sv0.vz = pM1->m[2][2];
 	gte_ldIR0(Late);
-	gte_ldsv(&Sv0);
+	gte_ldsv(pSv);
 	gte_gpl12();
-	gte_stsv(&Sv0);
+	gte_stsv(pSv);
 	pM2->m[1][0] = Sv0.vx;
 	pM2->m[2][1] = Sv0.vy;
 	pM2->m[2][2] = Sv0.vz;
@@ -1064,16 +1033,16 @@ void HMatrix1(MATRIX *pM0, MATRIX *pM1, MATRIX *pM2, ULONG Late)
 	Sv0.vx = (SHORT)pM0->t[0];
 	Sv0.vy = (SHORT)pM0->t[1];
 	Sv0.vz = (SHORT)pM0->t[2];
-	gte_ldIR0((0x1000 - Late));
-	gte_ldsv(&Sv0);
+	gte_ldIR0((inv));
+	gte_ldsv(pSv);
 	gte_gpf12();
 	Sv0.vx = (SHORT)pM1->t[0];
 	Sv0.vy = (SHORT)pM1->t[1];
 	Sv0.vz = (SHORT)pM1->t[2];
 	gte_ldIR0(Late);
-	gte_ldsv(&Sv0);
+	gte_ldsv(pSv);
 	gte_gpl12();
-	gte_stsv(&Sv0);
+	gte_stsv(pSv);
 	pM2->t[0] = (LONG)Sv0.vx;
 	pM2->t[1] = (LONG)Sv0.vy;
 	pM2->t[2] = (LONG)Sv0.vz;
@@ -1088,40 +1057,32 @@ void Model_color_plus(MODEL_WORK *pMw, ULONG Pluscolor_1, ULONG Pluscolor_2)
 {
 	ULONG n;
 	UCHAR *pgt3, *pgt4;
-	UCHAR g = (UCHAR)(Pluscolor_1 >> 8);
-	UCHAR b = (UCHAR)(Pluscolor_1 >> 16);
 
 	n = ((TMD_MEM *)pMw->pTmd)->n_poly;
-	if (n != 0) {
-		pgt3 = (UCHAR *)((int)pMw->pPacket + (UINT)G.Cbuf_id * 0x28 + 0x1e);
-		do {
-			n--;
-			pgt3[-0xe] = (UCHAR)Pluscolor_1;
-			pgt3[-0xd] = g;
-			pgt3[-0xc] = b;
-			pgt3[-2]   = (UCHAR)(((UINT)pgt3[-2]   + (Pluscolor_2 & 0xff))      >> 1);
-			pgt3[-1]   = (UCHAR)(((UINT)pgt3[-1]   + (Pluscolor_2 >> 8 & 0xff)) >> 1);
-			pgt3[0]    = (UCHAR)(((UINT)pgt3[0]    + (Pluscolor_2 >> 16 & 0xff))>> 1);
-			pgt3 += 0x50;
-		} while (n != 0);
+	pgt3 = (UCHAR *)((int)pMw->pPacket + (UINT)G.Cbuf_id * 0x28);
+	while (n-- != 0) {
+		pgt3[0x10] = (UCHAR)Pluscolor_1;
+		pgt3[0x11] = (UCHAR)(Pluscolor_1 >> 8);
+		pgt3[0x12] = (UCHAR)(Pluscolor_1 >> 16);
+		pgt3[0x1c] = (UCHAR)(((UINT)pgt3[0x1c] + (Pluscolor_2 & 0xff))       >> 1);
+		pgt3[0x1d] = (UCHAR)(((UINT)pgt3[0x1d] + (Pluscolor_2 >> 8 & 0xff))  >> 1);
+		pgt3[0x1e] = (UCHAR)(((UINT)pgt3[0x1e] + (Pluscolor_2 >> 16 & 0xff)) >> 1);
+		pgt3 += 0x50;
 	}
 
 	n = ((TMD_MEM *)pMw->pTmd2)->n_poly;
-	if (n != 0) {
-		pgt4 = (UCHAR *)((int)pMw->pPacket2 + (UINT)G.Cbuf_id * 0x34 + 0x2a);
-		do {
-			n--;
-			pgt4[-2]    = (UCHAR)Pluscolor_1;
-			pgt4[-1]    = g;
-			pgt4[0]     = b;
-			pgt4[-0x1a] = (UCHAR)(((UINT)pgt4[-0x1a] + (Pluscolor_1 & 0xff))       >> 1);
-			pgt4[-0x19] = (UCHAR)(((UINT)pgt4[-0x19] + (Pluscolor_1 >> 8 & 0xff))  >> 1);
-			pgt4[-0x18] = (UCHAR)(((UINT)pgt4[-0x18] + (Pluscolor_1 >> 16 & 0xff)) >> 1);
-			pgt4[-0xe]  = (UCHAR)(((UINT)pgt4[-0xe]  + (Pluscolor_2 & 0xff))        >> 1);
-			pgt4[-0xd]  = (UCHAR)(((UINT)pgt4[-0xd]  + (Pluscolor_2 >> 8 & 0xff))  >> 1);
-			pgt4[-0xc]  = (UCHAR)(((UINT)pgt4[-0xc]  + (Pluscolor_2 >> 16 & 0xff)) >> 1);
-			pgt4 += 0x68;
-		} while (n != 0);
+	pgt4 = (UCHAR *)((int)pMw->pPacket2 + (UINT)G.Cbuf_id * 0x34);
+	while (n-- != 0) {
+		pgt4[0x28] = (UCHAR)Pluscolor_1;
+		pgt4[0x29] = (UCHAR)(Pluscolor_1 >> 8);
+		pgt4[0x2a] = (UCHAR)(Pluscolor_1 >> 16);
+		pgt4[0x10] = (UCHAR)(((UINT)pgt4[0x10] + (Pluscolor_1 & 0xff))       >> 1);
+		pgt4[0x11] = (UCHAR)(((UINT)pgt4[0x11] + (Pluscolor_1 >> 8 & 0xff))  >> 1);
+		pgt4[0x12] = (UCHAR)(((UINT)pgt4[0x12] + (Pluscolor_1 >> 16 & 0xff)) >> 1);
+		pgt4[0x1c] = (UCHAR)(((UINT)pgt4[0x1c] + (Pluscolor_2 & 0xff))       >> 1);
+		pgt4[0x1d] = (UCHAR)(((UINT)pgt4[0x1d] + (Pluscolor_2 >> 8 & 0xff))  >> 1);
+		pgt4[0x1e] = (UCHAR)(((UINT)pgt4[0x1e] + (Pluscolor_2 >> 16 & 0xff)) >> 1);
+		pgt4 += 0x68;
 	}
 }
 
@@ -1135,6 +1096,8 @@ ULONG Joint_move(ENEMY_WORK *pEm, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_f
 	ULONG *seq_ptr;
 	UINT move_no;
 
+	/* f_num packs the frame count in its low half and the offset of the frame table in its high half.
+	 * A non-zero high half in Late_flg plays the motion backward, counting down from the last frame. */
 	f_num = *(UINT *)(Seq_t_ptr + (UINT)pEm->Move_no * 4);
 	if ((Late_flg & 0xffff0000) == 0)
 		move_no = (UINT)pEm->Move_cnt;
@@ -1146,6 +1109,10 @@ ULONG Joint_move(ENEMY_WORK *pEm, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_f
 	return J_seq(Kan_t_ptr, Seq_t_ptr, seq_ptr, Late_flg);
 }
 
+/* Rot_x and Rot_y are written together as one 32-bit word (DS: single sw at +0x7c). */
+#define ROT_XY(p) (*(UINT *)&(p)->Rot_x)
+#define CDIR_XY(p) (*(UINT *)&(p)->Cdir_x)
+
 /* J_seq - 0x80029614
    Core joint animation sequencer. Unpacks 12-bit packed rotation data
    into PARTS_W rotation fields, optionally lerps with previous frame
@@ -1155,6 +1122,8 @@ ULONG Joint_move(ENEMY_WORK *pEm, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_f
 /* DS 0x80029614 (J_seq) */
 ULONG J_seq(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 {
+	/* retail reserves 64 more bytes of locals (J_seq frame 120); never read */
+	volatile int Rsv[16];
 	ENEMY_WORK *pEm;
 	PARTS_W *pP_base;
 	PARTS_W *pP_walk;
@@ -1163,6 +1132,7 @@ ULONG J_seq(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 	UINT *pRot_w1;
 	UINT *pRot_w2;
 	UINT Pk_w;
+	USHORT Rot_z;
 	UINT Dif_x;
 	UINT Hk_flg;
 	UINT Parts_cnt;
@@ -1175,29 +1145,26 @@ ULONG J_seq(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 	SHORT *r0_00;
 	VECTOR *r0;
 	VECTOR TV0l;
-	MATRIX Frame_pad[2];
 
-	(void)Frame_pad;
 	pEm = G.pEm;
-	pFrame = (int *)(Kan_t_ptr + ((KAN_HEAD *)Kan_t_ptr)->Bone_ofs +
-					 (*(UINT *)&((KAN_HEAD *)Kan_t_ptr)->Parts_cnt >> 0x12) * (*pSeq_ptr & 0xfff) * 4);
+	pFrame = (int *)(Kan_t_ptr + ((KAN_HEAD *)Kan_t_ptr)->Bone_ofs + (*(UINT *)&((KAN_HEAD *)Kan_t_ptr)->Parts_cnt >> 0x12) * (*pSeq_ptr & 0xfff) * 4);
 	Ipol_w = ((KAN_FRAME *)pFrame)->Pos_y * (int)pEm->Parts0_pos_y;
-	pP_base = pEm->pSin_parts_ptr;
+	pP_walk = pEm->pSin_parts_ptr;
 	Mv_frames = (UINT)*(USHORT *)((UINT)pEm->Move_no * 4 + Seq_t_ptr);
-	pP_base->Pos_x = (int)((KAN_FRAME *)pFrame)->Pos_x;
-	pP_base->Pos_y = Ipol_w >> 0xc;
-	pP_base->Pos_z = (int)((KAN_FRAME *)pFrame)->Pos_z;
+	pP_walk->Pos_x = (int)((KAN_FRAME *)pFrame)->Pos_x;
+	pP_walk->Pos_y = Ipol_w >> 0xc;
+	pP_walk->Pos_z = (int)((KAN_FRAME *)pFrame)->Pos_z;
+	pP_base = pP_walk;
 	Parts_cnt = (UINT)((KAN_HEAD *)Kan_t_ptr)->Parts_cnt;
 	Hk_flg = (UINT)pEm->Hokan_flg;
-	pP_walk = pP_base;
 	Parts_left = Parts_cnt;
 	if (Hk_flg != 0) {
 		Ipol_w = (Late_flg & 0xffff) * Hk_flg;
-		TV0l.vx = (LONG)pP_base->Old_x;
-		TV0l.vy = (LONG)pP_base->Old_y;
-		TV0l.vz = (LONG)pP_base->Old_z;
+		TV0l.vx = (LONG)pP_walk->Old_x;
+		TV0l.vy = (LONG)pP_walk->Old_y;
+		TV0l.vz = (LONG)pP_walk->Old_z;
 		gte_ldIR0(0x1000 - Ipol_w);
-		r0 = (VECTOR *)&pP_base->Pos_x;
+		r0 = (VECTOR *)&pP_walk->Pos_x;
 		gte_ldlvl(r0);
 		gte_gpf12();
 		gte_ldIR0(Ipol_w);
@@ -1209,90 +1176,101 @@ ULONG J_seq(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 	pP_walk->Old_x = (SHORT)pP_walk->Pos_x;
 	pP_walk->Old_y = (SHORT)pP_walk->Pos_y;
 	pP_walk->Old_z = (SHORT)pP_walk->Pos_z;
-	do {
+	/* DS unpacks eight parts per pass without hoisting the mask constants out of the pass;
+	   a backward goto keeps the loop optimiser from hoisting them here as well. */
+Rot_top:
+	for (;;) {
 		Pk_w = (*pRot_w & 0xfff) | ((*pRot_w & 0xfff000) << 4);
-		pP_walk->Rot_x = (SHORT)Pk_w;
-		pP_walk->Rot_y = (SHORT)(Pk_w >> 0x10);
-		pRot_w1 = pRot_w + 1;
-		pP_walk->Rot_z = (USHORT)((KAN_ROT_LANES *)pRot_w)->Unk_03 | (USHORT)((*pRot_w1 & 0xf) << 8);
-		if (Parts_left == 1) {
+		ROT_XY(pP_walk) = Pk_w;
+		Rot_z = (USHORT)((KAN_ROT_LANES *)pRot_w)->Unk_03;
+		pRot_w++;
+		pP_walk->Rot_z = Rot_z | (USHORT)((*pRot_w & 0xf) << 8);
+		pP_walk++;
+		if (--Parts_left == 0) {
 			break;
 		}
-		Pk_w = ((*pRot_w1 & 0xfff0) >> 4) | (*pRot_w1 & 0xfff0000);
-		pP_walk[1].Rot_x = (SHORT)Pk_w;
-		pP_walk[1].Rot_y = (SHORT)(Pk_w >> 0x10);
-		pP_walk[1].Rot_z = (USHORT)(*pRot_w1 >> 0x1c) | (USHORT)(UCHAR)pRot_w[2] << 4;
-		if (Parts_left == 2) {
+		Pk_w = ((*pRot_w & 0xfff0) >> 4) | (*pRot_w & 0xfff0000);
+		ROT_XY(pP_walk) = Pk_w;
+		Rot_z = (USHORT)(*pRot_w >> 0x1c);
+		pRot_w++;
+		pP_walk->Rot_z = Rot_z | (USHORT)(UCHAR)*pRot_w << 4;
+		pP_walk++;
+		if (--Parts_left == 0) {
 			break;
 		}
-		Pk_w = pRot_w[2];
+		Pk_w = *pRot_w;
+		pRot_w++;
 		Pk_w = ((Pk_w & 0xfff00) >> 8) | ((Pk_w & 0xfff00000) >> 4);
-		pP_walk[2].Rot_x = (SHORT)Pk_w;
-		pP_walk[2].Rot_y = (SHORT)(Pk_w >> 0x10);
-		pP_walk[2].Rot_z = (USHORT)pRot_w[3] & 0xfff;
-		if (Parts_left == 3) {
+		ROT_XY(pP_walk) = Pk_w;
+		pP_walk->Rot_z = (USHORT)*pRot_w & 0xfff;
+		pP_walk++;
+		if (--Parts_left == 0) {
 			break;
 		}
-		Pk_w = pRot_w[3];
-		pRot_w1 = pRot_w + 4;
-		Pk_w = ((Pk_w & 0xfff000) >> 0xc) | ((Pk_w & 0xff000000) >> 8) | ((*pRot_w1 & 0xf) << 0x18);
-		pP_walk[3].Rot_x = (SHORT)Pk_w;
-		pP_walk[3].Rot_y = (SHORT)(Pk_w >> 0x10);
-		pP_walk[3].Rot_z = (SHORT)((*pRot_w1 & 0xfff0) >> 4);
-		if (Parts_left == 4) {
+		Pk_w = *pRot_w;
+		pRot_w++;
+		Pk_w = ((Pk_w & 0xfff000) >> 0xc) | ((Pk_w & 0xff000000) >> 8) | ((*pRot_w & 0xf) << 0x18);
+		ROT_XY(pP_walk) = Pk_w;
+		pP_walk->Rot_z = (SHORT)((*pRot_w & 0xfff0) >> 4);
+		pP_walk++;
+		if (--Parts_left == 0) {
 			break;
 		}
-		pRot_w2 = pRot_w + 5;
-		Pk_w = ((*pRot_w1 & 0xfff0000) >> 0x10) | ((*pRot_w1 & 0xf0000000) >> 0xc) | ((UINT)(UCHAR)*pRot_w2 << 0x14);
-		pP_walk[4].Rot_x = (SHORT)Pk_w;
-		pP_walk[4].Rot_y = (SHORT)(Pk_w >> 0x10);
-		pP_walk[4].Rot_z = (USHORT)(*pRot_w2 >> 8) & 0xfff;
-		if (Parts_left == 5) {
+		Pk_w = *pRot_w;
+		pRot_w++;
+		Pk_w = ((int)(Pk_w & 0xfff0000) >> 0x10) | ((Pk_w & 0xf0000000) >> 0xc) | ((UINT)(UCHAR)*pRot_w << 0x14);
+		ROT_XY(pP_walk) = Pk_w;
+		pP_walk->Rot_z = (USHORT)((*pRot_w & 0xfff00) >> 8);
+		pP_walk++;
+		if (--Parts_left == 0) {
 			break;
 		}
-		Pk_w = (*pRot_w2 >> 0x14) | ((pRot_w[6] & 0xfff) << 0x10);
-		pP_walk[5].Rot_x = (SHORT)Pk_w;
-		pP_walk[5].Rot_y = (SHORT)(Pk_w >> 0x10);
-		pP_walk[5].Rot_z = (SHORT)((pRot_w[6] & 0xfff000) >> 0xc);
-		if (Parts_left == 6) {
+		Pk_w = *pRot_w;
+		pRot_w++;
+		Pk_w = (Pk_w >> 0x14) | ((*pRot_w & 0xfff) << 0x10);
+		ROT_XY(pP_walk) = Pk_w;
+		pP_walk->Rot_z = (SHORT)((*pRot_w & 0xfff000) >> 0xc);
+		pP_walk++;
+		if (--Parts_left == 0) {
 			break;
 		}
-		pRot_w1 = pRot_w + 7;
-		Pk_w = (UINT)((KAN_ROT_LANES *)&pRot_w[6])->Unk_03 | ((*pRot_w1 & 0xf) << 8) | ((*pRot_w1 & 0xfff0) << 0xc);
-		pP_walk[6].Rot_x = (SHORT)Pk_w;
-		pP_walk[6].Rot_y = (SHORT)(Pk_w >> 0x10);
-		pP_walk[6].Rot_z = (USHORT)(*pRot_w1 >> 0x10) & 0xfff;
-		if (Parts_left == 7) {
+		Pk_w = (UINT)((KAN_ROT_LANES *)pRot_w)->Unk_03;
+		pRot_w++;
+		Pk_w = Pk_w | ((*pRot_w & 0xf) << 8) | ((*pRot_w & 0xfff0) << 0xc);
+		ROT_XY(pP_walk) = Pk_w;
+		pP_walk->Rot_z = (USHORT)((*pRot_w & 0xfff0000) >> 0x10);
+		pP_walk++;
+		if (--Parts_left == 0) {
 			break;
 		}
-		pRot_w2 = pRot_w + 8;
-		Parts_left -= 8;
-		Pk_w = *pRot_w2;
-		Pk_w = (*pRot_w1 >> 0x1c) | ((Pk_w & 0xff) << 4) | ((Pk_w & 0xfff00) << 8);
-		pP_walk[7].Rot_x = (SHORT)Pk_w;
-		pP_walk[7].Rot_y = (SHORT)(Pk_w >> 0x10);
-		pRot_w += 9;
-		pP_walk[7].Rot_z = (USHORT)(*pRot_w2 >> 0x14);
-		pP_walk += 8;
-	} while (Parts_left != 0);
+		Pk_w = *pRot_w;
+		pRot_w++;
+		Pk_w = (Pk_w >> 0x1c) | ((*pRot_w & 0xff) << 4) | ((*pRot_w & 0xfff00) << 8);
+		ROT_XY(pP_walk) = Pk_w;
+		Rot_z = (USHORT)(*pRot_w >> 0x14);
+		pRot_w++;
+		pP_walk->Rot_z = Rot_z;
+		pP_walk++;
+		if (--Parts_left != 0) {
+			goto Rot_top;
+		}
+		break;
+	}
 
 	pP_walk = pP_base;
 	Parts_left = Parts_cnt;
 	if (Hk_flg == 0) {
 		do {
 			Parts_cnt--;
-			pP_base->Cdir_x = pP_base->Rot_x;
-			pP_base->Cdir_y = pP_base->Rot_y;
+			CDIR_XY(pP_base) = ROT_XY(pP_base);
 			pP_base->Cdir_z = pP_base->Rot_z;
 			pP_base++;
 		} while (Parts_cnt != 0);
 	} else {
 		pEm->Hokan_flg += 0xff;
 		do {
-			Hk_flg = (USHORT)pP_base->Cdir_x | ((UINT)(USHORT)pP_base->Cdir_y << 16);
+			CDIR_XY(pP_base) &= 0xfff0fff;
 			Pk_w = (USHORT)pP_base->Cdir_z & 0xfff;
-			pP_base->Cdir_x = (SHORT)(Hk_flg & 0xfff0fff);
-			pP_base->Cdir_y = (SHORT)((Hk_flg & 0xfff0fff) >> 0x10);
 			pP_base->Cdir_z = (SHORT)Pk_w;
 			gte_ldIR0(Ipol_w);
 			gte_ldsv((SVECTOR *)&pP_base->Cdir_x);
@@ -1339,11 +1317,12 @@ ULONG J_seq(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 	} while (Parts_left != 0);
 	Mv_cnt_nx = pEm->Move_cnt + 1;
 	pEm->Move_cnt = Mv_cnt_nx;
-	Mv_end = (Mv_frames <= Mv_cnt_nx);
-	if (Mv_end) {
+	Mv_end = 0;
+	if (Mv_cnt_nx >= Mv_frames) {
 		pEm->Move_cnt = 0;
+		Mv_end = 1;
 	}
-	return (UINT)Mv_end;
+	return Mv_end;
 }
 
 /* hokan_svec - 0x80029b70
@@ -1354,35 +1333,31 @@ ULONG J_seq(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 void hokan_svec(SVECTOR *sv0, SVECTOR *sv1, SVECTOR *sv2, ULONG late)
 {
 	ULONG vx, vy, vz;
-	SHORT clamp;
+	ULONG tmpz;
+	LONG cv;
 
 	/* mask sv0 to 12-bit signed */
-	{
-		ULONG tmp = (USHORT)sv0->vx | ((UINT)(USHORT)sv0->vy << 16);
-		ULONG tmpz = (USHORT)sv0->vz & 0xfff;
-		sv0->vx = (SHORT)(tmp & 0xfff0fff);
-		sv0->vy = (SHORT)((tmp & 0xfff0fff) >> 0x10);
-		sv0->vz = (SHORT)tmpz;
-		vx = ((int)sv1->vx - (int)sv0->vx) + 0x800;
-		vz = ((int)sv1->vz - tmpz) + 0x800;
-		vy = ((int)sv1->vy - (int)sv0->vy) + 0x800;
-	}
-
-	if (0x1000 < vx) {
-		clamp = (vx & 0x8000) == 0 ? -0x1000 : 0x1000;
-		sv1->vx += clamp;
-	}
-	if (0x1000 < vy) {
-		clamp = (vy & 0x8000) == 0 ? -0x1000 : 0x1000;
-		sv1->vy += clamp;
-	}
-	if (0x1000 < vz) {
-		clamp = (vz & 0x8000) == 0 ? -0x1000 : 0x1000;
-		sv1->vz += clamp;
-	}
-
+	*(UINT *)sv0 &= 0xfff0fff;
+	tmpz = (USHORT)sv0->vz & 0xfff;
+	sv0->vz = (SHORT)tmpz;
 	gte_ldIR0(0x1000 - late);
 	gte_ldsv(sv0);
+	vx = ((int)sv1->vx - (int)sv0->vx) + 0x800;
+	vz = ((int)sv1->vz - tmpz) + 0x800;
+	vy = ((int)sv1->vy - (int)sv0->vy) + 0x800;
+
+	if (0x1000 < vx) {
+		sv1->vx = (vx & 0x8000) == 0 ? sv1->vx - 0x1000 : sv1->vx + 0x1000;
+	}
+	if (0x1000 < vy) {
+		cv = sv1->vy;
+		sv1->vy = (vy & 0x8000) == 0 ? cv - 0x1000 : cv + 0x1000;
+	}
+	if (0x1000 < vz) {
+		cv = sv1->vz;
+		sv1->vz = (vz & 0x8000) == 0 ? cv - 0x1000 : cv + 0x1000;
+	}
+
 	gte_gpf12_b();
 	gte_ldIR0(late);
 	gte_ldsv(sv1);
@@ -1402,8 +1377,10 @@ void Pl_set_packet(void)
 {
 	PARTS_W *pPart;
 	MODEL_WORK *pMw;
+	ULONG **ppuPk;
+	ULONG *G_packet;
 	ULONG *Save_tmd, *Save_tmd2, *Save_pac, *Save_pac2;
-	UINT i;
+	UINT n;
 
 	if (G.Player.pTmd != NULL) {
 		pPart = G.Player.pSin_parts_ptr;
@@ -1415,10 +1392,18 @@ void Pl_set_packet(void)
 		pPart[0xb].pTmd2    = (ULONG *)gpPl_tmd2_ptr;
 		pPart[0xb].pPacket  = (ULONG *)gpPl_pac_ptr;
 		pPart[0xb].pPacket2 = (ULONG *)gpPl_pac2_ptr;
-		for (i = 0; i < G.Player.Parts_num; i++) {
-			pMw = (MODEL_WORK *)&pPart[i].Attribute;
-			PresetObjectGT3_neo(pMw, pPart[i].pPacket, 1);
-			PresetObjectGT4_neo(pMw, pPart[i].pPacket2, 1);
+		n = G.Player.Parts_num;
+		if (n != 0) {
+			ppuPk = (ULONG **)&pPart->pPacket2;
+			do {
+				n--;
+				pMw = (MODEL_WORK *)&pPart->Attribute;
+				pPart++;
+				PresetObjectGT3_neo(pMw, ppuPk[-2], 1);
+				G_packet = *ppuPk;
+				ppuPk += 0x2b;
+				PresetObjectGT4_neo(pMw, G_packet, 1);
+			} while (n != 0);
 		}
 		pPart = G.Player.pSin_parts_ptr;
 		pPart[0xb].pTmd     = Save_tmd;
@@ -1426,8 +1411,7 @@ void Pl_set_packet(void)
 		pPart[0xb].pPacket  = Save_pac;
 		pPart[0xb].pPacket2 = Save_pac2;
 		if ((G.Player.Id == 0 || G.Player.Id == 2) && Flg_ck(G.SaveData.Common_flg, 0x3e) != 0) {
-			Texture_Move((MODEL_WORK *)&G.Player.pSin_parts_ptr->Attribute,
-						 G.Player.Tpage + 2, 0, G.Player.Clut + 0x1e2);
+			Texture_Move((MODEL_WORK *)&G.Player.pSin_parts_ptr->Attribute, G.Player.Tpage + 2, 0, G.Player.Clut + 0x1e2);
 		}
 	}
 }
@@ -1442,13 +1426,17 @@ void Pl_set_packet(void)
 /* DS 0x80029e10 (Joint_move_p) */
 ULONG Joint_move_p(JOINT_P *pJp, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_flg)
 {
+	/* retail reserves 8 more bytes of locals (Joint_move_p frame 104); never read */
+	volatile int Rsv[2];
 	UINT   f_num;
 	UINT   sel;
 	UINT   mask;
 	UINT   seq_word;
 	UINT  *pRot_w;
 	UINT   Prt_mask, Pk_w, Parts_left, On_bits, Parts_cnt;
-	int    Fr_adr, Rot_adr, Ipol_inv;
+	int    Fr_adr, Ipol_inv;
+	UINT  *pRot_a;
+	SHORT *pRot_s;
 	ULONG  Ipol_w;
 	UINT   Hk_flg;
 	UINT   Mv_frames;
@@ -1458,12 +1446,9 @@ ULONG Joint_move_p(JOINT_P *pJp, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_fl
 	MATRIX *pMtx;
 	SVECTOR *r0;
 	SHORT   Cur_v, Step_z;
-	UINT    flg;
 	UINT    cdir_y;
 	UINT    dx, dy, dz;
-	ULONG   Frame_pad[6];		/* retail never reads 0x10-0x1f, 0x24, 0x2c, 0x34 (its spills are 0x20, 0x28, 0x30, 0x38, 0x3c) */
 
-	(void)Frame_pad;
 	f_num = *(UINT *)(Seq_t_ptr + (UINT)pJp->Move_no * 4);
 	if ((Late_flg & 0xffff0000) == 0)
 		sel = (UINT)pJp->Move_cnt;
@@ -1477,11 +1462,11 @@ ULONG Joint_move_p(JOINT_P *pJp, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_fl
 	mask    = 0xfff0000;
 	pRot_w  = (UINT *)&((KAN_FRAME *)Fr_adr)->Unk_0c;
 	Hk_flg = (UINT)pJp->Hokan_flg;
-	Rot_adr  = (int)&((KAN_FRAME *)Fr_adr)->Unk_08;
+	pRot_a  = pRot_w - 1;
 	Prt_mask   = (UINT)pJp->P0_parts_no;
 	On_bits  = pJp->On_parts_flg;
 	pP_cur = G.pEm->pSin_parts_ptr;
-	pGrp = pP_cur;
+	pRot_s = &pP_cur->Rot_z;
 	Mv_frames = (UINT)*(USHORT *)((UINT)pJp->Move_no * 4 + Seq_t_ptr);
 	pJp->P0_m.t[1] = (LONG)((int)((KAN_FRAME *)Fr_adr)->Pos_y * (int)G.pEm->Parts0_pos_y >> 12);
 	Parts_cnt = (UINT)((KAN_HEAD *)Kan_t_ptr)->Parts_cnt;
@@ -1490,65 +1475,87 @@ ULONG Joint_move_p(JOINT_P *pJp, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_fl
 
 	do {
 		if ((On_bits & 1) != 0) {
-			*(UINT *)&pGrp[0].Rot_x = (*pRot_w & 0xfff) | (*pRot_w & 0xfff000) << 4;
-			pGrp[0].Rot_z = (USHORT)((KAN_ROT_LANES *)pRot_w)->Unk_03 | (USHORT)((((KAN_ROT_GRP *)Rot_adr)->Unk_08 & 0xf) << 8);
+			*(UINT *)(pRot_s - 2) = (*pRot_w & 0xfff) | (*pRot_w & 0xfff000) << 4;
+			*pRot_s = (USHORT)((KAN_ROT_LANES *)pRot_w)->Unk_03 | (USHORT)((pRot_a[2] & 0xf) << 8);
 		}
 		if (Prt_mask == 0) {
-			Prt_mask = (*pRot_w & 0xfff) | (*pRot_w & 0xfff000) << 4;
-			pJp->P0_sv.vx = (SHORT)Prt_mask;
-			pJp->P0_sv.vy = (SHORT)(Prt_mask >> 0x10);
-			pJp->P0_sv.vz = (USHORT)((KAN_ROT_LANES *)pRot_w)->Unk_03 | (USHORT)((((KAN_ROT_GRP *)Rot_adr)->Unk_08 & 0xf) << 8);
-			flg = 0xffffffff;
+			*(UINT *)&pJp->P0_sv.vx = (*pRot_w & 0xfff) | (*pRot_w & 0xfff000) << 4;
+			pJp->P0_sv.vz = (USHORT)((KAN_ROT_LANES *)pRot_w)->Unk_03 | (USHORT)((pRot_a[2] & 0xf) << 8);
+			Prt_mask = 0xffffffff;
 			RotMatrix(&pJp->P0_sv, &pJp->P0_m);
-			Prt_mask = flg;
 		}
-		if (Parts_left == 1) break;
-		if ((On_bits >> 1 & 1) != 0) {
-			Pk_w = pRot_w[1];
-			*(UINT *)&pGrp[1].Rot_x = (Pk_w & 0xfff0) >> 4 | (Pk_w & mask);
-			pGrp[1].Rot_z = (USHORT)(pRot_w[1] >> 0x1c) | (USHORT)((KAN_ROT_LANES *)&((KAN_ROT_GRP *)Rot_adr)->Unk_0c)->Unk_00 << 4;
+		On_bits >>= 1;
+		pRot_a++;
+		pRot_w++;
+		pRot_s += 0x56;
+		if (--Parts_left == 0) break;
+		if ((On_bits & 1) != 0) {
+			Pk_w = *pRot_w;
+			*(UINT *)(pRot_s - 2) = (Pk_w & 0xfff0) >> 4 | (Pk_w & mask);
+			*pRot_s = (USHORT)(*pRot_w >> 0x1c) | (USHORT)((KAN_ROT_LANES *)&pRot_a[2])->Unk_00 << 4;
 		}
-		if (Parts_left == 2) break;
-		if ((On_bits >> 2 & 1) != 0) {
-			*(UINT *)&pGrp[2].Rot_x = ((pRot_w[2] << 0xc) >> 0x14) | ((pRot_w[2] & 0xfff00000) >> 4);
-			pGrp[2].Rot_z = (USHORT)((KAN_ROT_GRP *)Rot_adr)->Unk_10 & 0xfff;
+		On_bits >>= 1;
+		pRot_a++;
+		pRot_w++;
+		pRot_s += 0x56;
+		if (--Parts_left == 0) break;
+		if ((On_bits & 1) != 0) {
+			*(UINT *)(pRot_s - 2) = ((*pRot_w << 0xc) >> 0x14) | ((*pRot_w & 0xfff00000) >> 4);
+			*pRot_s = (USHORT)pRot_a[2] & 0xfff;
 		}
-		if (Parts_left == 3) break;
-		if ((On_bits >> 3 & 1) != 0) {
-			*(UINT *)&pGrp[3].Rot_x =
-				((pRot_w[3] & 0xfff000) >> 0xc) |
-				((pRot_w[3] & 0xff000000) >> 8) | ((((KAN_ROT_GRP *)Rot_adr)->Unk_14 & 0xf) << 0x18);
-			pGrp[3].Rot_z = (SHORT)((((KAN_ROT_GRP *)Rot_adr)->Unk_14 & 0xfff0) >> 4);
+		On_bits >>= 1;
+		pRot_a++;
+		pRot_w++;
+		pRot_s += 0x56;
+		if (--Parts_left == 0) break;
+		if ((On_bits & 1) != 0) {
+			*(UINT *)(pRot_s - 2) = ((*pRot_w & 0xfff000) >> 0xc) | ((*pRot_w & 0xff000000) >> 8) | ((pRot_a[2] & 0xf) << 0x18);
+			*pRot_s = (SHORT)((pRot_a[2] & 0xfff0) >> 4);
 		}
-		if (Parts_left == 4) break;
-		if ((On_bits >> 4 & 1) != 0) {
-			*(UINT *)&pGrp[4].Rot_x =
-				((int)(pRot_w[4] & mask) >> 0x10) |
-				((pRot_w[4] & 0xf0000000) >> 0xc) | ((UINT)((KAN_ROT_LANES *)&((KAN_ROT_GRP *)Rot_adr)->Unk_18)->Unk_00 << 0x14);
-			pGrp[4].Rot_z = (USHORT)(((UINT)(((KAN_ROT_GRP *)Rot_adr)->Unk_18 << 0xc)) >> 0x14);
+		On_bits >>= 1;
+		pRot_a++;
+		pRot_w++;
+		pRot_s += 0x56;
+		if (--Parts_left == 0) break;
+		if ((On_bits & 1) != 0) {
+			*(UINT *)(pRot_s - 2) = ((int)(*pRot_w & mask) >> 0x10) | ((*pRot_w & 0xf0000000) >> 0xc) | ((UINT)((KAN_ROT_LANES *)&pRot_a[2])->Unk_00 << 0x14);
+			*pRot_s = (USHORT)((UINT)(pRot_a[2] << 0xc) >> 0x14);
 		}
-		if (Parts_left == 5) break;
-		if ((On_bits >> 5 & 1) != 0) {
-			*(UINT *)&pGrp[5].Rot_x = (pRot_w[5] >> 0x14) | ((((KAN_ROT_GRP *)Rot_adr)->Unk_1c & 0xfff) << 0x10);
-			pGrp[5].Rot_z = (SHORT)((((KAN_ROT_GRP *)Rot_adr)->Unk_1c & 0xfff000) >> 0xc);
+		On_bits >>= 1;
+		pRot_a++;
+		pRot_w++;
+		pRot_s += 0x56;
+		if (--Parts_left == 0) break;
+		if ((On_bits & 1) != 0) {
+			*(UINT *)(pRot_s - 2) = (*pRot_w >> 0x14) | ((pRot_a[2] & 0xfff) << 0x10);
+			*pRot_s = (SHORT)((pRot_a[2] & 0xfff000) >> 0xc);
 		}
-		if (Parts_left == 6) break;
-		if ((On_bits >> 6 & 1) != 0) {
-			Pk_w = pRot_w[7];
-			*(UINT *)&pGrp[6].Rot_x = ((UINT)((KAN_ROT_LANES *)&((KAN_ROT_GRP *)Rot_adr)->Unk_1c)->Unk_03) | ((Pk_w & 0xf) << 8) | ((Pk_w & 0xfff0) << 0xc);
-			pGrp[6].Rot_z = (USHORT)(pRot_w[7] >> 0x10) & (USHORT)(mask >> 0x10);
+		On_bits >>= 1;
+		pRot_a++;
+		pRot_w++;
+		pRot_s += 0x56;
+		if (--Parts_left == 0) break;
+		pRot_a++;
+		pRot_w++;
+		if ((On_bits & 1) != 0) {
+			Pk_w = *pRot_w;
+			*(UINT *)(pRot_s - 2) = ((UINT)((KAN_ROT_LANES *)pRot_a)->Unk_03) | ((Pk_w & 0xf) << 8) | ((Pk_w & 0xfff0) << 0xc);
+			*pRot_s = (SHORT)((*pRot_w & mask) >> 0x10);
 		}
-		if (Parts_left == 7) break;
-		if ((On_bits >> 7 & 1) != 0) {
-			Pk_w = pRot_w[8];
-			*(UINT *)&pGrp[7].Rot_x = (((KAN_ROT_GRP *)Rot_adr)->Unk_20 >> 0x1c) | ((Pk_w & 0xff) << 4) | ((Pk_w & 0xfff00) << 8);
-			pGrp[7].Rot_z = (USHORT)(pRot_w[8] >> 0x14);
+		On_bits >>= 1;
+		pRot_s += 0x56;
+		if (--Parts_left == 0) break;
+		pRot_w++;
+		if ((On_bits & 1) != 0) {
+			Pk_w = *pRot_w;
+			*(UINT *)(pRot_s - 2) = (pRot_a[1] >> 0x1c) | ((Pk_w & 0xff) << 4) | ((Pk_w & 0xfff00) << 8);
+			*pRot_s = (USHORT)(*pRot_w >> 0x14);
 		}
-		On_bits >>= 8;
-		Rot_adr = Rot_adr + 9 * sizeof(UINT);
-		pRot_w += 9;
-		Parts_left -= 8;
-		pGrp += 8;
+		On_bits >>= 1;
+		pRot_a += 2;
+		pRot_w++;
+		Parts_left--;
+		pRot_s += 0x56;
 	} while (Parts_left != 0);
 
 	Prt_mask = pJp->On_parts_flg;
@@ -1557,9 +1564,8 @@ ULONG Joint_move_p(JOINT_P *pJp, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_fl
 		do {
 			if ((Prt_mask & 1) != 0) {
 				/* carry the current values into pMtx[2] before rebuilding the matrix */
-				SHORT cur_y = pMtx[3].m[1][1];
 				*(UINT *)&pMtx[2].m[2][2] = *(UINT *)&pMtx[3].m[0][2];
-				*(SHORT *)pMtx[2].t = cur_y;
+				((SHORT *)&pMtx[2].m[2][2])[2] = pMtx[3].m[1][1];
 				RotMatrix((SVECTOR *)&pP_cur->Rot_x, pMtx);
 			}
 			Prt_mask >>= 1;
@@ -1576,15 +1582,15 @@ ULONG Joint_move_p(JOINT_P *pJp, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_fl
 			if ((Prt_mask & 1) != 0) {
 				/* hokan: interpolate the stored Cdir toward the new Rot.
 				   The stored Cdir fields are 12-bit: mask them before taking deltas. */
-				cdir_y = (USHORT)pMtx[2].t[0] & 0xfff;
+				cdir_y = (USHORT)((SHORT *)&pMtx[2].m[2][2])[2] & 0xfff;
 				*(UINT *)&pMtx[2].m[2][2] &= 0xfff0fff;
-				*(SHORT *)pMtx[2].t = (SHORT)cdir_y;
+				((SHORT *)&pMtx[2].m[2][2])[2] = (SHORT)cdir_y;
 				gte_ldIR0((int)Ipol_w);
 				gte_ldsv(r0);
 				Cur_v = pMtx[3].m[0][2];
 				dz = ((int)Cur_v - (int)pMtx[2].m[2][2]) + 0x800;
 				dy = ((int)pMtx[3].m[1][1] - (int)*(short *)pMtx[2].t) + 0x800;
-				dx = ((int)pMtx[3].m[1][0] - (int)pP_cur->Cdir_y) + 0x800;
+				dx = ((int)pMtx[3].m[1][0] - (int)((SHORT *)&pMtx[2].m[2][2])[1]) + 0x800;
 				if (0x1000 < dz) {
 					Step_z = (dz & 0x8000) == 0 ? -0x1000 : 0x1000;
 					pMtx[3].m[0][2] = Cur_v + Step_z;
@@ -1632,6 +1638,7 @@ ULONG Joint_move2(ENEMY_WORK *pEm, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_
 	ULONG *seq_ptr;
 	UINT move_no;
 
+	/* same frame lookup as Joint_move: the high half of Late_flg selects backward playback */
 	f_num = *(UINT *)(Seq_t_ptr + (UINT)pEm->Move_no * 4);
 	if ((Late_flg & 0xffff0000) == 0)
 		move_no = (UINT)pEm->Move_cnt;
@@ -1661,23 +1668,21 @@ ULONG J_seq2(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 	int *pFrame;
 	UINT *pRot_w;
 	short *pRot_s;
-	int Parts_left, Ipol_w;
+	int Parts_left, Ipol_w, Fr_w;
 	ULONG Pk_w, Hk_flg, Parts_cnt, Mv_frames;
-	MATRIX *pM2;
 	ULONG TV0_old[3];   /* Old_x/y/z save */
 	MATRIX M0;
 	MATRIX M1;
-	SHORT *pRot;
-	ULONG Frame_pad[30];		/* retail reserves 0x100 bytes; only the low locals are used */
+	/* retail reserves 128 more bytes of locals above M1 (J_seq2 frame 256); never read */
+	volatile int Rsv[32];
 
-	(void)Frame_pad;
 	pEm = G.pEm;
-	pFrame = (int *)(Kan_t_ptr + ((KAN_HEAD *)Kan_t_ptr)->Bone_ofs +
-					 (*(UINT *)&((KAN_HEAD *)Kan_t_ptr)->Parts_cnt >> 0x12) * (*pSeq_ptr & 0xfff) * 4);
-	Ipol_w = ((KAN_FRAME *)pFrame)->Pos_y * (int)pEm->Parts0_pos_y;
+	pFrame = (int *)(Kan_t_ptr + ((KAN_HEAD *)Kan_t_ptr)->Bone_ofs + (*(UINT *)&((KAN_HEAD *)Kan_t_ptr)->Parts_cnt >> 0x12) * (*pSeq_ptr & 0xfff) * 4);
+	Fr_w = *pFrame;
+	Ipol_w = (Fr_w >> 0x10) * (int)pEm->Parts0_pos_y;
 	pP_ptr = pEm->pSin_parts_ptr;
 	Mv_frames = (UINT)*(USHORT *)((UINT)pEm->Move_no * 4 + Seq_t_ptr);
-	pP_ptr->Pos_x = (int)((KAN_FRAME *)pFrame)->Pos_x;
+	pP_ptr->Pos_x = (SHORT)Fr_w;
 	pP_ptr->Pos_y = Ipol_w >> 0xc;
 	pP_ptr->Pos_z = (int)((KAN_FRAME *)pFrame)->Pos_z;
 	Hk_flg = (UINT)pEm->Hokan_flg;
@@ -1703,11 +1708,11 @@ ULONG J_seq2(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 	pP_ptr->Old_z = (SHORT)pP_ptr->Pos_z;
 
 	/* first part rotation from the KAN_FRAME Unk_0c word */
-	Pk_w = (((KAN_FRAME *)pFrame)->Unk_0c & 0xfffU) | (((KAN_FRAME *)pFrame)->Unk_0c & 0xfff000U) << 4;
-	pP_ptr->Rot_x = (SHORT)Pk_w;
-	pP_ptr->Rot_y = (SHORT)(Pk_w >> 0x10);
-	pRot_w = (UINT *)&pFrame[4];
-	pP_ptr->Rot_z = (USHORT)((KAN_ROT_LANES *)&((KAN_FRAME *)pFrame)->Unk_0c)->Unk_03 | (USHORT)((*pRot_w & 0xf) << 8);
+	pRot_w = (UINT *)&((KAN_FRAME *)pFrame)->Unk_0c;
+	*(UINT *)&pP_ptr->Rot_x = (*pRot_w & 0xfff) | (*pRot_w & 0xfff000) << 4;
+	Pk_w = (UINT)((KAN_ROT_LANES *)pRot_w)->Unk_03;
+	pRot_w++;
+	pP_ptr->Rot_z = (USHORT)(Pk_w | (*pRot_w & 0xf) << 8);
 
 	/* DS unpacks 8 parts (9 words) per pass: pRot_w advances word by word and pRot_s by 0x56 shorts per part;
 	   Parts_left is counted down after every part. */
@@ -1766,18 +1771,15 @@ ULONG J_seq2(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 		} while (Parts_cnt != 0);
 	}
 	else {
-		pM2 = (MATRIX *)pP_ptr->M;
 		pEm->Hokan_flg += 0xff;
 		do {
 			/* M0 = previous rotation: DS copies the 3x3 shorts as five words (lw/sw), not a MATRIX copy */
-			*(MAT3_COPY *)&M0 = *(MAT3_COPY *)pM2;
-			pRot = &pP_ptr->Rot_x;
-			pP_ptr++;
+			*(MAT3_COPY *)&M0 = *(MAT3_COPY *)pP_ptr->M;
 			Parts_cnt--;
 			/* M1 = new rotation for the same part */
-			RotMatrix((SVECTOR *)pRot, &M1);
-			HMatrix(&M0, &M1, pM2, 0xfff - Ipol_w);
-			pM2 = (MATRIX *)pP_ptr->M;
+			RotMatrix((SVECTOR *)&pP_ptr->Rot_x, &M1);
+			HMatrix(&M0, &M1, (MATRIX *)pP_ptr->M, 0xfff - Ipol_w);
+			pP_ptr++;
 		} while (Parts_cnt != 0);
 	}
 
@@ -1790,4 +1792,25 @@ ULONG J_seq2(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg)
 		}
 		return 0;
 	}
+}
+
+/* Joint_move_skip - 0x8002a9c8
+   Advances the motion by one frame without posing the parts: the same frame lookup as
+   Joint_move (forward playback only), then the Move_cnt step that ends J_seq and J_seq2.
+   Retail-only; Em10_mv01 and Em10_mv02 call it on every third frame (Move_cnt % 3 == 2) to skip a frame.
+   Returns 1 when the motion cycle completes.
+*/
+/* DS 0x8002a9c8 (Joint_move_skip) */
+ULONG Joint_move_skip(ENEMY_WORK *pEm, ULONG Seq_t_ptr)
+{
+	ULONG f_num;
+
+	f_num = *(UINT *)(Seq_t_ptr + (UINT)pEm->Move_no * 4);
+	pEm->pNow_seq = (ULONG *)(Seq_t_ptr + (f_num >> 0x10) + (UINT)pEm->Move_cnt * 4);
+	pEm->Move_cnt++;
+	if ((f_num & 0xffff) <= pEm->Move_cnt) {
+		pEm->Move_cnt = 0;
+		return 1;
+	}
+	return 0;
 }

@@ -25,6 +25,8 @@ struct tagRBJ_ENTRY {
 };
 typedef struct tagRBJ_ENTRY RBJ_ENTRY;
 
+/* Counts and pointers for the room currently loaded: sprite and cut totals, and the floor, light and
+ * block tables read from the room file. */
 struct tagROOM_WORK {
 	UCHAR nSprite;
 	UCHAR nCut;
@@ -153,7 +155,7 @@ struct tagLIGHT_DATA {
 
 
 /* DS 0x801bfa14: font TIM load buffer (Set_room) */
-extern ULONG  Font_tim_buf[0x90EC];
+extern ULONG *Font_tim_buf;
 /* Runtime address, not a fixed DS object: the free-work area starts at the stage overlay base 0x8011a000 plus the aligned stage size (Set_stage) */
 #define Free_work_base ((UCHAR *)RDTFile)	/* stage overlay base (DEFINES.H RDTFile) */
 

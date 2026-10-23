@@ -47,21 +47,31 @@ extern VOID Pix_clear(register ULONG set_no);
 extern VOID St_pltex_operation(register ULONG type);
 extern ULONG Tama_ck_i(register ULONG id);
 extern ULONG Tama_decrease_i(register ULONG id, register ULONG flag);
-extern UCHAR Tama_reload_ck(VOID);
+extern LONG Tama_reload_ck(VOID);
 extern VOID Tama_reload(VOID);
 extern VOID Check_cursol_distance(register ULONG type);
 
 extern STATUS St;					// 800D5BF0		// 4208 bytes
-extern UCHAR bk_cut[];				// 800D4E00
+extern UCHAR bk_cut[24];				// 800D4E00
 extern LIGHT_CUT_DATA *bk_light;	// 800DCBCC		// 40 bytes
 extern UCHAR mugen_sw;				// 800CF1D8
 
 
 
 
-/* Globals defined in STATUS.C */
-	extern UCHAR init_item_tbl_Leon[11][3];				// 0x800a8f62
+/* Globals defined in STATUS.C: the starting item lists, one per character (init_item_tbl_<name>, 11 entries
+ * of 3 bytes each),
+ * plus the item data table and the file (document) data table used by the status screen. */
+	extern UCHAR init_item_tbl_Leon[11][3];				// 0x800a9264
 	extern UCHAR init_item_tbl_Ada[11][3];				// 0x800a93d0
+	extern UCHAR init_item_tbl_Claire[11][3];				// 0x800a9285
+	extern UCHAR init_item_tbl_Hunk[11][3];				// 0x800a92a6
+	extern UCHAR init_item_tbl_ToFu[11][3];				// 0x800a92c7
+	extern UCHAR init_item_tbl_Leon_ex[11][3];				// 0x800a92e8
+	extern UCHAR init_item_tbl_Claire_ex[11][3];				// 0x800a9309
+	extern UCHAR init_item_tbl_Ada_ex[11][3];				// 0x800a932a
+	extern UCHAR init_item_tbl_Chris_ex[11][3];				// 0x800a934b
+	extern UCHAR init_item_tbl_Sherry[11][3];				// 0x800a93f1
 
 /* Tables defined in STATUS.C (moved here from the old owners) */
 	extern ITEM_DATA Item_data_tbl[101];

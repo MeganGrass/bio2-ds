@@ -11,7 +11,7 @@
 #include "OMA.H"
 #include "SCA.H"
 
-/* Attack structs used by the weapon tables below (moved here from PL_WEP.H / PL_WEP2.H) */
+/* Attack structs used by the weapon tables declared in PL_WEP.H and PL_WEP2.H */
 struct tagATTACK_SEQ {
 	UCHAR Tbl_no;
 	UCHAR Timer;
@@ -196,7 +196,7 @@ struct tagPLAYER_WORK {
 
 /* Player routine / damage / die dispatch. All Pl_* dispatch tables hold 32-bit code
    addresses and are called with (pEm, Kan, Seq) (or (pEm, Key, Key_trg) for the *_pad tables).
-   GLOBAL.H currently declares them as pointer-to-array; PL_TBL_FN takes the address of the
+   The owner headers declare them as pointer-to-array; PL_TBL_FN takes the address of the
    symbol and indexes it as an array of function pointers. */
 typedef void (*PL_FUNC)(ENEMY_WORK *pEm, ULONG Kan, ULONG Seq);
 #define PL_TBL_FN(tbl, idx)	(((PL_FUNC *)&(tbl))[idx])
@@ -276,17 +276,15 @@ extern const SHORT  Pl_walk_mot[3];			/* DS 0x80010ed8, pl_mv01 / pl_mv04 / pl_m
 extern const UCHAR  Pl_run_spd[3];			/* DS 0x80010ee0, pl_mv02_pad */
 extern const UCHAR  Pl_run_mot[3];			/* DS 0x80010ee4, pl_mv02 */
 extern const UCHAR  Pl_backwalk_spd[3];		/* DS 0x80010ee8, pl_mv03_pad */
-extern const UCHAR  Pl_backwalk_mot[3];		/* DS 0x80010eec, pl_mv03 */
 extern const UCHAR  Pl_rot_spd[3];			/* DS 0x80010ef0, pl_mv04_pad */
 extern const SVECTOR Pl_mv07_init_sv;			/* DS 0x80010f14 (8 bytes), initial Sv for pl_mv07 */
 
 /* Player-side work / flags addressed directly in DS */
 extern UCHAR  Pl_poison_tint;					/* DS 0x800a4005, poison tint level (0..0x40) */
 extern UCHAR  Pad_act_flg;					/* DS 0x800e898c, pad flag written by PAD.C */
-extern UCHAR  s__800a2694[];				/* DS 0x800a2694, pad speed scale, indexed by UnkMvPadFlg */
 
 /* Model load buffer (Player_set): read to DS 0x801bfa14, copied to DS 0x801cd414 */
-extern ULONG  Font_tim_buf[0x90EC];				/* DS 0x801bfa14 */
+extern ULONG *Font_tim_buf;				/* DS 0x801bfa14 */
 /* Word table at Font_tim_buf + Font_tim_buf[0] (Player_set). Offsets: Seq/Kan/Tmd from
  * the Pl_model_copy_buf base, Tim from the Font_tim_buf base. Evidence: Player_set (DS 0x8003baf0). */
 struct tagPL_DATA_TBL {
@@ -298,13 +296,14 @@ struct tagPL_DATA_TBL {
 typedef struct tagPL_DATA_TBL PL_DATA_TBL;
 /* DS 0x801cd414: view into Font_tim_buf (the model copy sits inside the player-file buffer, +0xDA00) */
 #define Pl_model_copy_buf ((UCHAR *)Font_tim_buf + 0xDA00)
-extern UCHAR  s_Pl_cd_msg_80010ec8[];				/* DS 0x80010ec8, Cd_read message buffer */
+extern UCHAR  s_Pl_cd_msg_80010ec8[4];				/* DS 0x80010ec8, Cd_read message buffer */
 
 
 
 /* Globals defined in PLAYER.C */
 	extern USHORT Pld_no[16];							// 0x800a3fe4	// PLxx_PLD names (FILECODE.H), by enemy Id
 	extern UCHAR Pl_neck_timer;							// 0x800a4004
+	extern UCHAR Pld_name[40];							// 0x800a4008
 	extern PL_FUNC Pl_routine[9];						// 0x800a4030
 	extern PL_FUNC Pl_mv_pad[12];						// 0x800a4054
 	extern PL_FUNC Pl_mv[12];							// 0x800a4084
@@ -316,25 +315,4 @@ extern UCHAR  s_Pl_cd_msg_80010ec8[];				/* DS 0x80010ec8, Cd_read message buffe
 	extern ULONG(*gpPl_pac2_ptr)[1];					// 0x800d7858
 	extern CHAR UnkMvPadFlg;							// 0x800d785c
 	extern ULONG(*gpPl_tmd2_ptr)[1];					// 0x800d8cec
-
-/* Tables defined in PLAYER.C (moved here from the old owners) */
-	extern ATTACK_WORK3 PLW05_W[3];
-	extern ATTACK_WORK3 PLW07_W[3];
-	extern ATTACK_SEQ PLW07_S[8];
-	extern ATTACK_WORK3 PLW08_W[3];
-	extern ATTACK_SEQ PLW08_S[10];
-	extern ATTACK_WORK3 PLW0E_W[3];
-	extern ATTACK_SEQ PLW0E_S[2];
-	extern ATTACK_WORK3 PLW0F_W[3];
-	extern ATTACK_SEQ PLW0F_S[4];
-	extern ATTACK_WORK3 PLW12_W[3];
-	extern ATTACK_SEQ PLW12_S[4];
-	extern ATTACK_WORK3 PLW13_W[3];
-	extern ATTACK_SEQ PLW13_S[4];
-	extern ATTACK_WEAPON_TBL Pl_weapon_tbl[19][3];
-	extern ATTACK_WORK3 PLW00_W[3];
-	extern ATTACK_SEQ PLW00_S[2];
-	extern ATTACK_WORK3 PLW02_W[3];
-	extern ATTACK_SEQ PLW02_S[2];
-	extern ATTACK_SEQ PLW05_S[2];
 #endif /* PLAYER_H_H */

@@ -16,6 +16,8 @@
 #include "SCA.H"
 
 /* ---- types migrated from data.h ---- */
+/* Shadow ("kage") work for one enemy: an offset/half-size footprint around Pos, drawn as Prim[2]
+ * (two POLY_FT4 quads). Be_flg is the work flag and Dir_y is the shadow's Y direction. */
 struct tagKAGE_WORK {
 	SHORT Off_x;
 	SHORT Off_z;
@@ -30,6 +32,8 @@ struct tagKAGE_WORK {
 	POLY_FT4 Prim[2];
 };
 
+/* Shadow work for the 9-shadow variant: same footprint fields as tagKAGE_WORK, with pKw_top
+ * pointing at a KAGE_WORK. */
 struct tagKAGE_WORK9 {
 	SHORT Off_x;
 	SHORT Off_z;
@@ -290,6 +294,10 @@ struct tagEM22_FREE {
 	SHORT Dest_z;
 	SHORT Sca_ofs;
 	VOID* Dm_eff_func;
+	UCHAR Retail_28;	/* retail-only, name unknown: byte at pEm+0x240 */
+	CHAR Retail_29;	/* retail-only: signed byte at pEm+0x241 (Spd_x step of Em22_mv0a) */
+	SHORT Retail_2a;	/* retail-only: halfword at pEm+0x242 (Spd_y step of Em22_mv0a) */
+	SHORT Retail_2c;	/* retail-only: halfword at pEm+0x244 (saved Pos_y) */
 };
 
 struct tagEM23_FREE {
@@ -314,6 +322,7 @@ struct tagEM23_FREE {
 	UCHAR Roar_cnt;
 	UCHAR Rensha_cnt;
 	VOID* Dm_eff_func;
+	UCHAR Retail_20;	/* retail-only: countdown byte at pEm+0x238 */
 };
 
 struct tagEM23_ESP {
@@ -359,6 +368,9 @@ struct tagEM25_FREE {
 	UCHAR Dmg_type;
 	UCHAR No_fire;
 	UCHAR Water_rno;
+	UCHAR Retail_27;	/* retail-only, name unknown: byte at pEm+0x23F */
+	ENEMY_WORK* Retail_28;	/* retail-only, name unknown: another enemy at pEm+0x240 */
+	SHORT Retail_2C;	/* retail-only, name unknown: float offset at pEm+0x244 */
 };
 
 struct tagEM25_BLOOD_TBL {
@@ -460,6 +472,13 @@ struct tagEM2A_FREE {
 	UCHAR Dm_wep;
 	UCHAR LRpunch_wait;
 	UCHAR Cfpunch_wait;
+	UCHAR Retail_14;
+	UCHAR Retail_15;
+	UCHAR Damage_no;
+	UCHAR Damage_old;
+	DM_ESP2* pEsp2;
+	ULONG Buf0;
+	ULONG Buf1;
 };
 
 struct tagDM_ESP {
@@ -503,6 +522,7 @@ struct tagEM2B_FREE {
 	SHORT Bak_x;
 	SHORT Bak_z;
 	USHORT Escape_cnt;
+	UCHAR Retail_1e;
 };
 
 struct tagPARTS_FLY {
@@ -580,6 +600,7 @@ struct tagEM2E_FREE {
 	UCHAR Sick_flg;
 	UCHAR Poison_type;
 	UCHAR No_fire;
+	UCHAR Retail_28;
 };
 
 struct tagEM2E_BLOOD_TBL {
@@ -772,6 +793,8 @@ struct tagEM37_FREE {
 	SHORT Px;
 	SHORT etc_flg;
 	UCHAR Q_timer;
+	UCHAR Retail_0B;
+	USHORT Retail_0C;
 };
 
 struct tagEM38_FREE {
@@ -810,6 +833,10 @@ struct tagEM3A_FREE {
 	UCHAR Old_dmg;
 	UCHAR No_snd;
 	SHORT Em_keep;
+	SHORT Retail_26;
+	SHORT Retail_28;
+	UCHAR Retail_2A;
+	UCHAR Retail_2B;
 };
 
 struct tagEM3A_BLOOD_TBL {
@@ -862,14 +889,14 @@ extern JH_HEAD   Pl_jh_head;
 /* ------------------------------------------------------------------ */
 
 ULONG   Hani_ck(VECTOR *pV, short *pPxzhw);											/* 80015280 */
-void    Add_speedXZ(ENEMY_WORK *pEm, long muki);									/* 800152c8 */
+void    Add_speedXZ();  /* two or three arguments: see Mot_play_sp */									/* 800152c8 */
 void    Add_speedXYZ(ENEMY_WORK *pEm, long muki_y, long muki_z);					/* 80015350 */
 void    Add_speedXYZsuper(ENEMY_WORK *pEm, long muki_y, long muki_z);				/* 800153f4 */
-short   Direction_ck(short Hontai_x, short Hontai_z, short Target_x, short Target_z);	/* 800154ac */
+long   Direction_ck(long Hontai_x, long Hontai_z, long Target_x, long Target_z);	/* 800154ac */
 void    Goto00(ENEMY_WORK *pEm, long Vec_x, long Vec_z, short Add_dir);				/* 80015558 */
 long    Goto00_ck(ENEMY_WORK *pEm, long Vec_x, long Vec_z, short Add_dir);			/* 80015614 */
 void    Goto01(ENEMY_WORK *pEm, short Dir, short Add_dir);							/* 8001569c */
-long    Goto01_ck(ENEMY_WORK *pEm, short Dir, short Add_dir);						/* 80015714 */
+long    Goto01_ck(ENEMY_WORK *pEm, long Dir, long Add_dir);						/* 80015714 */
 long    Dir_pos_ck(VECTOR *pV, VECTOR *pP, short Hed_dir, short Hani_dir);			/* 80015758 */
 long    L_pos_ckXZ(VECTOR *pV, VECTOR *pP, ULONG Ll);								/* 800157d4 */
 long    L_pos_ckXZM(MATRIX *pM, VECTOR *pP, ULONG Ll, SVECTOR *pSv);				/* 80015834 */
@@ -901,6 +928,7 @@ void    Kage_work9_color_set(ULONG *pK, ULONG Color);								/* 8001700c */
 void    Texture_Move(MODEL_WORK *pMw, USHORT tex_page, ULONG mvmu, short clut_plus);	/* 80017054 */
 void Texture_Move_GT3(MODEL_WORK *pMw, USHORT tex_page, ULONG mvmu, short clut_plus, UCHAR *pPoly_no); 	/* 800171d0 */
 void Texture_Move_GT4(MODEL_WORK *pMw, USHORT tex_page, ULONG mvmu, short clut_plus, UCHAR *pPoly_no); 	/* 800172f8 */
+void Texture_Move_GT4_up(MODEL_WORK *pMw, ULONG Late, ULONG Ouv, UCHAR *pPoly_no);	/* 8001745c */
 ULONG   Neck_Dir_ZY(VECTOR *pSv0, VECTOR *pSv1, SVECTOR *pRot, short Front_dir_y);	/* 8001820c */
 void    Rot_neck(ENEMY_WORK *pPm, short Cdir_y);									/* 800177c0 */
 void    Rot_neck_em(ENEMY_WORK *pPm, short Cdir_y);									/* 80017d98 */

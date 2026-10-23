@@ -8,6 +8,8 @@
 #ifndef _FILECODE_H_
 #define _FILECODE_H_
 
+/* File-number names. Each value is the floc[] index of the file on the disc, so these names are the
+ * values passed to Cd_read and used to index floc[] and the Ghidra file tables. */
 #define	CONFIG_BIN	0
 #define	DIEDEMO_BIN	1
 #define	ENDING_BIN	2

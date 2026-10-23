@@ -7,7 +7,6 @@
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include "MAIN.H"
 #include "CONFIG.H"
 #include "SCE1.H"
@@ -30,6 +29,10 @@
 #include "GAME.H"
 #include "flag.h"
 #include "DIVCHK.H"
+#include "SPL_TBL.H"
+
+/* DS takes Rnd() as a signed int (no andi after the jal); Rnd_s32() calls it through a LONG-returning type (see ESP_R.C). */
+#define Rnd_s32()	(((LONG (*)(VOID))Rnd)())
 
 /* DS 0x800537cc (Break_point) */
 ULONG Break_point(SCE_TASK *pSce)
@@ -116,19 +119,17 @@ typedef struct {
 /* DS 0x80053924 (Ifel_ck) */
 ULONG Ifel_ck(SCE_TASK *pSce)
 {
-	USHORT Ofs;
-	ULONG *pSlot;
-	UCHAR *pNext;
 	UCHAR *pData;
+	ULONG D0;
 
 	pData = pSce->Data;
-	pNext = pData + 4;
-	pSce->Data = pNext;
-	Ofs = ((SCE_JMP_REC *)pData)->Ofs;
-	pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] = pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] + 1;
-	pSlot = pSce->pS_SP;
-	pSce->pS_SP = pSlot + 1;
-	*pSlot = (ULONG)(pNext + Ofs);
+	pSce->Data = pData + 4;
+	/* The jump target (the record end plus the USHORT offset) is read before the Ifel counter is
+	   raised: DS loads the offset (lhu a2,0x2(a2)) ahead of the counter store (sb v0,0x4(v1)) and
+	   adds it to the advanced Data value it has just stored (addu a1,a1,a2). */
+	D0 = (ULONG)pSce->Data + ((SCE_JMP_REC *)pData)->Ofs;
+	pSce->Ifel_ctr[(signed char)pSce->Sub_ctr]++;
+	*pSce->pS_SP++ = D0;
 	return 1;
 }
 
@@ -137,7 +138,7 @@ ULONG Else_ck(SCE_TASK *pSce)
 {
 	pSce->pS_SP = pSce->pS_SP + -1;
 	pSce->Data = pSce->Data + ((SCE_JMP_REC *)pSce->Data)->Ofs;
-	pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] = pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] + -1;
+	pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] = pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] - 1;
 	return 1;
 }
 
@@ -146,7 +147,7 @@ ULONG Endif(SCE_TASK *pSce)
 {
 	pSce->pS_SP = pSce->pS_SP + -1;
 	pSce->Data += 2;
-	pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] = pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] + -1;
+	pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] = pSce->Ifel_ctr[(signed char)pSce->Sub_ctr] - 1;
 	return 1;
 }
 
@@ -159,38 +160,43 @@ typedef struct {
 /* DS 0x800539dc (Sleep) */
 ULONG Sleep(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
+	/* Sub_idx is a full-width signed index: retail reads Sub_ctr with lb a0+2 and uses it as is */
+	LONG Sub_idx;
 	UCHAR Loop_cnt;
 	UCHAR *pData;
 
 	pData = pSce->Data;
-	Sub_idx = pSce->Sub_ctr;
+	Sub_idx = (signed char)pSce->Sub_ctr;
 	pSce->Data = pData + 1;
 	Loop_cnt = pSce->Loop_ctr[Sub_idx] + 1;
 	pSce->Loop_ctr[Sub_idx] = Loop_cnt;
-	*(USHORT *)((int)pSce->Lcnt[Sub_idx] + ((int)((UINT)Loop_cnt << 0x18) >> 0x17)) =
-		((SCE_SLEEP_REC *)pData)->Sleep_cnt;
+	/* Lcnt[Sub_idx] row at pSce + 0xa0 + Sub_idx * 8, column is the new loop level as a signed byte */
+	pSce->Lcnt[Sub_idx][(signed char)Loop_cnt] = ((SCE_SLEEP_REC *)pData)->Sleep_cnt;
 	return 1;
 }
 
+/* Sleep: push a timed-sleep level. The count from the record goes into the level's Lcnt slot and the
+ * script continues on the next command (return 1). Sleeping then counts that slot down each frame. */
 /* DS 0x80053a24 (Sleeping) */
 ULONG Sleeping(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
+	LONG Sub_idx;
 	short Sleep_cnt;
 	short *pSleep_cnt;
 
-	Sub_idx = pSce->Sub_ctr;
-	pSleep_cnt = pSce->Lcnt[Sub_idx] + pSce->Loop_ctr[Sub_idx];
+	Sub_idx = (signed char)pSce->Sub_ctr;
+	pSleep_cnt = pSce->Lcnt[Sub_idx] + (signed char)pSce->Loop_ctr[Sub_idx];
 	Sleep_cnt = *pSleep_cnt;
 	*pSleep_cnt = Sleep_cnt + -1;
 	if (Sleep_cnt == 1) {
 		pSce->Data += 3;
-		pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] + -1;
+		pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] - 1;
 	}
 	return 2;
 }
 
+/* Wsleep: wait one frame at this point in the script. The loop counter moves on and the opcode is stepped
+ * past, so the scheduler re-enters the same opcode on the next frame; Wsleeping (below) ends the wait. */
 /* DS 0x80053a8c (Wsleep) */
 ULONG Wsleep(SCE_TASK *pSce)
 {
@@ -204,7 +210,7 @@ ULONG Wsleeping(SCE_TASK *pSce)
 {
 	if (((G.Status_flg & STAT_XA_VOICE) == 0) && ((Moji.Mess_flg & 0x80) == 0)) {
 		pSce->Data++;
-		pSce->Loop_ctr[(signed char)pSce->Sub_ctr] = pSce->Loop_ctr[(signed char)pSce->Sub_ctr] + -1;
+		pSce->Loop_ctr[(signed char)pSce->Sub_ctr] = pSce->Loop_ctr[(signed char)pSce->Sub_ctr] - 1;
 	}
 	return 2;
 }
@@ -227,18 +233,15 @@ typedef struct {
 /* DS 0x80053b1c (For) */
 ULONG For(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
-	short Brk_ofs;
+	LONG Sub_idx;
+	LONG Brk_ofs;
 	signed char Loop_idx;
 	UCHAR *pCmd;
 	UCHAR *pBody;
 
 	pCmd = pSce->Data;
 	Sub_idx = pSce->Sub_ctr;
-	if (((SCE_FOR_REC *)pCmd)->Lcnt == 0) {
-		pSce->Data = pCmd + ((SCE_FOR_REC *)pCmd)->Brk_ofs + 6;
-	}
-	else {
+	if (((SCE_FOR_REC *)pCmd)->Lcnt != 0) {
 		Loop_idx = pSce->Loop_ctr[Sub_idx] + 1;
 		pSce->Loop_ctr[Sub_idx] = Loop_idx;
 		Brk_ofs = ((SCE_FOR_REC *)pCmd)->Brk_ofs;
@@ -249,26 +252,29 @@ ULONG For(SCE_TASK *pSce)
 		pSce->Lstack[Sub_idx][Loop_idx] = pBody;
 		pSce->Loop_if_class[Sub_idx][Loop_idx] = pSce->Ifel_ctr[Sub_idx];
 	}
+	else {
+		pSce->Data = pCmd + ((SCE_FOR_REC *)pCmd)->Brk_ofs + 6;
+	}
 	return 1;
 }
 
+/* For: a counted loop. A zero count skips the body (jumps past the break offset). Otherwise a new loop
+ * level records the count, the body start, the break target and the current if/else depth, so the
+ * matching Next can return to the body or leave by the break target. */
 /* DS 0x80053bd4 (For2) */
 ULONG For2(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
-	short Brk_ofs;
+	/* retail reserves 8 more bytes of locals (For2 frame 8); never read */
+	volatile int Rsv[1];
+	LONG Sub_idx;
+	LONG Brk_ofs;
 	signed char Loop_idx;
 	UCHAR *pCmd;
 	UCHAR *pBody;
-	ULONG Pad[2];
 
-	(void)Pad;
 	pCmd = pSce->Data;
 	Sub_idx = pSce->Sub_ctr;
-	if (G.SaveData.Sce_work[pCmd[5] - 4] == 0) {
-		pSce->Data = pCmd + ((SCE_BRK_REC *)pCmd)->Brk_ofs + 6;
-	}
-	else {
+	if (G.SaveData.Sce_work[pCmd[5] - 4] != 0) {
 		Loop_idx = pSce->Loop_ctr[Sub_idx] + 1;
 		pSce->Loop_ctr[Sub_idx] = Loop_idx;
 		Brk_ofs = ((SCE_BRK_REC *)pCmd)->Brk_ofs;
@@ -279,28 +285,31 @@ ULONG For2(SCE_TASK *pSce)
 		pSce->Lstack[Sub_idx][Loop_idx] = pBody;
 		pSce->Loop_if_class[Sub_idx][Loop_idx] = pSce->Ifel_ctr[Sub_idx];
 	}
+	else {
+		pSce->Data = pCmd + ((SCE_BRK_REC *)pCmd)->Brk_ofs + 6;
+	}
 	return 1;
 }
 
+/* Next: close a For loop. While the count is above one, control returns to the saved body start; on the
+ * last pass the loop level is popped and the script moves past the Next record. */
 /* DS 0x80053cbc (Next) */
 ULONG Next(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
-	signed char Loop_idx;
-	short Lp_cnt;
+	LONG Sub_idx;
+	LONG Loop_idx;
 	short *pLp_cnt;
 
 	Sub_idx = pSce->Sub_ctr;
 	Loop_idx = pSce->Loop_ctr[Sub_idx];
 	pLp_cnt = pSce->Lcnt[Sub_idx] + Loop_idx;
-	Lp_cnt = *pLp_cnt;
-	*pLp_cnt = Lp_cnt + -1;
-	if (Lp_cnt == 1) {
-		pSce->Data += 2;
-		pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] + -1;
+	(*pLp_cnt)--;
+	if (*pLp_cnt != 0) {
+		pSce->Data = pSce->Lstack[Sub_idx][Loop_idx];
 	}
 	else {
-		pSce->Data = pSce->Lstack[Sub_idx][Loop_idx];
+		pSce->Data += 2;
+		pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] + -1;
 	}
 	return 1;
 }
@@ -330,7 +339,7 @@ ULONG While(SCE_TASK *pSce)
 	Ret = While_main(pSce, pData, pCmd[1]);
 	if (Ret == 0) {
 		pSce->Data = *ppBrk;
-		pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] + -1;
+		pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] - 1;
 	}
 	return 1;
 }
@@ -342,7 +351,7 @@ ULONG Ewhile(SCE_TASK *pSce)
 
 	Sub_idx = pSce->Sub_ctr;
 	pSce->Data = pSce->Lstack[Sub_idx][(signed char)pSce->Loop_ctr[Sub_idx]];
-	pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] + -1;
+	pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] - 1;
 	return 1;
 }
 
@@ -370,7 +379,7 @@ ULONG Do(SCE_TASK *pSce)
 /* DS 0x80053ec4 (Edwhile) */
 ULONG Edwhile(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
+	ULONG Sub_ctr;
 	UCHAR *pCmd;
 	ULONG Ret;
 	UCHAR *pData;
@@ -378,15 +387,19 @@ ULONG Edwhile(SCE_TASK *pSce)
 	pCmd = pSce->Data;
 	pData = pCmd + 2;
 	pSce->Data = pData;
-	Sub_idx = pSce->Sub_ctr;
+	/* Sub_ctr is read as a signed byte (DS lb s1,0x2(s0)) and kept sign-extended in a ULONG for indexing. */
+	Sub_ctr = (signed char)pSce->Sub_ctr;
 	Ret = While_main(pSce, pData, pCmd[1]);
-	if (Ret == 0) {
-		pSce->Loop_ctr[Sub_idx] = pSce->Loop_ctr[Sub_idx] + -1;
+	/* Each branch returns 1 itself: DS loads v0 = 1 in both paths (li v0,0x1 before the j and before the
+	 * final sw), and places the decrement path first as the fall-through after bne v0,zero. */
+	if (Ret != 0) {
+		pSce->Data = pSce->Lstack[Sub_ctr][(signed char)pSce->Loop_ctr[Sub_ctr]];
+		return 1;
 	}
 	else {
-		pSce->Data = pSce->Lstack[Sub_idx][(signed char)pSce->Loop_ctr[Sub_idx]];
+		pSce->Loop_ctr[Sub_ctr] = pSce->Loop_ctr[Sub_ctr] + -1;
+		return 1;
 	}
-	return 1;
 }
 
 /* Condition term of While_main: SHORT logic operator at +0 (retail While_main 0x80053f50: lhu s0,0x0(a1))
@@ -403,22 +416,21 @@ ULONG While_main(SCE_TASK *pSce, UCHAR *pData, UCHAR Ofs)
 	UINT Ret;
 	UINT Cmd_ret;
 	short *pCond;
-	ULONG Pad[2];
+	UCHAR *pEnd;
 
-	(void)Pad;
-
+	pEnd = pData + Ofs;
 	Ret = ((SCE_JMP_FUNC)(Sce_jmp_tbl[*pData]))(pSce);
 	pCond = (short *)pSce->Data;
-	while (pCond != (short *)(pData + Ofs)) {
+	while (pCond != (short *)pEnd) {
 		Logic_op = *pCond;
 		pSce->Data = (UCHAR *)(pCond + 1);
 		Cmd_ret = ((SCE_JMP_FUNC)(Sce_jmp_tbl[((SCE_COND_REC *)pCond)->Op]))(pSce);
 		pCond = (short *)pSce->Data;
-		if (Logic_op == 0) {
-			Ret &= Cmd_ret;
+		if (Logic_op != 0) {
+			Ret |= Cmd_ret;
 		}
 		else {
-			Ret |= Cmd_ret;
+			Ret &= Cmd_ret;
 		}
 	}
 	return Ret;
@@ -438,17 +450,19 @@ typedef struct {
 	SHORT Val;
 } SCE_CASE_REC;
 
+/* Switch: open a switch block. The case value is compared against the saved expression and control moves
+ * to the matching Case label, or to the Default/Eswitch exit when none matches. */
 /* DS 0x80054020 (Switch) */
 ULONG Switch(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
+	LONG Sub_idx;
 	UCHAR Var_no;
 	USHORT Brk_ofs;
 	signed char Loop_idx;
 	UCHAR *pCase;
 	UCHAR *pNext;
 
-	Sub_idx = pSce->Sub_ctr;
+	Sub_idx = (signed char)pSce->Sub_ctr;
 	pCase = pSce->Data;
 	Brk_ofs = ((SCE_SWITCH_REC *)pCase)->Brk_ofs;
 	Var_no = pCase[1];
@@ -495,7 +509,7 @@ ULONG Default(SCE_TASK *pSce)
 /* DS 0x80054128 (Eswitch) */
 ULONG Eswitch(SCE_TASK *pSce)
 {
-	pSce->Loop_ctr[(signed char)pSce->Sub_ctr] = pSce->Loop_ctr[(signed char)pSce->Sub_ctr] + -1;
+	pSce->Loop_ctr[(signed char)pSce->Sub_ctr] = pSce->Loop_ctr[(signed char)pSce->Sub_ctr] - 1;
 	pSce->Data += 2;
 	return 1;
 }
@@ -506,44 +520,51 @@ typedef struct {
 	SHORT Jmp_ofs;
 } SCE_GOTO_REC;
 
+/* Goto: jump to a label in the script. The offset in the record is relative to the current command. */
+/* The task level index is a ULONG holding the sign-extended Sub_ctr byte (lb), as in the prototype's ULONG Sub_ctr local;
+ * the jump offset is a LONG local loaded with lh, and the stack slot is Stack[level] + (Ifel_ctr + 1). */
 /* DS 0x8005415c (Goto) */
 ULONG Goto(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
+	ULONG Sub_idx;
 	UCHAR Ifel_val;
 	UCHAR Loop_val;
-	short Jmp_ofs;
+	LONG Jmp_ofs;
 	UCHAR *pData;
 
-	Sub_idx = pSce->Sub_ctr;
+	Sub_idx = (signed char)pSce->Sub_ctr;
 	pData = pSce->Data;
 	Ifel_val = pData[1];
 	Loop_val = pData[2];
 	Jmp_ofs = ((SCE_GOTO_REC *)pData)->Jmp_ofs;
 	pSce->Ifel_ctr[Sub_idx] = Ifel_val;
-	pSce->pS_SP = pSce->Stack[Sub_idx] + Ifel_val + 1;
+	pSce->pS_SP = pSce->Stack[Sub_idx] + (Ifel_val + 1);
 	pSce->Loop_ctr[Sub_idx] = Loop_val;
 	pSce->Data = pData + Jmp_ofs;
 	return 1;
 }
 
+/* Gosub: call a script subroutine. The return address (the command after this one) is saved in Ret_addr
+ * for this task level and control jumps to the subroutine entry from the table. */
 /* DS 0x800541a8 (Gosub) */
 ULONG Gosub(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
+	LONG Sub_idx;
+	int Next_idx;
 	UCHAR Sub_no;
 	USHORT Sub_ofs;
 	UCHAR *pSub_tbl;
 
-	Sub_idx = pSce->Sub_ctr;
+	Sub_idx = (signed char)pSce->Sub_ctr;
+	Next_idx = Sub_idx + 1;
 	Sub_no = pSce->Data[1];
 	pSce->Ret_addr[Sub_idx] = pSce->Data + 2;
-	pSce->Ifel_ctr[Sub_idx + 1] = -1;
-	pSce->Loop_ctr[Sub_idx + 1] = -1;
-	pSce->pS_SP = pSce->Stack[Sub_idx + 1];
+	pSce->Ifel_ctr[Next_idx] = -1;
+	pSce->Loop_ctr[Next_idx] = -1;
+	pSce->pS_SP = pSce->Stack[Next_idx];
 	pSub_tbl = Sce.pCScd;
 	Sub_ofs = *(USHORT *)(Sce.pCScd + (UINT)Sub_no * 2);
-	pSce->Sub_ctr = Sub_idx + 1;
+	pSce->Sub_ctr = Next_idx;
 	pSce->Data = pSub_tbl + Sub_ofs;
 	return 1;
 }
@@ -553,33 +574,31 @@ ULONG Return(SCE_TASK *pSce)
 {
 	signed char Sub_idx;
 
-	Sub_idx = pSce->Sub_ctr + -1;
+	Sub_idx = (signed char)(pSce->Sub_ctr - 1);
 	pSce->Sub_ctr = Sub_idx;
 	pSce->Data = pSce->Ret_addr[Sub_idx];
-	pSce->pS_SP = pSce->Stack[Sub_idx] + (signed char)pSce->Ifel_ctr[Sub_idx] + 1;
+	pSce->pS_SP = pSce->Stack[Sub_idx] + ((signed char)pSce->Ifel_ctr[Sub_idx] + 1);
 	return 1;
 }
 
 /* DS 0x80054268 (Break) */
 ULONG Break(SCE_TASK *pSce)
 {
-	signed char Sub_idx;
-	signed char Loop_idx;
-	char Ifel_cls;
+	int Sub_idx;
+	int Loop_idx;
 
-	Sub_idx = pSce->Sub_ctr;
-	Loop_idx = pSce->Loop_ctr[Sub_idx];
+	Sub_idx = (signed char)pSce->Sub_ctr;
+	Loop_idx = (signed char)pSce->Loop_ctr[Sub_idx];
 	pSce->Data = pSce->Lbreak[Sub_idx][Loop_idx];
-	Ifel_cls = pSce->Loop_if_class[Sub_idx][Loop_idx];
-	pSce->Loop_ctr[Sub_idx] = Loop_idx + -1;
-	pSce->Ifel_ctr[Sub_idx] = Ifel_cls;
+	pSce->Ifel_ctr[Sub_idx] = pSce->Loop_if_class[Sub_idx][Loop_idx];
+	pSce->Loop_ctr[Sub_idx] = Loop_idx - 1;
 	return 1;
 }
 
 /* DS 0x800542b4 (Work_copy) */
 ULONG Work_copy(SCE_TASK *pSce)
 {
-	UCHAR Dst_ofs;
+	ULONG Dst_ofs;
 	UCHAR *pData;
 	UCHAR D0;
 	UCHAR D2;
@@ -590,11 +609,11 @@ ULONG Work_copy(SCE_TASK *pSce)
 	D2 = pData[3];
 	pData += 4;
 	pSce->Data = pData;
-	if (D2 == 0) {
-		pData[Dst_ofs] = (UCHAR)G.SaveData.Sce_work[D0 - 4];
+	if (D2 != 0) {
+		*(short *)(pData + Dst_ofs) = G.SaveData.Sce_work[D0 - 4];
 	}
 	else {
-		*(short *)(pData + Dst_ofs) = G.SaveData.Sce_work[D0 - 4];
+		pData[Dst_ofs] = (UCHAR)G.SaveData.Sce_work[D0 - 4];
 	}
 	return 1;
 }
@@ -602,7 +621,13 @@ ULONG Work_copy(SCE_TASK *pSce)
 /* DS 0x80054310 (Rbj_reset) */
 ULONG Rbj_reset(SCE_TASK *pSce)
 {
-	Replace_rdt();
+	/* DS calls Replace_rdt as a function that returns a value (as an implicit int
+	 * declaration would), so the jal counts as a write of v0 even though the value is
+	 * not used. With v0 written twice in the function, the "return 1" is no longer
+	 * kept at the end of the block: DS increments the Data pointer in v1 and puts
+	 * li v0,1 in the load delay slot after lw v1,0x1c(s0). Called through the void
+	 * prototype, the pointer is incremented in v0 and a nop fills that slot. */
+	((LONG (*)(void))Replace_rdt)();
 	Sce.Rbj_reset_flg = 1;
 	pSce->Data++;
 	return 1;
@@ -635,20 +660,32 @@ typedef struct {
 ULONG Ck(SCE_TASK *pSce)
 {
 	UCHAR *pData;
-	UCHAR  Flg_no;
-	USHORT Bit;
-	ULONG  Ret;
+	LONG   D0;
+	LONG   D1;
+	LONG   D2;
+	ULONG *pFlg;
 
-	pData  = pSce->Data;
-	Flg_no = pData[1];
-	Bit    = ((SCE_CK_REC *)pData)->Bit;
+	pData = pSce->Data;
+	D0 = pData[1];						/* Flg_addr index */
+	D1 = ((SCE_CK_REC *)pData)->Bit;	/* bit selector (DS lhu); LONG so that D1 >> 8 is DS sra */
 	pSce->Data = pData + 4;
-	Ret = (*(ULONG *)((UCHAR *)Flg_addr[Flg_no] + ((Bit >> 3) & 0x1c)) & (0x80000000U >> (Bit & 0x1f))) != 0;
-	if ((Bit >> 8) == 0)
+	/* word (D1 >> 5) & 7 of the flag array; DS folds the index and the * 4 scale into srl 3, andi 0x1c */
+	pFlg = Flg_addr[D0] + ((D1 >> 5) & 7);
+	/* the if/else form keeps the masked word in its own register (DS and v1,v1,v0; sltu v0,zero,v1) */
+	if (*pFlg & (0x80000000U >> (D1 & 0x1f)))
 	{
-		Ret ^= 1;
+		D2 = 1;
 	}
-	return Ret;
+	else
+	{
+		D2 = 0;
+	}
+	/* high byte of the selector 0: the result is inverted (test for a clear bit) */
+	if ((D1 >> 8) == 0)
+	{
+		D2 ^= 1;
+	}
+	return D2;
 }
 
 /* DS 0x800543b4 (Set) */
@@ -656,10 +693,11 @@ ULONG Set(SCE_TASK *pSce)
 {
 	UCHAR  *pData;
 	UCHAR   D0;
-	UCHAR   D1;
-	UCHAR   D2;
+	LONG    D1;
+	LONG    D2;
 	ULONG  *pFlg;
-	ULONG   Mask;
+	ULONG   Top;
+	LONG    Bit;
 
 	pData = pSce->Data;
 	D0 = pData[1];
@@ -667,21 +705,20 @@ ULONG Set(SCE_TASK *pSce)
 	D2 = pData[3];
 	pSce->Data = pData + 4;
 	pFlg = Flg_addr[D0] + (D1 >> 5);
-	Mask = 0x80000000U >> (D1 & 0x1f);
-	if (D2 == 1)
+	Bit = D1 & 0x1f;
+	Top = 0x80000000U;
+	/* retail returns 1 from each case (the constant 1 of the compare is reused as the return value) */
+	switch (D2)
 	{
-		*pFlg |= Mask;
-	}
-	else if (D2 < 2)
-	{
-		if (D2 == 0)
-		{
-			*pFlg &= ~Mask;
-		}
-	}
-	else if (D2 == 7)
-	{
-		*pFlg ^= Mask;
+	case 0:
+		*pFlg &= ~(Top >> Bit);
+		return 1;
+	case 1:
+		*pFlg |= Top >> Bit;
+		return 1;
+	case 7:
+		*pFlg ^= Top >> Bit;
+		return 1;
 	}
 	return 1;
 }
@@ -691,50 +728,40 @@ ULONG Set(SCE_TASK *pSce)
 typedef struct {
 	UCHAR Dummy[2];
 	USHORT Cmp_word;
-	USHORT Cmp_val;
+	SHORT Cmp_val;
 } SCE_CMP_REC;
 
 /* DS 0x80054474 (Cmp) */
 ULONG Cmp(SCE_TASK *pSce)
 {
-	USHORT Cmp_val;
-	USHORT Var_val;
-	USHORT Cmp_word;
+	LONG Cmp_val;
+	LONG Var_val;
+	UINT Cmp_word;
 	UCHAR *pData;
 	UINT Var_no;
-	ULONG Ret;
 
 	pData = pSce->Data;
 	Cmp_word = ((SCE_CMP_REC *)pData)->Cmp_word;
 	Cmp_val = ((SCE_CMP_REC *)pData)->Cmp_val;
 	pSce->Data = pData + 6;
 	Var_no = Cmp_word & 0xff;
-	Ret = Var_no * 2;
 	Var_val = G.SaveData.Sce_work[Var_no - 4];
 	switch (Cmp_word >> 8) {
 	case CMP_EQ:
-		Ret = (ULONG)(Var_val == Cmp_val);
-		break;
+		return (ULONG)(Var_val == Cmp_val);
 	case CMP_GT:
-		Ret = (ULONG)((short)Cmp_val < (short)Var_val);
-		break;
+		return (ULONG)(Cmp_val < Var_val);
 	case CMP_GE:
-		Ret = ((short)Var_val < (short)Cmp_val) ^ 1;
-		break;
+		return (Var_val < Cmp_val) ^ 1;
 	case CMP_LT:
-		Ret = (ULONG)((short)Var_val < (short)Cmp_val);
-		break;
+		return (ULONG)(Var_val < Cmp_val);
 	case CMP_LE:
-		Ret = ((short)Cmp_val < (short)Var_val) ^ 1;
-		break;
+		return (Cmp_val < Var_val) ^ 1;
 	case CMP_NE:
-		Ret = (ULONG)(Var_val != Cmp_val);
-		break;
+		return (ULONG)(Var_val != Cmp_val);
 	case CMP_AND:
-		Ret = (ULONG)((Var_val & Cmp_val) != 0);
-		break;
+		return (ULONG)((Var_val & Cmp_val) != 0);
 	}
-	return Ret;
 }
 
 /* Save record: SHORT value at +2 (retail Save 0x8005451c: lh a1,0x2(v0)) */
@@ -747,7 +774,7 @@ typedef struct {
 ULONG Save(SCE_TASK *pSce)
 {
 	UCHAR Var_no;
-	short Set_val;
+	LONG Set_val;
 	UCHAR *pData;
 
 	pData = pSce->Data;
@@ -784,7 +811,7 @@ typedef struct {
 /* DS 0x8005458c (Calc) */
 ULONG Calc(SCE_TASK *pSce)
 {
-	short Imm;
+	LONG Imm;
 	USHORT Cmd_word;
 	UCHAR *pData;
 
@@ -799,19 +826,20 @@ ULONG Calc(SCE_TASK *pSce)
 /* DS 0x800545d8 (Calc2) */
 ULONG Calc2(SCE_TASK *pSce)
 {
-	UCHAR Op_no;
-	UCHAR Dst_no;
-	short Src_val;
+	/* The Oct 97 mockup declares three LONG locals (D0, D1, D2) here. With LONG locals the Sce_work read is a
+	   single lh (DS 0x80054600: lh a2,0x47ec(at)) passed straight to Calc_branch, and the frame is DS's 32 bytes
+	   with no extra stack slots. */
+	LONG Op_no;
+	LONG Dst_no;
+	LONG Src_val;
 	UCHAR *pData;
-	ULONG Pad[2];
 
-	(void)Pad;
 	pData = pSce->Data;
 	Op_no = pData[1];
 	Dst_no = pData[2];
 	Src_val = G.SaveData.Sce_work[pData[3] - 4];
 	pSce->Data = pData + 4;
-	Calc_branch((UINT)Op_no, G.SaveData.Sce_work + (Dst_no - 4), (int)Src_val);
+	Calc_branch(Op_no, G.SaveData.Sce_work + (Dst_no - 4), Src_val);
 	return 1;
 }
 
@@ -875,15 +903,18 @@ ULONG Sce_rnd(SCE_TASK *pSce)
 /* DS 0x8005478c (Cut_chg) */
 ULONG Cut_chg(SCE_TASK *pSce)
 {
-	UCHAR Cut_arg;
-	tagGLOBAL *pG;
+	ULONG D0;
+	ULONG *pStatus_flg;
 
-	pG = &G;
-	pG->Status_flg |= STAT_CAM_LOCK;
-	Cut_arg = pSce->Data[1];
-	Cut_chg_main(Cut_arg & 0x7f);
-	pG->Status_flg |= 0x100000;
-	if ((Cut_arg & 0x80) != 0) {
+	/* DS keeps the address of G.Status_flg in a saved register (s1) across the
+	   Cut_chg_main call and reads and writes the flag word through it at offset 0;
+	   the empty asm keeps cc1psx from folding the address back into lui/lw pairs. */
+	__asm__ ("" : "=r"(pStatus_flg) : "0"(&G.Status_flg));
+	*pStatus_flg |= STAT_CAM_LOCK;
+	D0 = pSce->Data[1];
+	Cut_chg_main(D0 & 0x7f);
+	*pStatus_flg |= 0x100000;
+	if ((D0 & 0x80) != 0) {
 		Main.Bg_chg_flg = 0;
 	}
 	pSce->Data += 2;
@@ -894,7 +925,7 @@ ULONG Cut_chg(SCE_TASK *pSce)
 ULONG Cut_old(SCE_TASK *pSce)
 {
 	Cut_chg_main((UINT)Sce.Cut_old);
-	G.Status_flg = (G.Status_flg & ~STAT_CAM_LOCK) | 0x100000;
+	G.Status_flg = (G.Status_flg | 0x100000) & ~STAT_CAM_LOCK;
 	pSce->Data++;
 	return 1;
 }
@@ -902,9 +933,11 @@ ULONG Cut_old(SCE_TASK *pSce)
 /* DS 0x80054884 (Cut_chg_main) */
 void Cut_chg_main(ULONG Cut_no)
 {
+	/* The previous cut is copied straight from the SHORT field: DS loads the whole halfword (lhu) before the new
+	   cut is stored and keeps only its low byte in Sce.Cut_old (sb). */
+	Sce.Cut_old = G.SaveData.Cut_no;
+	G.SaveData.Cut_no = Cut_no;
 	Main.Bg_chg_flg = 1;
-	Sce.Cut_old = (UCHAR)G.SaveData.Cut_no;
-	G.SaveData.Cut_no = (short)Cut_no;
 	Cut_change(Cut_no);
 }
 
@@ -924,38 +957,33 @@ ULONG Cut_auto(SCE_TASK *pSce)
 /* DS 0x80054930 (Cut_replace) */
 ULONG Cut_replace(SCE_TASK *pSce)
 {
-	UCHAR Cut_cur_b;
-	UCHAR Cut_a_b;
-	UCHAR Cut_b_b;
-	UINT Cut_cur;
-	UCHAR *pCut;
 	UINT Cut_a;
-	UINT Fc;
+	UINT Cut_b;
+	UCHAR *pCut;
+	UINT cur;
 
-	Cut_a_b = pSce->Data[1];
-	Cut_a = (UINT)Cut_a_b;
-	Cut_b_b = pSce->Data[2];
-	Fc = (UINT)Cut_b_b;
+	Cut_a = pSce->Data[1];
+	Cut_b = pSce->Data[2];
 	pCut = &(G.pRoom)->pVcut->Fcut;
-	Cut_cur_b = (G.pRoom)->pVcut->Fcut;
-	while (Cut_cur = (UINT)Cut_cur_b, Cut_cur != 0xff) {
-		if (Cut_cur == Cut_a) {
-			*pCut = Cut_b_b;
+	cur = *pCut;
+	while (cur != 0xff) {
+		if (cur == Cut_a) {
+			*pCut = Cut_b;
 		}
-		else if (Cut_cur == Fc) {
-			*pCut = Cut_a_b;
+		else if (cur == Cut_b) {
+			*pCut = Cut_a;
 		}
 		if (pCut[1] == Cut_a) {
-			pCut[1] = Cut_b_b;
+			pCut[1] = Cut_b;
 		}
-		else if (pCut[1] == Fc) {
-			pCut[1] = Cut_a_b;
+		else if (pCut[1] == Cut_b) {
+			pCut[1] = Cut_a;
 		}
 		pCut += 0x14;
-		Cut_cur_b = *pCut;
+		cur = *pCut;
 	}
 	if ((G.Cccut_next)->Fcut == Cut_a) {
-		Cut_change(Fc);
+		Cut_change(Cut_b);
 	}
 	pSce->Data += 3;
 	return 1;
@@ -964,20 +992,15 @@ ULONG Cut_replace(SCE_TASK *pSce)
 /* DS 0x80054a14 (Cut_be_set) */
 ULONG Cut_be_set(SCE_TASK *pSce)
 {
-	VCUT *pVc_nx;
 	UCHAR *pCmd;
 	VCUT *pVc;
-	VCUT *pVc_cur;
 
 	pCmd = pSce->Data;
 	pVc = (G.pRoom)->pVcut;
-	pVc_cur = pVc;
 	if (pVc->Fcut != pCmd[1]) {
 		do {
-			pVc = pVc_cur + 1;
-			pVc_nx = pVc_cur + 1;
-			pVc_cur = pVc;
-		} while (pVc_nx->Fcut != pCmd[1]);
+			pVc++;
+		} while (pVc->Fcut != pCmd[1]);
 		pCmd = pSce->Data;
 	}
 	pVc[pCmd[2]].Be_flg = pCmd[3];
@@ -1012,10 +1035,13 @@ ULONG Message_on(SCE_TASK *pSce)
 /* DS 0x80054af4 (Aot_set) */
 ULONG Aot_set(SCE_TASK *pSce)
 {
-	if (G.Sce_aot[pSce->Data[1]] == (SCE_AOT *)0x0) {
+	SCE_AOT **ppAot;
+
+	ppAot = &G.Sce_aot[pSce->Data[1]];
+	if (*ppAot == (SCE_AOT *)0x0) {
 		G.nSce_aot++;
 	}
-	G.Sce_aot[pSce->Data[1]] = (SCE_AOT *)(pSce->Data + 2);
+	*ppAot = (SCE_AOT *)(pSce->Data + 2);
 	pSce->Data += 0x14;
 	return 1;
 }
@@ -1023,10 +1049,13 @@ ULONG Aot_set(SCE_TASK *pSce)
 /* DS 0x80054b60 (Aot_set_4p) */
 ULONG Aot_set_4p(SCE_TASK *pSce)
 {
-	if (G.Sce_aot[pSce->Data[1]] == (SCE_AOT *)0x0) {
+	SCE_AOT **ppAot;
+
+	ppAot = &G.Sce_aot[pSce->Data[1]];
+	if (*ppAot == (SCE_AOT *)0x0) {
 		G.nSce_aot++;
 	}
-	G.Sce_aot[pSce->Data[1]] = (SCE_AOT *)(pSce->Data + 2);
+	*ppAot = (SCE_AOT *)(pSce->Data + 2);
 	pSce->Data[3] |= SCE_POINT4;
 	pSce->Data += 0x1c;
 	return 1;
@@ -1035,10 +1064,15 @@ ULONG Aot_set_4p(SCE_TASK *pSce)
 /* DS 0x80054be4 (Door_aot_set) */
 ULONG Door_aot_set(SCE_TASK *pSce)
 {
-	if (G.Sce_aot[pSce->Data[1]] == (SCE_AOT *)0x0) {
+	SCE_AOT **ppAot;
+
+	/* DS forms the address of the Sce_aot slot once and keeps it in a register for both the
+	 * empty-slot test and the store of the new AOT pointer. */
+	ppAot = &G.Sce_aot[pSce->Data[1]];
+	if (*ppAot == (SCE_AOT *)0x0) {
 		G.nSce_aot++;
 	}
-	G.Sce_aot[pSce->Data[1]] = (SCE_AOT *)(pSce->Data + 2);
+	*ppAot = (SCE_AOT *)(pSce->Data + 2);
 	pSce->Data += 0x20;
 	return 1;
 }
@@ -1046,10 +1080,14 @@ ULONG Door_aot_set(SCE_TASK *pSce)
 /* DS 0x80054c50 (Door_aot_set_4p) */
 ULONG Door_aot_set_4p(SCE_TASK *pSce)
 {
-	if (G.Sce_aot[pSce->Data[1]] == (SCE_AOT *)0x0) {
+	SCE_AOT **ppAot;
+
+	/* DS forms the address of the Sce_aot slot once (v1) and uses it for both the NULL test and the store. */
+	ppAot = &G.Sce_aot[pSce->Data[1]];
+	if (*ppAot == (SCE_AOT *)0x0) {
 		G.nSce_aot++;
 	}
-	G.Sce_aot[pSce->Data[1]] = (SCE_AOT *)(pSce->Data + 2);
+	*ppAot = (SCE_AOT *)(pSce->Data + 2);
 	pSce->Data[3] |= SCE_POINT4;
 	pSce->Data += 0x28;
 	return 1;
@@ -1065,16 +1103,16 @@ typedef struct {
 /* DS 0x80054cd4 (Item_aot_set) */
 ULONG Item_aot_set(SCE_TASK *pSce)
 {
+	/* retail reserves 8 more bytes of locals (Item_aot_set frame 48); never read */
+	volatile int Rsv[2];
 	UCHAR Work_a;
 	USHORT Flg_bit;
 	ULONG Ret;
 	ULONG *p;
 	UCHAR *pData;
 	UINT Ob_no;
-	ULONG Pad[2];
 	tagGLOBAL *pG;
 
-	(void)Pad;
 
 	pG = &G;
 	pData = pSce->Data;
@@ -1086,12 +1124,21 @@ ULONG Item_aot_set(SCE_TASK *pSce)
 		pG->nSce_aot++;
 	}
 	pG->Sce_aot[Work_a] = (SCE_AOT *)(pData + 2);
-	p = Flg_addr[FLAG_ITEM];
 	if (3 < pG->SaveData.Stage_no) {
 		p = Flg_addr[FLAG_ITEM_2];
 	}
+	else {
+		p = Flg_addr[FLAG_ITEM];
+	}
 	Ret = Flg_ck((ULONG *)p, (UINT)Flg_bit);
-	if (Ret == 0) {
+	if (Ret != 0) {
+		pG->Sce_aot[Work_a]->Id = SCE_NOTHING;
+		if (Ob_no < 0x20) {
+			pG->Ob_model[Ob_no].Be_flg = 0x80000000;
+			pG->Ob_model[Ob_no].Free0 = 0;
+		}
+	}
+	else {
 		if (Ob_no < 0x20) {
 			Work_a = pData[0x15];
 			pG->Ob_model[Ob_no].Free0 = Work_a;
@@ -1100,19 +1147,14 @@ ULONG Item_aot_set(SCE_TASK *pSce)
 			}
 		}
 	}
-	else {
-		pG->Sce_aot[Work_a]->Id = SCE_NOTHING;
-		if (Ob_no < 0x20) {
-			pG->Ob_model[Ob_no].Be_flg = 0x80000000;
-			pG->Ob_model[Ob_no].Free0 = 0;
-		}
-	}
 	return 1;
 }
 
 /* DS 0x80054e14 (Item_aot_set2) */
 ULONG Item_aot_set2(SCE_TASK *pSce)
 {
+	/* retail reserves 8 more bytes of locals (Item_aot_set2 frame 64); never read */
+	volatile int Rsv[2];
 	UCHAR Work_a;
 	UCHAR Chance;
 	USHORT Flg_bit;
@@ -1122,30 +1164,32 @@ ULONG Item_aot_set2(SCE_TASK *pSce)
 	UCHAR *pData;
 	ULONG *pFlg_nrm;
 	UINT Ob_no;
+	tagGLOBAL *pG;
 	ULONG *pFlg_alt;
-	ULONG Pad[2];
 
-	(void)Pad;
+	pG = &G;
 	pData = pSce->Data;
 	Flg_bit = ((SCE_ITEM_AOT_REC *)pData)->Flg_bit;
 	Ob_no = (UINT)pData[0x14];
 	pSce->Data = pData + 0x18;
 	Work_a = pData[1];
-	if (G.Sce_aot[Work_a] == (SCE_AOT *)0x0) {
-		G.nSce_aot++;
+	if (pG->Sce_aot[Work_a] == (SCE_AOT *)0x0) {
+		pG->nSce_aot++;
 	}
-	G.Sce_aot[Work_a] = (SCE_AOT *)(pData + 2);
-	pFlg_nrm = Flg_addr[FLAG_ITEM];
-	pFlg_alt = Flg_addr[FLAG_EX_0];
-	if (3 < G.SaveData.Stage_no) {
+	pG->Sce_aot[Work_a] = (SCE_AOT *)(pData + 2);
+	if (3 < pG->SaveData.Stage_no) {
 		pFlg_nrm = Flg_addr[FLAG_ITEM_2];
 		pFlg_alt = Flg_addr[FLAG_EX_1];
 	}
-	Ret = Stage_room_to_mapno((int)G.SaveData.Stage_no, (int)G.SaveData.Room_no);
-	Ret = Flg_ck(G.SaveData.Map_flg, Ret);
+	else {
+		pFlg_nrm = Flg_addr[FLAG_ITEM];
+		pFlg_alt = Flg_addr[FLAG_EX_0];
+	}
+	Ret = Stage_room_to_mapno((int)pG->SaveData.Stage_no, (int)pG->SaveData.Room_no);
+	Ret = Flg_ck(pG->SaveData.Map_flg, Ret);
 	if (Ret == 0) {
 		Chance = pData[0x16];
-		Rnd_val = (int)Rnd() * 100;
+		Rnd_val = Rnd_s32() * 100;
 		if (Rnd_val < 0) {
 			Rnd_val += 0xff;
 		}
@@ -1156,20 +1200,20 @@ ULONG Item_aot_set2(SCE_TASK *pSce)
 		Flg_on((ULONG *)p, (UINT)Flg_bit);
 	}
 	Ret = Flg_ck((ULONG *)pFlg_nrm, (UINT)Flg_bit);
-	if (Ret == 0) {
+	if (Ret != 0) {
+		pG->Sce_aot[Work_a]->Id = SCE_NOTHING;
 		if (Ob_no < 0x20) {
-			Work_a = pData[0x15];
-			G.Ob_model[Ob_no].Free0 = Work_a;
-			if ((Work_a & ITEM_ACTION_BE_FLG) != 0) {
-				G.Ob_model[Ob_no].Be_flg = 0x80000000;
-			}
+			pG->Ob_model[Ob_no].Be_flg = 0x80000000;
+			pG->Ob_model[Ob_no].Free0 = 0;
 		}
 	}
 	else {
-		G.Sce_aot[Work_a]->Id = SCE_NOTHING;
 		if (Ob_no < 0x20) {
-			G.Ob_model[Ob_no].Be_flg = 0x80000000;
-			G.Ob_model[Ob_no].Free0 = 0;
+			Work_a = pData[0x15];
+			pG->Ob_model[Ob_no].Free0 = Work_a;
+			if ((Work_a & ITEM_ACTION_BE_FLG) != 0) {
+				pG->Ob_model[Ob_no].Be_flg = 0x80000000;
+			}
 		}
 	}
 	return 1;
@@ -1184,16 +1228,16 @@ typedef struct {
 /* DS 0x80055008 (Item_aot_set_4p) */
 ULONG Item_aot_set_4p(SCE_TASK *pSce)
 {
+	/* retail reserves 8 more bytes of locals (Item_aot_set_4p frame 48); never read */
+	volatile int Rsv[2];
 	UCHAR Work_a;
 	USHORT Flg_bit;
 	ULONG Ret;
 	ULONG *p;
 	UCHAR *pData;
 	UINT Ob_no;
-	ULONG Pad[2];
 	tagGLOBAL *pG;
 
-	(void)Pad;
 
 	pG = &G;
 	pData = pSce->Data;
@@ -1206,25 +1250,27 @@ ULONG Item_aot_set_4p(SCE_TASK *pSce)
 		pG->nSce_aot++;
 	}
 	pG->Sce_aot[Work_a] = (SCE_AOT *)(pData + 2);
-	p = Flg_addr[FLAG_ITEM];
 	if (3 < pG->SaveData.Stage_no) {
 		p = Flg_addr[FLAG_ITEM_2];
 	}
+	else {
+		p = Flg_addr[FLAG_ITEM];
+	}
 	Ret = Flg_ck((ULONG *)p, (UINT)Flg_bit);
-	if (Ret == 0) {
+	if (Ret != 0) {
+		pG->Sce_aot[Work_a]->Id = SCE_NOTHING;
+		if (Ob_no < 0x20) {
+			pG->Ob_model[Ob_no].Be_flg = 0x80000000;
+			pG->Ob_model[Ob_no].Free0 = 0;
+		}
+	}
+	else {
 		if (Ob_no < 0x20) {
 			Work_a = pData[0x1d];
 			pG->Ob_model[Ob_no].Free0 = Work_a;
 			if ((Work_a & ITEM_ACTION_BE_FLG) != 0) {
 				pG->Ob_model[Ob_no].Be_flg = 0x80000000;
 			}
-		}
-	}
-	else {
-		pG->Sce_aot[Work_a]->Id = SCE_NOTHING;
-		if (Ob_no < 0x20) {
-			pG->Ob_model[Ob_no].Be_flg = 0x80000000;
-			pG->Ob_model[Ob_no].Free0 = 0;
 		}
 	}
 	return 1;
@@ -1283,7 +1329,9 @@ ULONG Aot_on(SCE_TASK *pSce)
 		/* retail +0xc (data part) */
 		pArg = (SCE_AOT *)&pCAot->Data;
 	}
-	((CODE_PTR)(Sce_at_jump_tbl[pCAot->Id]))(pArg);
+	/* Called through the table's own SCE_AT_FUNC type (ULONG return, result unused), as SCE_AT.C does. DS
+	   (0x8005523c) then reloads pSce->Data into v1 and sets the return value 1 in the load delay slot. */
+	Sce_at_jump_tbl[pCAot->Id](pArg);
 	pSce->Data += 2;
 	return 1;
 }
@@ -1305,9 +1353,9 @@ typedef struct {
 	SHORT Ofs_x;		/* 0x1a */
 	SHORT Ofs_y;		/* 0x1c */
 	SHORT Ofs_z;		/* 0x1e */
-	USHORT At_w;		/* 0x20 */
-	USHORT Box_h;		/* 0x22 */
-	USHORT Box_d;		/* 0x24 */
+	SHORT At_w;		/* 0x20 */
+	SHORT Box_h;		/* 0x22 */
+	SHORT Box_d;		/* 0x24 */
 } SCE_OBJ_SET_REC;
 
 /* DS 0x80055260 (Obj_model_set) */
@@ -1316,12 +1364,12 @@ ULONG Obj_model_set(SCE_TASK *pSce)
 	UCHAR Work_c;
 	UCHAR Sup_flg;
 	UCHAR Cc_n;
-	short Work_a;
-	short Work_b;
-	short Pos_y_s;
-	USHORT Box_h;
-	USHORT Box_d;
-	USHORT Work_d;
+	LONG Work_a;
+	LONG Work_b;
+	LONG Pos_y_s;
+	LONG Box_h;
+	LONG Box_d;
+	ULONG Work_d;
 	ULONG Old_be_flg;
 	short (*pMtx)[3];
 	UINT Sup_mode;
@@ -1330,26 +1378,29 @@ ULONG Obj_model_set(SCE_TASK *pSce)
 	UINT Om_no;
 	OBJ_MODEL_WORK *pOm;
 	UCHAR *pData;
+	CC_PARTS_WORK *pCc;
+	tagGLOBAL *pG;
 
+	pG = &G;
 	pData = pSce->Data;
 	Work_c = pData[6];
 	Om_no = (UINT)pData[1];
 	Work_d = ((SCE_OBJ_SET_REC *)pData)->Work_d;
-	pOm = G.Ob_model + Om_no;
+	pOm = pG->Ob_model + Om_no;
 	Old_be_flg = pOm->Be_flg;
 	pOm->Id = pData[2];
 	pOm->nFloor = Work_c;
 	pOm->Type = Work_d;
 	Sup_flg = pData[7];
-	Work_e = (UINT)Sup_flg;
-	if (Old_be_flg == 0) {
-		pOm->Be_flg = (int)(short)(((SCE_OBJ_SET_REC *)pData)->Be_flg | OM_ENABLED);
-	}
-	else {
+	if (Old_be_flg != 0) {
 		pOm->Be_flg = 0;
 	}
-	if (G.pObj_work_end < G.Ob_model + Om_no + 1) {
-		G.pObj_work_end = G.Ob_model + Om_no + 1;
+	else {
+		pOm->Be_flg = (int)(short)(((SCE_OBJ_SET_REC *)pData)->Be_flg | OM_ENABLED);
+	}
+	/* retail reads pObj_work_end through its own address (lui+addiu), the other fields through the G base register */
+	if (G.pObj_work_end < pOm + 1) {
+		G.pObj_work_end = pOm + 1;
 	}
 	Work_a = ((SCE_OBJ_SET_REC *)pData)->Work_a;
 	Work_b = ((SCE_OBJ_SET_REC *)pData)->Work_b;
@@ -1374,37 +1425,32 @@ ULONG Obj_model_set(SCE_TASK *pSce)
 	Work_d = ((SCE_OBJ_SET_REC *)pData)->At_w;
 	Box_h = ((SCE_OBJ_SET_REC *)pData)->Box_h;
 	Box_d = ((SCE_OBJ_SET_REC *)pData)->Box_d;
-	Sup_mode = Work_e & 0xc0;
+	Sup_mode = Sup_flg & 0xc0;
 	pOm->Parts.Be_flg = 1;
 	pOm->Atd[0].At_w = Work_d;
 	pOm->Atd[0].At_h = Box_h;
 	pOm->Atd[0].At_d = Box_d;
-	if (Sup_mode == SUPER_WORK_TYPE_PLAYER) {
-		pMtx = G.Player.M;
+	/* retail: a switch on the two high bits of the super flag (decision tree 0x40, then 0, 0x80, 0xc0) */
+	switch (Sup_mode) {
+	case 0:
+		pOm->pSuper = (ULONG *)&GsIDMATRIX;
+		break;
+	case SUPER_WORK_TYPE_PLAYER:
+		pOm->pSuper = (ULONG *)pG->Player.M;
+		break;
+	case 0x80:
+		pOm->pSuper = (ULONG *)pG->pEnemy[Sup_flg & 0x3f]->M;
+		break;
+	case 0xc0:
+		pOm->pSuper = (ULONG *)&pG->Ob_model[Sup_flg & 0x3f].Workm;
+		break;
 	}
-	else {
-		if (Sup_mode < 0x41) {
-			if ((Sup_flg & 0xc0) == 0) {
-				pOm->pSuper = (ULONG *)&GsIDMATRIX;
-			}
-			goto tmd_setup;
-		}
-		if (Sup_mode == 0x80) {
-			pMtx = G.pEnemy[Work_e & 0x3f]->M;
-		}
-		else {
-			if (Sup_mode != 0xc0) goto tmd_setup;
-			pMtx = (short (*)[3])&G.Ob_model[Work_e & 0x3f].Workm;
-		}
-	}
-	pOm->pSuper = (ULONG *)pMtx;
-tmd_setup:
-	pTmd_adr = (ROOM_WORK *)(G.pRoom)->pOmodel[Om_no].Tmd_adr;
-	if (pTmd_adr == G.pRoom) {
-		pOm->Be_flg = 0;
-	}
-	else {
+	pTmd_adr = (ROOM_WORK *)(pG->pRoom)->pOmodel[Om_no].Tmd_adr;
+	if (pTmd_adr != pG->pRoom) {
 		Om_init(Om_no, (ULONG *)pTmd_adr);
+	}
+	else {
+		pOm->Be_flg = 0;
 	}
 	pMtx = pOm->M;
 	RotMatrix((SVECTOR *)&pOm->Cdir_x, (MATRIX *)pMtx);
@@ -1413,11 +1459,12 @@ tmd_setup:
 	Cc_n = pData[5];
 	if ((pData[3] & 0xc0) != 0) {
 		Work_e = (UINT)Cc_work.Ccol_no;
-		Cc_work.Cc_parts[Work_e].Cc_ctr = pData[3];
-		Cc_work.Cc_parts[Work_e].Cc_wait = Work_c;
-		Cc_work.Cc_parts[Work_e].Cc_num = Cc_n;
-		Cc_work.Cc_parts[Work_e].Cc_cnt = 0;
-		Cc_work.Cc_parts[Work_e].pOm = pOm;
+		pCc = &Cc_work.Cc_parts[Work_e];
+		pCc->Cc_ctr = pData[3];
+		pCc->Cc_wait = Work_c;
+		pCc->Cc_num = Cc_n;
+		pCc->Cc_cnt = 0;
+		pCc->pOm = pOm;
 		Cc_work.Ccol_no++;
 	}
 	Oma_set_ofs(pOm);
@@ -1469,12 +1516,13 @@ ULONG Super_set(SCE_TASK *pSce)
 			}
 			goto work_params;
 		}
+		/* Sup_mode is 0x80 in this branch, so Sup_val - 0x80 is the enemy number (Sup_val & 0x3f) */
 		if (Sup_mode == 0x80) {
 			if ((Sup_no & 0x80) != 0) {
-				pEm->pSuper = (ULONG *)&G.pEnemy[Sup_val & 0x3f]->pSin_parts_ptr[Sup_no & 0x7f].Workm;
+				pEm->pSuper = (ULONG *)&G.pEnemy[Sup_val - 0x80]->pSin_parts_ptr[Sup_no & 0x7f].Workm;
 				goto work_params;
 			}
-			pMat = (MATRIX *)&G.pEnemy[Sup_val & 0x3f]->M;
+			pMat = (MATRIX *)&G.pEnemy[Sup_val - 0x80]->M;
 		}
 		else {
 			if (Sup_mode != 0xc0) goto work_params;
@@ -1583,8 +1631,9 @@ typedef struct {
 /* DS 0x800558b0 (Super_reset) */
 ULONG Super_reset(SCE_TASK *pSce)
 {
-	short Dir_y_s;
-	short Dir_z_s;
+	LONG Cdir_x;		/* Cdir_x read from the record (kept signed; a direct copy loads it unsigned) */
+	LONG Dir_y_s;		/* Cdir_y source, read from the record */
+	LONG Dir_z_s;		/* Cdir_z source, read from the record */
 	ENEMY_WORK *pEm;
 	UCHAR *pData;
 	long Wm_x;
@@ -1602,7 +1651,8 @@ ULONG Super_reset(SCE_TASK *pSce)
 	pEm->Pos_z = Wm_z;
 	Dir_y_s = ((SCE_SUPER_RESET_REC *)pData)->Dir_y_s;
 	Dir_z_s = ((SCE_SUPER_RESET_REC *)pData)->Dir_z_s;
-	pEm->Cdir_x = ((SCE_SUPER_RESET_REC *)pData)->Cdir_x;
+	Cdir_x = ((SCE_SUPER_RESET_REC *)pData)->Cdir_x;
+	pEm->Cdir_x = Cdir_x;
 	pEm->Cdir_y = Dir_y_s;
 	pEm->Cdir_z = Dir_z_s;
 	pSce->Data = pData + 8;
@@ -1618,18 +1668,13 @@ ULONG Work_set(SCE_TASK *pSce)
 	int Idx;
 
 	pData = pSce->Data;
-	pSce->Spd_x = 0;
-	pSce->Spd_y = 0;
-	pSce->Spd_z = 0;
-	pSce->Dspd_x = 0;
-	pSce->Dspd_y = 0;
-	pSce->Dspd_z = 0;
-	pSce->Aspd_x = 0;
-	pSce->Aspd_y = 0;
-	pSce->Aspd_z = 0;
-	pSce->Adspd_x = 0;
-	pSce->Adspd_y = 0;
-	pSce->Adspd_z = 0;
+	/* Retail clears the twelve speed fields as six word stores (sw zero at +0x158 to +0x16c); each ULONG store below clears two adjacent SHORT fields. */
+	*(ULONG *)&pSce->Spd_x = 0;
+	*(ULONG *)&pSce->Spd_z = 0;
+	*(ULONG *)&pSce->Dspd_y = 0;
+	*(ULONG *)&pSce->Aspd_x = 0;
+	*(ULONG *)&pSce->Aspd_z = 0;
+	*(ULONG *)&pSce->Adspd_y = 0;
 	Kind = pData[1];
 	Idx = (int)(signed char)pData[2];
 	pSce->Data = pData + 3;
@@ -1670,18 +1715,18 @@ ULONG Parts_set(SCE_TASK *pSce)
 	pData = pSce->Data;
 	Parts_v = ((SCE_PARTS_REC *)pData)->Parts_v;
 	pParts = pSce->pWork->pSin_parts_ptr + (signed char)pData[2];
-	switch (pData[3]) {
-	case PARTS_POLY_RGB0:
-		*(short *)&pParts->Poly_rgb = Parts_v;
-		break;
-	case PARTS_POLY_RGB1:
-		((CVECTOR *)&pParts->Poly_rgb)->b = (char)Parts_v;
-		break;
+	switch ((signed char)pData[3]) {
 	case PARTS_BE_FLAG0:
 		*(short *)&pParts->Be_flg = Parts_v;
 		break;
 	case PARTS_BE_FLAG1:
 		*((short *)&pParts->Be_flg + 1) = Parts_v;
+		break;
+	case PARTS_POLY_RGB0:
+		*(short *)&pParts->Poly_rgb = Parts_v;
+		break;
+	case PARTS_POLY_RGB1:
+		((CVECTOR *)&pParts->Poly_rgb)->b = (char)Parts_v;
 		break;
 	case PARTS_CDIR_X:
 		pParts->Cdir_x = Parts_v;
@@ -1722,21 +1767,24 @@ ULONG Speed_set(SCE_TASK *pSce)
 /* DS 0x80055ab0 (Add_speed) */
 ULONG Add_speed(SCE_TASK *pSce)
 {
-	short Vel_y;
-	short Vel_z;
+	ULONG S0;
+	ULONG S1;
+	ULONG S2;
 	ENEMY_WORK *pEm;
 
 	pEm = pSce->pWork;
-	Vel_y = pSce->Spd_y;
-	Vel_z = pSce->Spd_z;
-	pEm->Pos_x = pEm->Pos_x + (int)pSce->Spd_x;
-	pEm->Pos_y = pEm->Pos_y + (int)Vel_y;
-	pEm->Pos_z = pEm->Pos_z + (int)Vel_z;
-	Vel_y = pSce->Dspd_y;
-	Vel_z = pSce->Dspd_z;
-	pEm->Cdir_x += pSce->Dspd_x;
-	pEm->Cdir_y += Vel_y;
-	pEm->Cdir_z += Vel_z;
+	S0 = pSce->Spd_x;
+	S1 = pSce->Spd_y;
+	S2 = pSce->Spd_z;
+	pEm->Pos_x += S0;
+	pEm->Pos_y += S1;
+	pEm->Pos_z += S2;
+	S0 = pSce->Dspd_x;
+	S1 = pSce->Dspd_y;
+	S2 = pSce->Dspd_z;
+	pEm->Cdir_x += S0;
+	pEm->Cdir_y += S1;
+	pEm->Cdir_z += S2;
 	pSce->Data++;
 	return 1;
 }
@@ -1766,19 +1814,22 @@ typedef struct {
 /* DS 0x80055ba0 (Pos_set) */
 ULONG Pos_set(SCE_TASK *pSce)
 {
-	short Pos_y_s;
-	short Pos_z_s;
+	LONG S0;
+	LONG S1;
+	LONG S2;
 	UCHAR *pData;
 	ENEMY_WORK *pEm;
 
 	pData = pSce->Data;
 	pEm = pSce->pWork;
-	Pos_y_s = ((SCE_POS_REC *)pData)->Pos_y_s;
-	Pos_z_s = ((SCE_POS_REC *)pData)->Pos_z_s;
-	pEm->Pos_x = (int)((SCE_POS_REC *)pData)->Pos_x;
-	pEm->Pos_y = (int)Pos_y_s;
-	pEm->Pos_z = (int)Pos_z_s;
-	pSce->Data = pData + 8;
+	S0 = ((SCE_POS_REC *)pData)->Pos_x;
+	S1 = ((SCE_POS_REC *)pData)->Pos_y_s;
+	S2 = ((SCE_POS_REC *)pData)->Pos_z_s;
+	pData += 8;
+	pEm->Pos_x = S0;
+	pEm->Pos_y = S1;
+	pEm->Pos_z = S2;
+	pSce->Data = pData;
 	return 1;
 }
 
@@ -1794,8 +1845,9 @@ typedef struct {
 /* DS 0x80055bd0 (Dir_set) */
 ULONG Dir_set(SCE_TASK *pSce)
 {
-	short Dir_y_s;
-	short Dir_z_s;
+	LONG Cdir_x;		/* Cdir_x read from the record (kept signed; a direct copy loads it unsigned) */
+	LONG Dir_y_s;		/* Cdir_y source, read from the record */
+	LONG Dir_z_s;		/* Cdir_z source, read from the record */
 	UCHAR *pData;
 	ENEMY_WORK *pEm;
 
@@ -1803,7 +1855,8 @@ ULONG Dir_set(SCE_TASK *pSce)
 	pEm = pSce->pWork;
 	Dir_y_s = ((SCE_DIR_REC *)pData)->Dir_y_s;
 	Dir_z_s = ((SCE_DIR_REC *)pData)->Dir_z_s;
-	pEm->Cdir_x = ((SCE_DIR_REC *)pData)->Cdir_x;
+	Cdir_x = ((SCE_DIR_REC *)pData)->Cdir_x;
+	pEm->Cdir_x = Cdir_x;
 	pEm->Cdir_y = Dir_y_s;
 	pEm->Cdir_z = Dir_z_s;
 	pSce->Data = pData + 8;
@@ -1891,17 +1944,18 @@ void Member_set_branch(ENEMY_WORK *pW, ULONG Member, long D0)
 /* DS 0x80055e38 (Member_copy) */
 ULONG Member_copy(SCE_TASK *pSce)
 {
-	UCHAR Dst_no;
-	UCHAR Mem_no;
-	UCHAR *pData;
-	long Mem_val;
+	/* The SCE record is { opcode, destination, member }. DS reads both operand bytes with lb (signed); plain
+	   char is unsigned in this build, so the record pointer is signed char. The destination selects
+	   Sce_work[Dst_no - 4] (DS shifts it once and folds the -4 into the Sce_work base address). */
+	ULONG Dst_no;
+	ULONG Mem_no;
+	signed char *pData;
 
-	pData = pSce->Data;
+	pData = (signed char *)pSce->Data;
 	Dst_no = pData[1];
 	Mem_no = pData[2];
-	pSce->Data = pData + 3;
-	Mem_val = Load_member_branch(pSce->pWork, (int)(signed char)Mem_no);
-	G.SaveData.Sce_work[(signed char)Dst_no + -4] = (short)Mem_val;
+	pSce->Data = (UCHAR *)(pData + 3);
+	G.SaveData.Sce_work[Dst_no - 4] = (SHORT)Load_member_branch(pSce->pWork, Mem_no);
 	return 1;
 }
 
@@ -1920,7 +1974,7 @@ ULONG Member_cmp(SCE_TASK *pSce)
 	UCHAR *pData;
 	UINT Mem_val;
 	ULONG Ret;
-	UINT Cmp_op;
+	int Cmp_op;
 	UINT Cmp_val;
 
 	pData = pSce->Data;
@@ -1928,15 +1982,15 @@ ULONG Member_cmp(SCE_TASK *pSce)
 	Cmp_val = (UINT)((SCE_MEMBER_CMP_REC *)pData)->Cmp_val;
 	pSce->Data = pData + 6;
 	Mem_val = Load_member_branch(pSce->pWork, Cmp_word & 0xff);
-	Cmp_op = (int)(UINT)Cmp_word >> 8;
-	Ret = (ULONG)(Cmp_op < 7);
+	Cmp_op = Cmp_word >> 8;
+	Ret = (ULONG)((UINT)Cmp_op < 7);
 	if (Ret != 0) {
 		switch (Cmp_op) {
-		case CMP_EQ:  Ret = (ULONG)(Mem_val == Cmp_val); break;
-		case CMP_GT:  Ret = (ULONG)((int)Cmp_val < (int)Mem_val); break;
-		case CMP_GE:  Ret = ((int)Mem_val < (int)Cmp_val) ^ 1; break;
-		case CMP_LT:  Ret = (ULONG)((int)Mem_val < (int)Cmp_val); break;
-		case CMP_LE:  Ret = ((int)Cmp_val < (int)Mem_val) ^ 1; break;
+		case CMP_EQ:  return (ULONG)(Mem_val == Cmp_val);
+		case CMP_GT:  return (ULONG)((int)Cmp_val < (int)Mem_val);
+		case CMP_GE:  return ((int)Mem_val < (int)Cmp_val) ^ 1;
+		case CMP_LT:  return (ULONG)((int)Mem_val < (int)Cmp_val);
+		case CMP_LE:  return ((int)Cmp_val < (int)Mem_val) ^ 1;
 		case CMP_NE:  Ret = (ULONG)(Mem_val != Cmp_val); break;
 		case CMP_AND: Ret = (ULONG)((Mem_val & Cmp_val) != 0); break;
 		}
@@ -2004,7 +2058,7 @@ long Load_member_branch(ENEMY_WORK *pW, ULONG Member)
 /* DS 0x80056188 (Member_calc) */
 ULONG Member_calc(SCE_TASK *pSce)
 {
-	short Imm;
+	LONG Imm;
 	USHORT Cmd_word;
 	short *Ans;
 
@@ -2102,7 +2156,6 @@ ULONG Dir_ck(SCE_TASK *pSce)
 
 	pData = pSce->Data;
 	pSce->Data = pData + 8;
-	Ret = Goto00_ck(pSce->pWork, (int)((SCE_DIR_CK_REC *)pData)->Vec_x, (int)((SCE_DIR_CK_REC *)pData)->Vec_z,
-					  ((SCE_DIR_CK_REC *)pData)->Add_dir);
+	Ret = Goto00_ck(pSce->pWork, (int)((SCE_DIR_CK_REC *)pData)->Vec_x, (int)((SCE_DIR_CK_REC *)pData)->Vec_z, ((SCE_DIR_CK_REC *)pData)->Add_dir);
 	return (UINT)(Ret == 0);
 }

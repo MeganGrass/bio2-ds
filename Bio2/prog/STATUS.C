@@ -9,7 +9,6 @@
 #include "ROOM.H"
 #include <LIBGPU.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBSPU.H>
 #include "STATUS.h"
 #include "CD.H"
@@ -35,21 +34,18 @@
 #include "flag.h"
 
 /* DS 0x800d4e00 */
-UCHAR bk_cut[] = {
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0
-};
+UCHAR bk_cut[24];
 
 /* DS 0x800d5bf0 (St) */
-STATUS St = { 0 };
+STATUS St;
 
 /* DS 0x800dcbcc (bk_light) */
-LIGHT_CUT_DATA *bk_light = 0;
+LIGHT_CUT_DATA *bk_light;
 
 
-/* DS 0x801a8820: TIM buffer uploaded by Status_init_m (no Ghidra label) */
+/* DS 0x801a8820: TIM buffer uploaded by Status_init_m */
 #define St_tim_buf2		((ULONG *)0x801a8820)
-/* DS 0x801b5000: VRAM save buffer for St_pltex_operation (no Ghidra label) */
+/* DS 0x801b5000: VRAM save buffer for St_pltex_operation */
 #define St_pltex_buf		((ULONG *)0x801b5000)
 
 /* DS 0x80068068 (Status_init) */
@@ -189,55 +185,61 @@ VOID Status_init(VOID)
 /* DS 0x80068484 (Status_init_m) */
 VOID Status_init_m(VOID)
 {
-	register STATUS *pSt;				// 4208 bytes
+	register STATUS *pSt;
 	register ULONG i;
 
-	ULONG File_no;
-	UCHAR *Mess;
 	DR_MODE *pDmode0;
 	DR_MODE *pDmode1;
 	ULONG iconIdx;
 	MAP_DATA *pMapData;
+	ITEM_WORK *pItem;
+	ULONG *pBuf;
 
+	i = 10;
 	pSt = &St;
+	pItem = G.SaveData.Item_work;
 
-	if ((G.System_flg & SYS_EX_BATTLE) == 0 ||
-		G.SaveData.Player_life == 0 || G.SaveData.Player_life == 2) {
-		File_no = ST0_TIM;
-		Mess = (UCHAR *)"ST0";
-		Cd_read(File_no, Bg_img_buf, 0, Mess);
-	} else if (G.SaveData.Player_life == 1) {
-		File_no = ST1_TIM;
-		Mess = (UCHAR *)"ST1";
-		Cd_read(File_no, Bg_img_buf, 0, Mess);
-	} else if (G.SaveData.Player_life == 3) {
-		File_no = ST1__TIM;
-		Mess = (UCHAR *)"ST1";
-		Cd_read(File_no, Bg_img_buf, 0, Mess);
+	if ((G.System_flg & SYS_EX_BATTLE) != 0) {
+		switch (G.SaveData.Player_life) {
+		case 0:
+			Cd_read(ST0_TIM, Bg_img_buf, 0, (UCHAR *)"ST0");
+			break;
+		case 1:
+			Cd_read(ST1_TIM, Bg_img_buf, 0, (UCHAR *)"ST1");
+			break;
+		case 2:
+			Cd_read(ST0_TIM, Bg_img_buf, 0, (UCHAR *)"ST0");
+			break;
+		case 3:
+			Cd_read(ST1__TIM, Bg_img_buf, 0, (UCHAR *)"ST1");
+			break;
+		}
+	} else {
+		Cd_read(ST0_TIM, Bg_img_buf, 0, (UCHAR *)"ST0");
 	}
 
-	G.Ctpage = 0x1a;
-	G.Cclut  = 0x04;
+	/* DS stores Ctpage (0x1a) and Cclut (0x04) with one sh */
+	*(USHORT *)&G.Ctpage = 0x041a;
 	Mapping_tim(Bg_img_buf);
-	G.Ctpage = 0x1b;
-	G.Cclut  = 0x0a;
+	/* Ctpage 0x1b, Cclut 0x0a */
+	*(USHORT *)&G.Ctpage = 0x0a1b;
 	Mapping_tim(St_tim_buf2);
 	Cd_read(ITEMALL_PIX, Bg_img_buf, 0, (UCHAR *)"ITEM ALL");
 
-	i = 10;
+	pBuf = Bg_img_buf;
 	do {
 		i--;
-		if (G.SaveData.Item_work[i].Size == 0x02) {
-			iconIdx = G.SaveData.Item_work[i].Id + 0x56;
+		if (pItem[i].Size == 0x02) {
+			iconIdx = pItem[i].Id + 0x56;
 		} else {
-			iconIdx = G.SaveData.Item_work[i].Id;
+			iconIdx = pItem[i].Id;
 		}
-		Pix_trans((i >> 1) + i, Bg_img_buf + iconIdx * 300);
+		Pix_trans((i >> 1) + i, pBuf + iconIdx * 300);
 	} while (i != 0);
 
-	/* SetDrawMode for Dmode[0xb..0x6] tpage 0x9b */
-	pDmode0 = (DR_MODE *)&St.Dmode[0xb][0].code[1];
-	pDmode1 = (DR_MODE *)&St.Dmode[0xa][1].code[1];
+	/* St.Dmode slots 0..7 (both buffers), tpage 0x9b. The slot numbers are the retail ones: DS 0x800d69f8 + slot * 24. */
+	pDmode0 = (DR_MODE *)&St.Dmode[0x8][0];
+	pDmode1 = (DR_MODE *)&St.Dmode[0x7][1];
 	for (i = 8; i > 0; i--) {
 		pDmode0 -= 2;
 		SetDrawMode(pDmode0, 0, 0, 0x9b, (RECT *)0);
@@ -245,9 +247,9 @@ VOID Status_init_m(VOID)
 		pDmode1 -= 2;
 	}
 
-	/* SetDrawMode for Dmode[0x11..0x6] tpage 0x1b */
-	pDmode0 = (DR_MODE *)&St.Dmode[0x11][0].code[1];
-	pDmode1 = (DR_MODE *)&St.Dmode[0x10][1].code[1];
+	/* St.Dmode slots 8..13, tpage 0x1b */
+	pDmode0 = (DR_MODE *)&St.Dmode[0xe][0];
+	pDmode1 = (DR_MODE *)&St.Dmode[0xd][1];
 	for (i = 6; i > 0; i--) {
 		pDmode0 -= 2;
 		SetDrawMode(pDmode0, 0, 0, 0x1b, (RECT *)0);
@@ -255,9 +257,10 @@ VOID Status_init_m(VOID)
 		pDmode1 -= 2;
 	}
 
-	/* SetDrawMode for Dmode[0x15..0x12] tpage 0x9a */
-	pDmode0 = (DR_MODE *)&St.Dmode[0x15][0].code[1];
-	pDmode1 = (DR_MODE *)&St.Dmode[0x14][1].code[1];
+	/* St.Dmode slots 14..17, tpage 0x9a; slot 18 follows with tpage 0x97, slot 21 (DS 0x800d6bf0) is the end-of-list tag of the
+	 * status screen, slots 22 and 23 (DS 0x800d6c08 and 0x800d6c20) the two end-of-list tags of the map screens. */
+	pDmode0 = (DR_MODE *)&St.Dmode[0x12][0];
+	pDmode1 = (DR_MODE *)&St.Dmode[0x11][1];
 	for (i = 4; i > 0; i--) {
 		pDmode0 -= 2;
 		SetDrawMode(pDmode0, 0, 0, 0x9a, (RECT *)0);
@@ -265,19 +268,20 @@ VOID Status_init_m(VOID)
 		pDmode1 -= 2;
 	}
 
-	SetDrawMode((DR_MODE *)&St.Dmode[0x15][0].code[1], 0, 0, 0x97, (RECT *)0);
-	SetDrawMode((DR_MODE *)&St.Dmode[0x15][1].code[1], 0, 0, 0x97, (RECT *)0);
-	SetDrawMode(&St_end_tag_c[0], 0, 0, 0xb7, (RECT *)0);
-	SetDrawMode(&St_end_tag_c[1], 0, 0, 0xb7, (RECT *)0);
-	SetDrawMode(&Map_end_tag[0], 0, 0, 0x17, (RECT *)0);
-	SetDrawMode(&Map_end_tag[1], 0, 0, 0x17, (RECT *)0);
-	SetDrawMode(&Map_end_tag[2], 0, 0, 0x1b, (RECT *)0);
-	SetDrawMode(&Map_end_tag[3], 0, 0, 0x1b, (RECT *)0);
+	SetDrawMode((DR_MODE *)&St.Dmode[0x12][0], 0, 0, 0x97, (RECT *)0);
+	SetDrawMode((DR_MODE *)&St.Dmode[0x12][1], 0, 0, 0x97, (RECT *)0);
+	SetDrawMode(&St.Dmode[0x15][0], 0, 0, 0xb7, (RECT *)0);
+	SetDrawMode(&St.Dmode[0x15][1], 0, 0, 0xb7, (RECT *)0);
+	SetDrawMode(&St.Dmode[0x16][0], 0, 0, 0x17, (RECT *)0);
+	SetDrawMode(&St.Dmode[0x16][1], 0, 0, 0x17, (RECT *)0);
+	SetDrawMode(&St.Dmode[0x17][0], 0, 0, 0x1b, (RECT *)0);
+	SetDrawMode(&St.Dmode[0x17][1], 0, 0, 0x1b, (RECT *)0);
 
 	pSt->St_type        = 0;
 	pSt->Machinegun_trg = 0;
 	pSt->Pl_chenge_flg  = 0;
-	St.Dmode[3][0].tag &= 0xffff;
+	pSt->dm00 = 0;
+	pSt->Equip_pending_flg = 0;
 	pSt->Main_rtn = 0;
 	pSt->Sub_rtn0 = 0;
 	pSt->Sub_rtn1 = 0;
@@ -299,17 +303,8 @@ VOID Status_init_m(VOID)
 		Map_info[0x11].pMap_data[4].W = 44;
 	}
 
-	pMapData = Map_info[6].pMap_data;
-	if (((G.Status_flg & STAT_SPECIAL_RUN) == 0) && ((G.System_flg & SYS_EX_BATTLE) == 0)) {
-		pMapData[0].Pl1_flg = 0x01;
-		pMapData[1].Pl1_flg = 0x01;
-		pMapData[2].Pl1_flg = 0x01;
-		pMapData[9].Pl1_flg = 0x01;
-		pMapData = Map_info[5].pMap_data;
-		pMapData[1].Pl1_flg  = 0x01;
-		pMapData[9].Pl1_flg  = 0x01;
-		pMapData[10].Pl1_flg = 0x01;
-	} else {
+	if (((G.Status_flg & STAT_SPECIAL_RUN) != 0) || ((G.System_flg & SYS_EX_BATTLE) != 0)) {
+		pMapData = Map_info[6].pMap_data;
 		if ((G.System_flg & SYS_ENDING) == 0) {
 			Flg_on(G.SaveData.Map_c_flg + 1, 4);
 		}
@@ -321,9 +316,21 @@ VOID Status_init_m(VOID)
 		pMapData[1].Pl1_flg  = 0;
 		pMapData[9].Pl1_flg  = 0;
 		pMapData[10].Pl1_flg = 0;
+	} else {
+		pMapData = Map_info[6].pMap_data;
+		pMapData[0].Pl1_flg = 0x01;
+		pMapData[1].Pl1_flg = 0x01;
+		pMapData[2].Pl1_flg = 0x01;
+		pMapData[9].Pl1_flg = 0x01;
+		pMapData = Map_info[5].pMap_data;
+		pMapData[1].Pl1_flg  = 0x01;
+		pMapData[9].Pl1_flg  = 0x01;
+		pMapData[10].Pl1_flg = 0x01;
 	}
-	if (((G.System_flg & SYS_EX_BATTLE) != 0) && ((G.System_flg & SYS_ENDING) == 0)) {
-		Flg_on(G.SaveData.Map_c_flg + 1, 1);
+	if ((G.System_flg & SYS_EX_BATTLE) != 0) {
+		if ((G.System_flg & SYS_ENDING) == 0) {
+			Flg_on(G.SaveData.Map_c_flg + 1, 1);
+		}
 	}
 }
 
@@ -349,13 +356,14 @@ VOID Status(VOID)
 		{ 4800, 3000, 0 }
 	};
 	register STATUS *pSt;					// 4208 bytes
-	register GLOBAL *pG;					// 35412 bytes
 	register ULONG i;
+	register GLOBAL *pG;				// base of the item slot loop: the slot offsets in G exceed 32767
 	ULONG iconIdx;
 	UCHAR *pNumCol;
+	ULONG *pBuf;
 
 	pSt = &St;
-	pG  = &G;
+	pG = &G;
 
 	Task_suspend(0);
 	Bg_set_mode(2, 0x200808);
@@ -365,6 +373,7 @@ VOID Status(VOID)
 
 	if (St.Pl_chenge_flg != 0) {
 		Cd_read(ITEMALL_PIX, Bg_img_buf, 0, (UCHAR *)"ITEM ALL");
+		pBuf = Bg_img_buf;
 		i = 10;
 		do {
 			i--;
@@ -373,7 +382,7 @@ VOID Status(VOID)
 			} else {
 				iconIdx = pG->SaveData.Item_work[i].Id;
 			}
-			Pix_trans((i >> 1) + i, Bg_img_buf + iconIdx * 300);
+			Pix_trans((i >> 1) + i, pBuf + iconIdx * 300);
 		} while (i != 0);
 		pSt->Pl_chenge_flg = 0;
 	}
@@ -388,10 +397,10 @@ VOID Status(VOID)
 	i = 1;
 	pNumCol = &Item_data_tbl[1].Item_num_col;
 	do {
-		if (Flg_ck(&G.SaveData.Weapon_mugen, i) == 0) {
-			*pNumCol &= ~0x10;
-		} else {
+		if (Flg_ck(&G.SaveData.Weapon_mugen, i) != 0) {
 			*pNumCol |= 0x10;
+		} else {
+			*pNumCol &= ~0x10;
 		}
 		i++;
 		pNumCol += 8;
@@ -425,15 +434,15 @@ VOID Status(VOID)
 	pSt->Icursol_main = 0;
 	pSt->Icursol_sub  = 0;
 
-	if ((St.Dmode[3][0].tag >> 24) == 0) {
-		pSt->Equip_item_no_old = pSt->Equip_item_no;
-		pSt->Equip_item_id_old = pSt->Equip_item_id;
-	} else {
+	if (pSt->Equip_pending_flg != 0) {
 		pSt->Equip_item_no_old = 0x80;
 		pSt->Equip_item_id_old = 0;
-		St.Dmode[3][0].tag &= 0x00ffffff;
-		pSt->Equip_item_no = (UCHAR)St.Dmode[3][0].code[0];
-		pSt->Equip_item_id = (UCHAR)(St.Dmode[3][0].code[0] >> 8);
+		pSt->Equip_pending_flg = 0;
+		pSt->Equip_item_no = pSt->Equip_pending_no;
+		pSt->Equip_item_id = pSt->Equip_pending_id;
+	} else {
+		pSt->Equip_item_no_old = pSt->Equip_item_no;
+		pSt->Equip_item_id_old = pSt->Equip_item_id;
 	}
 
 	pSt->Exit_flg  = 0x01;
@@ -458,14 +467,14 @@ VOID St_exit(VOID)
 
 	pSt = &St;
 	St_pltex_operation(1);
-	equipId = pSt->Equip_item_id;
-	equipNo = pSt->Equip_item_no;
-
 	if ((G.SaveData.Use_id == 0x32) || (G.SaveData.Use_id == 0x4b) || (G.SaveData.Use_id == 0x43)) {
-		pSt->Equip_item_no = 0x80;
-		pSt->Equip_item_id = 0;
-		St.Dmode[3][0].tag = (St.Dmode[3][0].tag & 0x00ffffff) | 0x01000000;
-		St.Dmode[3][0].code[0] = (St.Dmode[3][0].code[0] & 0xffff0000) | ((ULONG)equipId << 8) | equipNo;
+		equipNo = pSt->Equip_item_no;
+		equipId = pSt->Equip_item_id;
+		St.Equip_item_no = 0x80;
+		St.Equip_item_id = 0;
+		pSt->Equip_pending_flg = 1;
+		pSt->Equip_pending_no = equipNo;
+		pSt->Equip_pending_id = equipId;
 	}
 
 	if (pSt->St_type == 0x01) {
@@ -484,13 +493,10 @@ VOID St_exit(VOID)
 		if ((G.Status_flg & STAT_MIRROR_MATRIX) != 0) {
 			Mirror_weapon_cp((ENEMY_WORK *)&G.Player);
 		}
-		Snd_sys_arms_set((UCHAR)G.Player.Type);
+		((void (*)(UINT))Snd_sys_arms_set)(G.Player.Type);
 	}
 
-	Main.Bg_chg_flg = 0x02;
-	if (pSt->St_type == 0x02) {
-		Main.Bg_chg_flg = 0x01;
-	}
+	Main.Bg_chg_flg = (pSt->St_type == 0x02) ? 0x01 : 0x02;
 	pSt->St_type = 0;
 
 	if (G.SaveData.Item_work[pSt->Equip_item_no].Num != 0) {
@@ -563,7 +569,7 @@ VOID St_chenge_pl(register ULONG pl_id)
 			pG->SaveData.Item_work[i].Size = init_item_tbl_Ada[offset + i][2];
 		}
 	} else {
-		if (Flg_ck(pG->SaveData.Common_flg, 0x7f) != 0) {
+		if (Flg_ck(G.SaveData.Common_flg, 0x7f) != 0) {
 			do {
 				pG->SaveData.Item_work[i].Id   = pG->Bk_item_work[i].Id;
 				pG->SaveData.Item_work[i].Num  = pG->Bk_item_work[i].Num;
@@ -572,19 +578,16 @@ VOID St_chenge_pl(register ULONG pl_id)
 			} while (i < 10);
 			pG->SaveData.Max_item_num = pG->Bk_item_num;
 			pSt->Equip_item_no = pG->Bk_equip_no;
-			if (pG->Bk_equip_no == 0x80) {
-				pSt->Equip_item_id = 0;
-			} else {
+			if (pSt->Equip_item_no != 0x80) {
 				pSt->Equip_item_id = pG->SaveData.Item_work[pG->Bk_equip_no].Id;
+			} else {
+				pSt->Equip_item_id = 0;
 			}
-			pG->SaveData.Item_work[10].Id = 0x30;
-			if ((pl_id & 1) == 0) {
-				pG->SaveData.Item_work[10].Id = 47;
-			}
+			pG->SaveData.Item_work[10].Id = ((pl_id & 1) != 0) ? 0x30 : 47;
 			pG->SaveData.Item_work[10].Num  = 0x01;
 			pG->SaveData.Item_work[10].Size = 0x00;
 		}
-		Flg_off(pG->SaveData.Common_flg, 0x7f);
+		Flg_off(G.SaveData.Common_flg, 0x7f);
 	}
 }
 
@@ -594,7 +597,7 @@ VOID pl_tim_load(register ENEMY_WORK *pEm)
 	register UCHAR *Buf_top;
 	PL_DATA_TBL *pTbl;
 	ULONG *pBase;
-	ULONG unused_slot[6];				/* DS reserves 24 bytes of frame here and never touches them */
+	ULONG unused_slot[6];				/* 24-byte block of the frame, never touched */
 
 	(void)unused_slot;
 
@@ -619,32 +622,40 @@ ULONG St_file_set(register ULONG file_no)
 {
 	register ULONG i;
 
-	UCHAR *pFileTag = G.SaveData.File_tag_bk;
 	for (i = 0; i < 0x18; i++) {
-		if (*pFileTag == 0xff) {
-			*pFileTag = (UCHAR)file_no;
+		if (G.SaveData.File_tag_bk[i] == 0xff) {
+			G.SaveData.File_tag_bk[i] = (UCHAR)file_no;
 			return i;
 		}
-		pFileTag++;
 	}
-	return 0;
+	/* DS has no return statement after the loop: v0 still holds the failed i < 0x18 test (0) at the jr ra, so
+	   a full tag table returns 0. */
 }
 
 /* DS 0x8006931c (St_room_set) */
 VOID St_room_set(VOID)
 {
+	/* The mockup and the beta debug record list flag as the only local; the beta keeps it in v1, the register
+	   DS uses for the per-stage base below. It is the bit number handed to both Flg_on calls. */
 	register ULONG flag;
 
-	LONG flgBase = 0;
+	/* First Map_flg bit of each stage; the room number is added to it. */
+	flag = 0;
 	switch (G.SaveData.Stage_no) {
-	case 1: flgBase = 0x1e; break;
-	case 2: flgBase = 0x3a; break;
-	case 3: flgBase = 0x48; break;
-	case 4: flgBase = 0x59; break;
-	case 5: flgBase = 99;   break;
-	case 6: flgBase = 0x7b; break;
+	case 0: break;
+	case 1: flag = 0x1e; break;
+	case 2: flag = 0x3a; break;
+	case 3: flag = 0x48; break;
+	case 4: flag = 0x59; break;
+	case 5: flag = 99;   break;
+	case 6: flag = 0x7b; break;
 	}
-	Flg_on(G.SaveData.Map_flg, flgBase + G.SaveData.Room_no);
+	/* Room_no is added before Map_flg's address is formed. DS computes &G.SaveData.Room_no into s0
+	   (lui/addiu 0x481e), reads Room_no through it both times (lh 0(s0)) and reaches Map_flg (s0 + 0xee) and
+	   Map_o_flg (s0 + 0xea) from it. With flag + Room_no written as the Flg_on argument, CCPSX bases s0 on
+	   Map_flg instead and reloads Room_no with its own lui each time. */
+	flag += G.SaveData.Room_no;
+	Flg_on(G.SaveData.Map_flg, flag);
 	flag = Check_map_no((ULONG)G.SaveData.Stage_no, (ULONG)G.SaveData.Room_no);
 	Flg_on(&G.SaveData.Map_o_flg, flag);
 }
@@ -678,7 +689,7 @@ VOID Set_iwork_num(register ULONG no, register ULONG num)
 {
 	register GLOBAL *pG;				// 35412 bytes
 
-	UCHAR itemSize;
+	ULONG itemSize;
 
 	pG = &G;
 	itemSize = pG->SaveData.Item_work[no].Size;
@@ -702,13 +713,13 @@ ULONG Check_pl_life(VOID)
 	max_life = (ULONG)G.Player.Max_life;
 	if (G.Pl_poison_timer == 0) {
 		if (now_life <= (max_life >> 1)) {
-			if (now_life < 0x29) {
-				if (now_life < 0x15) {
-					return 3;
-				}
-				return 2;
+			if (now_life >= 0x29) {
+				return 1;
 			}
-			return 1;
+			if (now_life < 0x15) {
+				return 3;
+			}
+			return 2;
 		}
 		return 0;
 	}
@@ -718,10 +729,10 @@ ULONG Check_pl_life(VOID)
 /* DS 0x80069590 (Check_item_space) */
 ULONG Check_item_space(register ULONG id)
 {
-	if (id == 0x13) {
-		return 0;
+	if (id != 0x13) {
+		return (ULONG)(id - 0xe < 6);
 	}
-	return (ULONG)(id - 0xe < 6);
+	return 0;
 }
 
 /* DS 0x800695b0 (Check_item_mix) */
@@ -738,8 +749,7 @@ ULONG Check_item_mix(VOID)
 	id_m = G.SaveData.Item_work[pSt->Icursol_main].Id;
 	id_s = G.SaveData.Item_work[pSt->Icursol_sub].Id;
 
-	if ((pSt->Icursol_sub != pSt->Icursol_main) && (id_s != 0) &&
-		(Item_data_tbl[id_m].Item_mix_num != 0)) {
+	if ((pSt->Icursol_sub != pSt->Icursol_main) && (id_s != 0) && (Item_data_tbl[id_m].Item_mix_num != 0)) {
 		im_data  = Item_data_tbl[id_m].Item_mix_data;
 		mix_max  = Item_data_tbl[id_m].Item_mix_num;
 		for (ctr = 0; ctr < mix_max; ctr++) {
@@ -759,24 +769,29 @@ LONG Search_item(register ULONG type)
 {
 	register ULONG ctr;
 	register ULONG rt;
+	register LONG ret;
 
 	ctr = 0;
 	rt  = 0;
 	while (1) {
 		if (G.SaveData.Item_work[ctr].Id == 0) {
 			if (type == 0) {
-				return (LONG)ctr;
+				ret = ctr;
+				break;
 			}
 			rt++;
 		}
 		ctr++;
 		if (G.SaveData.Max_item_num <= ctr) {
 			if (type != 0) {
-				return (LONG)rt;
+				ret = rt;
+			} else {
+				ret = -1;
 			}
-			return -1;
+			break;
 		}
 	}
+	return ret;
 }
 
 /* DS 0x800696cc (Search_item_id) */
@@ -797,10 +812,10 @@ LONG Search_item_id(register ULONG id)
 /* DS 0x80069714 (Sort_item) */
 VOID Sort_item(VOID)
 {
-	register GLOBAL *pG;				// 35412 bytes
-	register STATUS *pSt;				// 4208 bytes
 	register ULONG ctr;
 	register ULONG last;
+	register GLOBAL *pG;
+	register STATUS *pSt;
 	LONG no;
 
 	no  = Search_item(0);
@@ -823,8 +838,8 @@ VOID Sort_item(VOID)
 			if (pSt->Equip_item_no == ctr) {
 				pSt->Equip_item_no--;
 			}
-			if ((UCHAR)pSt->Dmode[3][0].code[0] == ctr) {
-				pSt->Dmode[3][0].code[0] = (pSt->Dmode[3][0].code[0] & 0xffffff00) | (UCHAR)((UCHAR)pSt->Dmode[3][0].code[0] - 1);
+			if (pSt->Equip_pending_no == ctr) {
+				pSt->Equip_pending_no--;
 			}
 			ctr++;
 		} while (ctr < pG->SaveData.Max_item_num);
@@ -847,33 +862,34 @@ VOID Shift_item(register ULONG type)
 	pSt = &St;
 
 	if (type == 1) {
-		ULONG idx = pG->SaveData.Max_item_num - 2;
+		i = pG->SaveData.Max_item_num - 2;
 		do {
-			idx--;
-			pG->SaveData.Item_work[idx + 2].Id   = pG->SaveData.Item_work[idx].Id;
-			pG->SaveData.Item_work[idx + 2].Num  = pG->SaveData.Item_work[idx].Num;
-			pG->SaveData.Item_work[idx + 2].Size = pG->SaveData.Item_work[idx].Size;
-			Pix_move((idx >> 1) + idx, (idx >> 1) + idx + 3);
-		} while (idx != 0);
-		if (((LONG)(ULONG)pSt->Equip_item_no < (LONG)(pG->SaveData.Max_item_num - 2)) &&
-			(pSt->Equip_item_no != 0x80)) {
+			i--;
+			pG->SaveData.Item_work[i + 2].Id   = pG->SaveData.Item_work[i].Id;
+			pG->SaveData.Item_work[i + 2].Num  = pG->SaveData.Item_work[i].Num;
+			pG->SaveData.Item_work[i + 2].Size = pG->SaveData.Item_work[i].Size;
+			Pix_move((i >> 1) + i, (i >> 1) + i + 3);
+		} while (i != 0);
+		if (((LONG)(ULONG)pSt->Equip_item_no < (LONG)(pG->SaveData.Max_item_num - 2)) && (pSt->Equip_item_no != 0x80)) {
 			pSt->Equip_item_no += 0x02;
 			return;
 		}
 	} else {
-		for (i = 0; i < pG->SaveData.Max_item_num - 2; i++) {
+		i = 0;
+		do {
 			ULONG base = (i >> 1) + i;
 			pG->SaveData.Item_work[i].Id   = pG->SaveData.Item_work[i + 2].Id;
 			pG->SaveData.Item_work[i].Num  = pG->SaveData.Item_work[i + 2].Num;
 			pG->SaveData.Item_work[i].Size = pG->SaveData.Item_work[i + 2].Size;
 			Pix_move(base + 3, base);
-		}
+			i++;
+		} while (i < pG->SaveData.Max_item_num - 2);
 		Set_iwork(pG->SaveData.Max_item_num - 1, 0, 0, 0);
 		Pix_clear(0xb);
 		Set_iwork(pG->SaveData.Max_item_num - 2, 0, 0, 0);
 		Pix_clear(0xc);
 		if ((1 < pSt->Equip_item_no) && (pSt->Equip_item_no != 0x80)) {
-			pSt->Equip_item_no += 0xfe;
+			pSt->Equip_item_no -= 0x02;
 			return;
 		}
 	}
@@ -885,20 +901,24 @@ VOID Shift_item(register ULONG type)
 VOID Set_item(register ULONG id, register ULONG num, register ULONG *adr)
 {
 	register ULONG work_no;
+	register ULONG set_no;
+	ULONG *data_adr;
 
 	work_no = Search_item(0);
-	if ((id == 0x13) || (id - 0xe > 5)) {
-		Set_iwork(work_no, id, num, 0);
-		work_no = (work_no >> 1) + work_no;
-	} else {
+	if ((id != 0x13) && (id - 0xe <= 5)) {
 		Shift_item(1);
 		Set_iwork(0, id, num, 1);
 		Pix_trans(0, adr);
 		Set_iwork(1, id, num, 2);
-		work_no = 1;
-		adr += 300;
+		set_no = 1;
+		data_adr = adr + 300;
+	} else {
+		Set_iwork(work_no, id, num, 0);
+		set_no = work_no >> 1;
+		set_no += work_no;
+		data_adr = adr;
 	}
-	Pix_trans(work_no, adr);
+	Pix_trans(set_no, data_adr);
 }
 
 /* DS 0x80069bb4 (Pix_trans) */
@@ -909,7 +929,7 @@ VOID Pix_trans(register ULONG set_no, register ULONG *data_addr)
 	rect.w = 0x14;
 	rect.h = 0x1e;
 	rect.x = (SHORT)(((set_no % 3) * 0x28 - 0x80) >> 1) + 0x2c0;
-	rect.y = (SHORT)(set_no / 3) * 0x1e + 0x100;
+	rect.y = (set_no / 3) * 0x1e + 0x100;
 	LoadImage(&rect, data_addr);
 	DrawSync(0);
 }
@@ -922,12 +942,12 @@ VOID Pix_trans_pl(register ULONG set_no, register ULONG id, register ULONG *data
 	rect.w = 0x14;
 	rect.h = 0x1e;
 	rect.x = (SHORT)(((set_no % 3) * 0x28 - 0x80) >> 1) + 0x200;
-	rect.y = (SHORT)(set_no / 3) * 0x1e + 0x100;
+	rect.y = (set_no / 3) * 0x1e + 0x100;
 	LoadImage(&rect, data_addr);
 	DrawSync(0);
 	if ((id != 0x13) && (id - 0xe < 6)) {
 		rect.x = (SHORT)((((set_no + 1) % 3) * 0x28 - 0x80) >> 1) + 0x200;
-		rect.y = (SHORT)((set_no + 1) / 3) * 0x1e + 0x100;
+		rect.y = ((set_no + 1) / 3) * 0x1e + 0x100;
 		LoadImage(&rect, data_addr);
 		DrawSync(0);
 		LoadImage(&rect, data_addr + 0x64c8);
@@ -943,9 +963,8 @@ VOID Pix_move(register ULONG base, register ULONG object)
 	rect.w = 0x14;
 	rect.h = 0x1e;
 	rect.x = (SHORT)(((base % 3) * 0x28 - 0x80) >> 1) + 0x2c0;
-	rect.y = (SHORT)(base / 3) * 0x1e + 0x100;
-	MoveImage(&rect, (((object % 3) * 0x28 - 0x80) >> 1) + 0x2c0,
-			  (object / 3) * 0x1e + 0x100);
+	rect.y = (base / 3) * 0x1e + 0x100;
+	MoveImage(&rect, (((object % 3) * 0x28 - 0x80) >> 1) + 0x2c0, (object / 3) * 0x1e + 0x100);
 	DrawSync(0);
 }
 
@@ -953,13 +972,13 @@ VOID Pix_move(register ULONG base, register ULONG object)
 VOID Pix_clear(register ULONG set_no)
 {
 	auto RECT rect;						// FFFFFFF0		// 8 bytes
+	auto ULONG x = 0x102a8;					// x position of the source pixel block
 
-	rect.x = 0x2a8;
+	rect.x = x;
 	rect.y = 0x100;
 	rect.w = 0x14;
 	rect.h = 0x1e;
-	MoveImage(&rect, (((set_no % 3) * 0x28 - 0x80) >> 1) + 0x2c0,
-			  (set_no / 3) * 0x1e + 0x100);
+	MoveImage(&rect, (((set_no % 3) * 0x28 - 0x80) >> 1) + 0x2c0, (set_no / 3) * 0x1e + 0x100);
 	DrawSync(0);
 }
 
@@ -972,10 +991,10 @@ VOID St_pltex_operation(register ULONG type)
 	rect.y = 0x100;
 	rect.w = 0x40;
 	rect.h = 0x100;
-	if (type == 0) {
-		StoreImage(&rect, St_pltex_buf);
-	} else {
+	if (type != 0) {
 		LoadImage(&rect, St_pltex_buf);
+	} else {
+		StoreImage(&rect, St_pltex_buf);
 	}
 	DrawSync(0);
 }
@@ -983,32 +1002,30 @@ VOID St_pltex_operation(register ULONG type)
 /* DS 0x80069f54 (Tama_ck_i) */
 ULONG Tama_ck_i(register ULONG id)
 {
-	ULONG Ret;
-
 	if ((id == 0x12) && (Flg_ck(&G.SaveData.Weapon_mugen, 0x12) != 0)) {
 		G.Status_flg |= STAT_INF_AMMO;
 	}
-	if (((id == 0x0f) && (G.SaveData.Item_work[St.Equip_item_no].Num == 0xff)) ||
-		((id == 0x11) && (G.SaveData.Item_work[St.Equip_item_no].Num == 0xff))) {
+	if ((id == 0x0f) && (G.SaveData.Item_work[St.Equip_item_no].Num == 0xff)) {
 		G.Status_flg |= STAT_INF_AMMO;
-		Ret = 1;
+		return 1;
+	} else if ((id == 0x11) && (G.SaveData.Item_work[St.Equip_item_no].Num == 0xff)) {
+		G.Status_flg |= STAT_INF_AMMO;
+		return 1;
 	} else {
 		if ((St.Equip_item_no != 0x80) && (Flg_ck(&G.SaveData.Weapon_mugen, id) != 0)) {
 			return 1;
 		}
 		if (id == 0x0e) {
-			Ret = 0;
 			if (St.Equip_item_no != 0x80) {
-				Ret = (ULONG)(G.SaveData.Item_work[St.Equip_item_no].Num >= 3);
+				return (ULONG)(G.SaveData.Item_work[St.Equip_item_no].Num >= 3);
 			}
-		} else {
-			Ret = 0;
-			if (St.Equip_item_no != 0x80) {
-				Ret = (ULONG)(G.SaveData.Item_work[St.Equip_item_no].Num != 0);
-			}
+			return 0;
 		}
+		if (St.Equip_item_no != 0x80) {
+			return (ULONG)(G.SaveData.Item_work[St.Equip_item_no].Num != 0);
+		}
+		return 0;
 	}
-	return Ret;
 }
 
 /* DS 0x8006a0cc (Tama_decrease_i) */
@@ -1016,7 +1033,6 @@ ULONG Tama_decrease_i(register ULONG id, register ULONG flag)
 {
 	register ULONG item_no;
 	register ULONG num;
-	ULONG newNum;
 
 	item_no = St.Equip_item_no;
 	num     = G.SaveData.Item_work[item_no].Num;
@@ -1027,8 +1043,8 @@ ULONG Tama_decrease_i(register ULONG id, register ULONG flag)
 
 	if (num != 0xff) {
 		if ((id == 0x0f) || (id == 0x12)) {
-			if ((SHORT)(St.Machinegun_trg + 1) < 8) {
-				St.Machinegun_trg++;
+			St.Machinegun_trg++;
+			if ((SHORT)St.Machinegun_trg < 8) {
 				return 1;
 			}
 			St.Machinegun_trg = 0;
@@ -1039,8 +1055,8 @@ ULONG Tama_decrease_i(register ULONG id, register ULONG flag)
 			Set_iwork_num(item_no, num);
 		}
 		if (id == 0x10) {
-			if ((SHORT)(St.Machinegun_trg + 1) < 8) {
-				St.Machinegun_trg++;
+			St.Machinegun_trg++;
+			if ((SHORT)St.Machinegun_trg < 8) {
 				return 1;
 			}
 			St.Machinegun_trg = 0;
@@ -1051,46 +1067,53 @@ ULONG Tama_decrease_i(register ULONG id, register ULONG flag)
 			Set_iwork_num(item_no, num);
 		}
 		if (id == 0x0e) {
-			newNum = (flag == 0) ? num - 1 : num - 2;
+			if (flag != 0) {
+				num -= 2;
+			} else {
+				num--;
+			}
+			Set_iwork_num(item_no, num);
 		} else {
 			if (num == 0) {
 				return 0;
 			}
-			newNum = num - 1;
+			Set_iwork_num(item_no, num - 1);
 		}
-		Set_iwork_num(item_no, newNum);
 	}
 	return 1;
 }
 
 /* DS 0x8006a23c (Tama_reload_ck) */
-UCHAR Tama_reload_ck(VOID)
+/* Returns 0 or 1 in a full word (LONG, not UCHAR): DS callers branch on v0 with no zero-extension. */
+LONG Tama_reload_ck(VOID)
 {
 	register ITEM_MIX_DATA *tbl_ptr;	// 4 bytes
 
 	LONG itemIdx;
 	tbl_ptr = Item_data_tbl[G.SaveData.Item_work[St.Equip_item_no].Id].Item_mix_data;
 	itemIdx   = Search_item_id((ULONG)tbl_ptr->Object_item_id);
-	if (St.Equip_item_id == 0x11) {
-		return 0;
+	if (St.Equip_item_id != 0x11) {
+		return (itemIdx >= 0);
 	}
-	return (UCHAR)(itemIdx >= 0);
+	return 0;
 }
 
 /* DS 0x8006a2b4 (Tama_reload) */
 VOID Tama_reload(VOID)
 {
-	register ULONG num;					/* magazine size, then the rounds moved */
-	LONG itemIdx;
 	UCHAR weaponId;
+	ULONG num;							/* magazine size, then the rounds moved */
+	UCHAR haveNum;						/* rounds held by the ammo item */
+	LONG itemIdx;
 
 	weaponId = G.SaveData.Item_work[St.Equip_item_no].Id;
 	num      = Item_data_tbl[weaponId].Item_max;
 	itemIdx  = Search_item_id((ULONG)Item_data_tbl[weaponId].Item_mix_data->Object_item_id);
-	if (num < G.SaveData.Item_work[itemIdx].Num) {
-		G.SaveData.Item_work[itemIdx].Num -= num;
+	haveNum  = G.SaveData.Item_work[itemIdx].Num;
+	if (num < haveNum) {
+		G.SaveData.Item_work[itemIdx].Num = haveNum - num;
 	} else {
-		num = G.SaveData.Item_work[itemIdx].Num;
+		num = haveNum;
 		G.SaveData.Item_work[itemIdx].Id = 0;
 		Sort_item();
 	}
@@ -1171,6 +1194,111 @@ UCHAR init_item_tbl_Leon[11][3] = {
 	{ 0x2f, 0x01, 0x00 }
 };
 
+/* DS 0x800a9285 (init_item_tbl_Claire) */
+UCHAR init_item_tbl_Claire[11][3] = {
+	{ 0x03, 0x0d, 0x00 },
+	{ 0x01, 0x01, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x30, 0x01, 0x00 }
+};
+
+/* DS 0x800a92a6 (init_item_tbl_Hunk) */
+UCHAR init_item_tbl_Hunk[11][3] = {
+	{ 0x02, 0x12, 0x00 },
+	{ 0x07, 0x05, 0x00 },
+	{ 0x05, 0x08, 0x00 },
+	{ 0x14, 0x96, 0x00 },
+	{ 0x15, 0x0f, 0x00 },
+	{ 0x16, 0x08, 0x00 },
+	{ 0x2b, 0x01, 0x00 },
+	{ 0x2b, 0x01, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x52, 0x01, 0x00 }
+};
+
+/* DS 0x800a92c7 (init_item_tbl_ToFu) */
+UCHAR init_item_tbl_ToFu[11][3] = {
+	{ 0x01, 0x01, 0x00 },
+	{ 0x26, 0x01, 0x00 },
+	{ 0x26, 0x01, 0x00 },
+	{ 0x28, 0x01, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x52, 0x01, 0x00 }
+};
+
+/* DS 0x800a92e8 (init_item_tbl_Leon_ex) */
+UCHAR init_item_tbl_Leon_ex[11][3] = {
+	{ 0x02, 0x12, 0x00 },
+	{ 0x07, 0x05, 0x00 },
+	{ 0x05, 0x08, 0x00 },
+	{ 0x1e, 0xff, 0x00 },
+	{ 0x23, 0x01, 0x00 },
+	{ 0x28, 0x01, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x2f, 0x01, 0x00 }
+};
+
+/* DS 0x800a9309 (init_item_tbl_Claire_ex) */
+UCHAR init_item_tbl_Claire_ex[11][3] = {
+	{ 0x09, 0x06, 0x00 },
+	{ 0x19, 0x06, 0x00 },
+	{ 0x1a, 0x06, 0x00 },
+	{ 0x1e, 0xff, 0x00 },
+	{ 0x23, 0x01, 0x00 },
+	{ 0x28, 0x01, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x30, 0x01, 0x00 }
+};
+
+/* DS 0x800a932a (init_item_tbl_Ada_ex) */
+UCHAR init_item_tbl_Ada_ex[11][3] = {
+	{ 0x0f, 0x64, 0x01 },
+	{ 0x0f, 0x64, 0x02 },
+	{ 0x0d, 0x06, 0x00 },
+	{ 0x1e, 0xff, 0x00 },
+	{ 0x0c, 0x12, 0x00 },
+	{ 0x2e, 0x01, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x57, 0x01, 0x00 }
+};
+
+/* DS 0x800a934b (init_item_tbl_Chris_ex) */
+UCHAR init_item_tbl_Chris_ex[11][3] = {
+	{ 0x11, 0x05, 0x01 },
+	{ 0x11, 0x05, 0x02 },
+	{ 0x08, 0x07, 0x00 },
+	{ 0x1e, 0xff, 0x00 },
+	{ 0x13, 0x0f, 0x00 },
+	{ 0x23, 0x01, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x2f, 0x01, 0x00 }
+};
+
 /* DS 0x800a93d0 (init_item_tbl_Ada) */
 UCHAR init_item_tbl_Ada[11][3] = {
 	{ 0x03, 0x0d, 0x00 },
@@ -1186,162 +1314,17 @@ UCHAR init_item_tbl_Ada[11][3] = {
 	{ 0x57, 0x0f, 0x00 }
 };
 
-/* Tables moved here from ST_SUB02.C */
-/* DS 0x800a9e1c (Item_data_tbl) */
-ITEM_DATA Item_data_tbl[101] = {
-	{ 0x00, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x12, 0x00, 0x00, 0x02, Mix_beretta },
-	{ 0x0d, 0x00, 0x00, 0x01, Mix_beretta },
-	{ 0x12, 0x00, 0x00, 0x01, Mix_beretta },
-	{ 0x08, 0x00, 0x00, 0x02, Mix_magnam },
-	{ 0x08, 0x00, 0x00, 0x01, Mix_magnam },
-	{ 0x05, 0x00, 0x00, 0x02, Mix_shotgun },
-	{ 0x07, 0x00, 0x00, 0x01, Mix_shotgun },
-	{ 0xfa, 0x00, 0x03, 0x03, Mix_g_n },
-	{ 0xfa, 0x00, 0x01, 0x03, Mix_g_f },
-	{ 0xfa, 0x00, 0x02, 0x03, Mix_g_a },
-	{ 0x12, 0x00, 0x00, 0x01, &Mix_bowgun },
-	{ 0x06, 0x00, 0x00, 0x01, Mix_beretta },
-	{ 0x64, 0x00, 0x80, 0x01, &Mix_spark },
-	{ 0x64, 0x00, 0x80, 0x01, &Mix_machinegun },
-	{ 0x64, 0x00, 0x81, 0x01, &Mix_fire },
-	{ 0x04, 0x00, 0x00, 0x00, &Mix_nodata },
-	{ 0x64, 0x00, 0x80, 0x00, &Mix_nodata },
-	{ 0x0f, 0x00, 0x00, 0x01, Mix_beretta },
-	{ 0xfa, 0x00, 0x03, 0x06, Mix_bullet },
-	{ 0xfa, 0x00, 0x03, 0x03, Mix_shot_dan },
-	{ 0xfa, 0x00, 0x03, 0x03, Mix_mag_dan },
-	{ 0x64, 0x00, 0x81, 0x02, Mix_nen },
-	{ 0xfa, 0x00, 0x03, 0x04, Mix_g_normal },
-	{ 0xfa, 0x00, 0x01, 0x04, Mix_g_fire },
-	{ 0xfa, 0x00, 0x02, 0x04, Mix_g_acid },
-	{ 0x64, 0x00, 0x83, 0x02, Mix_dot380 },
-	{ 0x64, 0x00, 0x83, 0x02, Mix_battley },
-	{ 0xf0, 0x00, 0x03, 0x02, Mix_arrow },
-	{ 0xfa, 0x00, 0x00, 0x01, &Mix_ink_ribbon },
-	{ 0xfa, 0x00, 0x00, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x01, &Mix_parts_a },
-	{ 0x01, 0x00, 0x04, 0x01, &Mix_parts_b },
-	{ 0x01, 0x00, 0x04, 0x01, Mix_parts_c },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x05, Mix_g },
-	{ 0x01, 0x00, 0x04, 0x02, Mix_r },
-	{ 0x01, 0x00, 0x04, 0x03, Mix_b },
-	{ 0x01, 0x00, 0x04, 0x02, Mix_gg },
-	{ 0x01, 0x00, 0x04, 0x01, &Mix_gr },
-	{ 0x01, 0x00, 0x04, 0x02, Mix_gb },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x06, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x01, &Mix_Jaguar_a },
-	{ 0x01, 0x00, 0x04, 0x01, &Mix_Jaguar_b },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x01, &Mix_fuse },
-	{ 0x01, 0x00, 0x04, 0x01, &Mix_p_bomb },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x07, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x0a, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x01, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x02, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x04, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x05, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x08, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x09, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata },
-	{ 0x01, 0x00, 0x04, 0x00, &Mix_nodata }
-};
-
-/* DS 0x800aa144 (File_data) */
-FILE_DATA File_data[50] = {
-	{ 0x05, 0x00 },
-	{ 0x70, 0x00 },
-	{ 0x05, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x01, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x02, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x09, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x09, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x09, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x06, 0x00 },
-	{ 0x70, 0x00 },
-	{ 0x04, 0x00 },
-	{ 0x70, 0x00 },
-	{ 0x04, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x01, 0x00 },
-	{ 0x80, 0x00 },
-	{ 0x02, 0x00 },
-	{ 0x90, 0x00 },
-	{ 0x03, 0x00 },
-	{ 0x90, 0x00 },
-	{ 0x02, 0x00 },
-	{ 0x90, 0x00 },
-	{ 0x03, 0x00 },
-	{ 0x70, 0x00 },
-	{ 0x08, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x06, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x09, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x05, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x01, 0x00 },
-	{ 0x90, 0x00 },
-	{ 0x06, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x05, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x04, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x02, 0x00 },
-	{ 0x50, 0x00 },
-	{ 0x02, 0x00 },
-	{ 0x50, 0x00 }
+/* DS 0x800a93f1 (init_item_tbl_Sherry) */
+UCHAR init_item_tbl_Sherry[11][3] = {
+	{ 0x23, 0x01, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x00, 0x00, 0x00 },
+	{ 0x31, 0x01, 0x00 }
 };

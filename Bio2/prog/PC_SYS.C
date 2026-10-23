@@ -19,7 +19,7 @@
 #include "flag.h"
 
 /* DS 0x80010ba4 */
-UCHAR s_Pc_sys_msg_80010ba4[] = {
+UCHAR s_Pc_sys_msg_80010ba4[8] = {
 	93, 0, 0, 0, 0, 0, 0, 0
 };
 
@@ -393,28 +393,31 @@ SP_WORK Init_work_tbl[364] = {
 };
 
 
+/* PC window task. Task slot 0 is suspended while it runs and the screen fades in. Each frame it runs
+ * the computer screen for Window_no: 0 shows the Computer200 screen, 1 shows Computer613, and any other
+ * value ends the task and signals slot 0 back on. */
 /* DS 0x80039818 (Windows) */
 void Windows(void)
 {
 	Task_suspend(0);
 	Fade_off(0);
 	do {
-		if ((G.Window_no & 3) == 0)
+		switch (G.Window_no & 3)
 		{
+		case 0:
 			Computer200();
-		}
-		else
-		{
-			if ((G.Window_no & 3) != 1)
-			{
-				Task_signal(0);
-				Task_exit();
-				return;
-			}
+			break;
+		case 1:
 			Computer613();
+			break;
+		default:
+			goto window_end;
 		}
 		Task_sleep(1);
 	} while (1);
+window_end:
+	Task_signal(0);
+	Task_exit();
 }
 
 /* DS 0x800398ac (Keyboard_Input) */
@@ -440,8 +443,15 @@ ULONG Keyboard_Input(ULONG Length, ULONG Flg)
 	}
 	else if (Length == 0)
 	{
-		if (Flg == 1)
+		switch (Flg)
 		{
+		case 0:
+			pCom->In_buf[pCom->nMoji] = Code;
+			if (pCom->Moji_code == 0x1a)      { pCom->nMoji = 1; Console_put('Y'); }
+			else if (pCom->Moji_code == 0x0f) { pCom->nMoji = 1; Console_put('N'); }
+			else return 0;
+			break;
+		case 1:
 			pCom->In_buf[pCom->nMoji] = Code;
 			/* DS re-reads Moji_code here (lbu v1,0x2d9 after the In_buf store) */
 			if (pCom->Moji_code == 2)      { pCom->nMoji = 1; Console_put('A'); }
@@ -449,20 +459,11 @@ ULONG Keyboard_Input(ULONG Length, ULONG Flg)
 			else if (pCom->Moji_code == 4) { pCom->nMoji = 1; Console_put('C'); }
 			else if (pCom->Moji_code == 5) { pCom->nMoji = 1; Console_put('D'); }
 			else return 0;
-		}
-		else if (Flg == 0)
-		{
-			pCom->In_buf[pCom->nMoji] = Code;
-			if (pCom->Moji_code == 0x1a)      { pCom->nMoji = 1; Console_put('Y'); }
-			else if (pCom->Moji_code == 0x0f) { pCom->nMoji = 1; Console_put('N'); }
-			else return 0;
-		}
-		else if (Flg == 2)
-		{
+			break;
+		case 2:
 			pCom->nMoji = 1;
-		}
-		else
-		{
+			break;
+		default:
 			return 0;
 		}
 	}
@@ -505,20 +506,25 @@ ULONG Keyboard_Input(ULONG Length, ULONG Flg)
 void Keyboard_set(ULONG Be_flg, ULONG W, ULONG H, ULONG Col)
 {
 	COM_WORK *pCom;
+	USHORT    Init_y;
 
 	pCom = pCom_work;
 	pCom->Sp_work[0].Be_flg = (UCHAR)Be_flg;
 	pCom->Sp_work[0].Col    = (UCHAR)Col;
 	pCom->Sp_work[0].Pos_x  = (USHORT)(Init_work_tbl[0].Pos_x + 0x30);
+	/* Init_work_tbl[0].Pos_y is read before the W and H stores; those stores write pCom_work only */
+	Init_y                  = Init_work_tbl[0].Pos_y;
 	pCom->Sp_work[0].W      = (USHORT)W;
 	pCom->Sp_work[0].H      = (USHORT)H;
 	pCom->Sp_work[1].Be_flg = (UCHAR)Be_flg;
 	pCom->Kx                = 1;
 	pCom->Ky                = 0;
 	pCom->Key_input_flg     = 0;
-	pCom->Sp_work[0].Pos_y  = (USHORT)(Init_work_tbl[0].Pos_y + 0x8e);
+	pCom->Sp_work[0].Pos_y  = (USHORT)(Init_y + 0x8e);
 }
 
+/* PC keyboard screen: one frame of cursor movement and key entry. Keyboard_Input turns the pad key
+ * code into a character for the message being typed (Get_moji_code maps the key index to the glyph code). */
 /* DS 0x80039b88 (Keyboard) */
 ULONG Keyboard(void)
 {
@@ -528,6 +534,7 @@ ULONG Keyboard(void)
 	UCHAR     Code;
 	int       Moved;
 	SP_WORK  *pSp;
+	LONG      Tmp;
 
 	pCom = pCom_work;
 	Moved = 0;
@@ -548,7 +555,8 @@ ULONG Keyboard(void)
 		{
 			pCom->Ky++;
 			Moved    = 1;
-			if (pCom->Ky > 2)
+			Tmp = pCom->Ky;
+			if (Tmp > 2)
 				pCom->Ky = 0;
 		}
 		if ((G.Padd1 & 0x8000) != 0)
@@ -562,7 +570,8 @@ ULONG Keyboard(void)
 		{
 			pCom->Kx++;
 			Moved    = 1;
-			if (pCom->Kx > 9)
+			Tmp = pCom->Kx;
+			if (Tmp > 9)
 				pCom->Kx = 0;
 		}
 		if (Moved)
@@ -572,20 +581,20 @@ ULONG Keyboard(void)
 	Cur                = pCom->Kcursor_disp + pCom->Kcursor_add;
 	pCom->Kcursor_disp = Cur;
 	if ((Cur == 0x60) || (Cur == 0x40))
-		pCom->Kcursor_add = -pCom->Kcursor_add;
+		pCom->Kcursor_add = -(signed char)pCom->Kcursor_add;
 
 	Cur    = pCom->Kcursor_disp;
 	Key_in = pCom->Key_input_flg;
 	pSp    = &pCom->Sp_work[1];
 	pSp->W     = 0x18;
-	pSp->Pos_x = (USHORT)(pCom->Kx * 0x18 + 0x34);
-	pSp->Pos_y = (USHORT)(pCom->Ky * 0x18 + 0x9a);
-	pSp->U     = (UCHAR)(pCom->Kx * 0x18 + 4);
-	pSp->V     = (UCHAR)(pCom->Ky * 0x18 + 0x2a - Key_in);
+	pSp->Pos_x = (USHORT)((signed char)pCom->Kx * 0x18 + 0x34);
+	pSp->Pos_y = (USHORT)((signed char)pCom->Ky * 0x18 + 0x9a);
+	pSp->U     = (UCHAR)((signed char)pCom->Kx * 0x18 + 4);
+	pSp->V     = (UCHAR)((signed char)pCom->Ky * 0x18 + 0x2a - Key_in);
 	pSp->Col   = Cur;
 	pSp->H     = (USHORT)(0x17 - Key_in);
 
-	if ((pCom->Kx == 9) && (pCom->Ky > 0))
+	if (((signed char)pCom->Kx == 9) && ((signed char)pCom->Ky > 0))
 	{
 		pSp->Pos_y = 0xb2;
 		pSp->V     = (UCHAR)(66 - Key_in);
@@ -601,7 +610,7 @@ ULONG Keyboard(void)
 	else
 	{
 		Snd_se_stad(0x2090000, (VECTOR *)0);
-		Code             = pCom->Kx + pCom->Ky * 10;
+		Code             = pCom->Kx + (signed char)pCom->Ky * 10;
 		pCom->Moji_code = Code;
 		if (Code == 9)
 			pCom->Moji_code = 0x1e;
@@ -783,12 +792,15 @@ ULONG Get_moji_code(UCHAR Moji)
 	return Moji + 0x3f;
 }
 
+/* Typewriter-style print of pMess into the console. Speed is the frame wait between steps, and a "[nnn]"
+ * control code in the text sets a longer wait. The read position is kept in pCom so a message continues
+ * over several calls. */
 /* DS 0x8003a298 (Cprint) */
 ULONG Cprint(ULONG Speed, UCHAR *pMess, ULONG *Mend)
 {
+	UCHAR    *pBuf;
+	UCHAR     Ret_flg;
 	COM_WORK *pCom;
-	int       Tens;
-	UCHAR     Printed;
 
 	pCom = pCom_work;
 	if (*Mend != 0)
@@ -804,7 +816,7 @@ ULONG Cprint(ULONG Speed, UCHAR *pMess, ULONG *Mend)
 		return 0;
 
 	pCom->Wait = Speed;
-	Printed    = 0;
+	Ret_flg    = 0;
 	/* every character is read through pCom->pMess (DS reloads it); control codes advance it */
 	while (*pCom->pMess != 0)
 	{
@@ -823,8 +835,10 @@ ULONG Cprint(ULONG Speed, UCHAR *pMess, ULONG *Mend)
 			return 0;
 
 		case 0x5e:		/* '^' + 2 digits: move the cursor left */
-			Tens      = (*++pCom->pMess - 0x30) * 10;
-			pCom->Cx -= Tens + *++pCom->pMess - 0x30;
+			/* one expression, as in DS: the tens digit is read (first ++) before the units digit
+			 * (second ++); DS stores the first advanced pointer, then loads the units digit after
+			 * the tens product, and subtracts the whole sum from Cx in a single store */
+			pCom->Cx -= (*++pCom->pMess - 0x30) * 10 + (*++pCom->pMess - 0x30);
 			break;
 
 		case 0x7c:		/* '|' + 1 digit: text colour */
@@ -832,9 +846,12 @@ ULONG Cprint(ULONG Speed, UCHAR *pMess, ULONG *Mend)
 			break;
 
 		default:
-			Printed = 1;
-			pCom->Con_buf[pCom->Cy][pCom->Cx]     = *pCom->pMess;
-			pCom->Con_col_buf[pCom->Cy][pCom->Cx] = pCom->Ccol;
+			Ret_flg = 1;
+			/* DS forms the cell address as pCom + (Cy * 30 + offset) and then adds Cx */
+			pBuf  = &pCom->Con_buf[pCom->Cy][pCom->Cx];
+			*pBuf = *pCom->pMess;
+			pBuf  = &pCom->Con_col_buf[pCom->Cy][pCom->Cx];
+			*pBuf = pCom->Ccol;
 			pCom->Cursor_disp = 0x10;
 			pCom->Cx++;
 			break;
@@ -853,7 +870,7 @@ ULONG Cprint(ULONG Speed, UCHAR *pMess, ULONG *Mend)
 		Snd_se_stad(0x2100000, (VECTOR *)0);
 
 		pCom->pMess++;
-		if ((Speed != 0) && (Printed != 0))
+		if ((Speed != 0) && (Ret_flg != 0))
 			return 0;
 	}
 
@@ -872,7 +889,7 @@ void Console_put(UCHAR Moji)
 void Console_roll_up(void)
 {
 	COM_WORK *pCom;
-	int       i;
+	ULONG     i;
 
 	pCom = pCom_work;
 	for (i = 0; i < 11; i++)
@@ -900,8 +917,8 @@ void Console_clr(void)
 	pCol = &pCom->Con_col_buf[0][0];
 	for (i = 0; i < 360; i++)
 	{
-		pCon[i] = ' ';
-		pCol[i] = 0;
+		*pCon++ = ' ';
+		*pCol++ = 0;
 	}
 	pCom->Ccol = 0;
 	pCom->Cy   = 0;
@@ -931,10 +948,7 @@ void Console_trans(ULONG Be_flg)
 
 	do {
 		Ch = *pCon++;
-		pCell[-11] = 0x08;
-		pCell[-10] = 0x00;
-		pCell[-9]  = 0x0a;
-		pCell[-8]  = 0x00;
+		*(ULONG *)(pCell - 11) = 0x000a0008;
 		Cl = *pCol++;
 		*pCell = (UCHAR)Be_flg;
 		Uv     = Ch - 0x20;
@@ -971,8 +985,12 @@ void Sprite_Trans(ULONG nPacket)
 	SPRT     *pPkt;    /* SPRT packet cursor: Packet[Cbuf][0] */
 	SPRT     *pNext;
 	ULONG    *pPktW;   /* the same packet as words, DS cursor at the rgb+code word */
+	UCHAR    *pCbuf;
+	ULONG    *pOt;
 
 	pCom  = pCom_work;
+	pCbuf = &G.Cbuf_id;
+	pOt   = &G.Ot1[0][0];
 	pPkt  = &pCom->Packet[G.Cbuf_id][0];
 	pSpW  = (ULONG *)pCom->Sp_work;
 	pSp   = pCom->Sp_work;
@@ -991,7 +1009,7 @@ void Sprite_Trans(ULONG nPacket)
 			pPktW[2] = pSpW[2];
 			pNext = pPkt + 1;
 			pPktW += 5;
-			AddPrim(&G.Ot1[G.Cbuf_id][pSp->Pri], pPkt);
+			AddPrim(&pOt[*pCbuf * 1024 + pSp->Pri], pPkt);
 		}
 		pSpW += 4;
 		pSp++;
@@ -1013,27 +1031,23 @@ void Set_sp_work(SP_WORK *pSp, SP_WORK *pSw)
 }
 
 /* DS 0x8003a92c (Dr_mode_set) */
-ULONG Dr_mode_set(void)
+VOID Dr_mode_set(void)
 {
 	COM_WORK *pCom;
-	ULONG     Buf;
 	int       Slot;   /* OT slot, 7 down to 0 */
 	int       i;
-	UCHAR    *pDr;
 
 	pCom = pCom_work;
-	Buf  = G.Cbuf_id;
 	Slot = 7;
-	for (i = 0; i < 8; i++)
+	i = 8;
+	do
 	{
-		pDr = (UCHAR *)&pCom->Dr_mode[G.Cbuf_id][Slot];
-		SetDrawMode((DR_MODE *)pDr, 0, 0, 0x85, (RECT *)0);
-		Buf = G.Cbuf_id;
-		AddPrim(&G.Ot1[Buf][Slot], pDr);
+		SetDrawMode(&pCom->Dr_mode[G.Cbuf_id][Slot], 0, 0, 0x85, (RECT *)0);
+		AddPrim(&G.Ot1[G.Cbuf_id][Slot], &pCom->Dr_mode[G.Cbuf_id][Slot]);
 		Slot--;
-	}
-	return Buf;
+		i--;
+	} while (i != 0);
 }
 
 /* DS 0x800ea23c (pCom_work) */
-COM_WORK* pCom_work = 0;
+COM_WORK* pCom_work;

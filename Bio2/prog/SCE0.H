@@ -14,6 +14,9 @@ struct tagMODEL_LINK_INFO {
 	ULONG* Tmd_adr;
 };
 
+/* One scenario (event script) task. Data is the script read position, Lstack/Lbreak/Lcnt and Ifel_ctr/
+ * Loop_ctr track nested blocks, and Stack/pS_SP hold the subroutine return stack. The Spd/Dspd/Aspd fields
+ * are the speed and its change for the enemy the script drives (pWork). */
 struct tagSCE_TASK {
 	UCHAR Routine0;
 	UCHAR Status;
@@ -50,6 +53,8 @@ struct tagSCE_TASK {
 typedef ULONG (*SCE_JMP_FUNC)(void *);
 
 /* file-level externs */
+/* Scenario state: the 14 script task slots (the first 10 are for the room script and slots 10..13 for the
+ * door scene), the current script (pCScd), and the per-room cut, enemy and sound bookkeeping. */
 /* DS 0x800d7860 */
 struct tagSCENARIO {
 	SCE_TASK Sce_task[14];
@@ -72,7 +77,7 @@ struct tagSCENARIO {
 
 extern SCENARIO      Sce;
 extern ULONG         Padd2_mode;
-extern UCHAR         em_se_tbl[];
+extern UCHAR         em_se_tbl[200];
 extern SCE_JMP_FUNC  Sce_jmp_tbl[143];
 /* DS 0x800a7704 */
 extern UCHAR         Em_kind_tbl[];

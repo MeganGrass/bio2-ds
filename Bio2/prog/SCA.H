@@ -91,10 +91,12 @@ struct tagSC_UTIL {
 
 
 /* Cross-module globals used by SCA.C and OMA.C. Addresses are from the Sca_get_ground
- * disassembly. the old global.h declares pStairs (SCA_DATA *), Gnd_y, In_flg, Old_x and Old_z; those
+ * disassembly. the owner headers declare pStairs (SCA_DATA *), In_flg, Old_x and Old_z; those
  * declarations are not repeated here. */
 extern long      Ceiling;          /* DS 0x800d5be4 */
 extern long      Ground_in_flg;    /* DS 0x800dcbc8 */
+extern long      Ground_in_pos;    /* DS 0x800dcc2c (lowest ground offset under the position, set by Sca_get_ground) */
+extern SHORT     Gnd_y;            /* DS 0x800c3b7c */
 extern long      Ceiling_in_pos[]; /* DS 0x800ea198 (index 0 used by Sca_get_ground) */
 
 /* Function prototypes */

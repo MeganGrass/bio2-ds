@@ -181,14 +181,14 @@ extern VOID Select_moji_trans(LONG Num);
 /* ------------------------------------------------------------------ */
 
 /* Gap before Select_main (801BFA18-801BFAA7): CD message strings and
- * Cd_read message buffers. Ghidra does not define their contents.
+ * Cd_read message buffers.
  * Compiler jump tables at 801BFA3C (pl_move, Id 0), 801BFA54 (pl_move, Id 1),
  * 801BFA6C (pl_move, Id 0x0B) and 801BFA84 (moji_ctrl, 9 entries) are
  * replaced by C switch statements. */
-extern UCHAR Select_mess_tim[];		// 801BFA1C		// Cd_read message, TIM load (contents not defined)
-extern UCHAR Select_mess_pl[];		// 801BFA20		// Cd_read message, model load (contents not defined)
-extern CHAR Select_str_bg[];		// 801BFA24		// "Select_BG"
-extern CHAR Select_str_sel[];		// 801BFA30		// "Select"
+extern UCHAR Select_mess_tim[4];		// 801BFA1C		// Cd_read message, TIM load ("PLW")
+extern UCHAR Select_mess_pl[4];		// 801BFA20		// Cd_read message, model load ("PLD")
+extern CHAR Select_str_bg[10];		// 801BFA24		// "Select BG"
+extern CHAR Select_str_sel[12];		// 801BFA30		// "Select"
 
 extern SELECT_SPRT_DEF Select_sprt_def[12];	// 801C2AF0	// 144 bytes
 extern SELECT_PL_INIT Select_pl_init[4];		// 801C2B80	// 80 bytes

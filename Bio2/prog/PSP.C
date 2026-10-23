@@ -8,7 +8,6 @@
 #include "ROOM.H"
 #include <LIBGPU.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <STRINGS.H>
 #include "PSP.H"
 #include "ESP_R.H"
@@ -27,10 +26,12 @@ void Psp_init0(void)
 /* DS 0x80049ad0 (Psp_init1) */
 void Psp_init1(void)
 {
+	TSPRT *pPrim1;		/* start of the second primitive buffer; reused as the base of the new free work pointer */
+
 	pPsp_prim[0] = (TSPRT *)G.pFree_work;
-	pPsp_prim[1] = (TSPRT *)(G.pFree_work + (UINT)G.pRoom->nSprite_max * 0x20);
-	G.pFree_work = (UCHAR *)((TSPRT *)(G.pFree_work + (UINT)G.pRoom->nSprite_max * 0x20) +
-				   G.pRoom->nSprite_max);
+	pPrim1 = (TSPRT *)(G.pFree_work + (UINT)G.pRoom->nSprite_max * 0x20);
+	pPsp_prim[1] = pPrim1;
+	G.pFree_work = (UCHAR *)(pPrim1 + G.pRoom->nSprite_max);
 }
 
 /* DS 0x80049b1c (Psp_set)
@@ -88,14 +89,13 @@ void Psp_set(void)
 		do {
 			spr_cnt--;
 			idx--;
-			pSprite = pPsp_work + idx;
+			pSprite--;
 			pSprite->be_flg = 1;
 			pSprite->id     = (UCHAR)grp_cnt;
 			pSprite->otz    = (short)pRec[2];
 
 			uv = pRec[0];
-			xy = (int)((UINT)(UCHAR)pRec[1] + (int)(short)pGrp[2] +
-				   ((UINT)(UCHAR)(pRec[1] >> 8) + (int)(short)pGrp[3]) * 0x10000);
+			xy = (int)((UINT)(UCHAR)pRec[1] + (int)(short)pGrp[2] + ((UINT)(UCHAR)(pRec[1] >> 8) + (int)(short)pGrp[3]) * 0x10000);
 
 			if (pRec[3] == 0) {
 				/* 6-word record: explicit w/h in words 4 and 5 */
@@ -110,10 +110,7 @@ void Psp_set(void)
 			{
 				TSPRT *p = pPsp_prim[0] + idx;
 
-				p->sprt.r0   = 0x80;
-				p->sprt.g0   = 0x80;
-				p->sprt.b0   = 0x80;
-				p->sprt.code = 101;
+				*(UINT *)&p->sprt.r0 = 0x65808080;
 				*(int *)&p->sprt.x0 = xy;
 				*(UINT *)&p->sprt.u0 = (UINT)uv + 0x78000000;
 				p->sprt.w = (short)wh;
@@ -122,10 +119,7 @@ void Psp_set(void)
 			{
 				TSPRT *p = pPsp_prim[1] + idx;
 
-				p->sprt.r0   = 0x80;
-				p->sprt.g0   = 0x80;
-				p->sprt.b0   = 0x80;
-				p->sprt.code = 101;
+				*(UINT *)&p->sprt.r0 = 0x65808080;
 				*(int *)&p->sprt.x0 = xy;
 				*(UINT *)&p->sprt.u0 = (UINT)uv + 0x78000000;
 				p->sprt.w = (short)wh;
@@ -147,8 +141,12 @@ void Psp_trans(void)
 	int     cut;
 	PSP    *pSprite;
 	TSPRT  *p;
+	TSPRT **ppPrim;
+	UCHAR  *pCbuf;
 
 	SetGeomOffset(0xa0, 0x78);
+	ppPrim  = pPsp_prim;
+	pCbuf   = &G.Cbuf_id;
 	nsp     = (UINT)G.pRoom->nSprite;
 	cut     = (int)G.SaveData.Cut_no;
 	pSprite = pPsp_work + nsp;
@@ -156,9 +154,8 @@ void Psp_trans(void)
 	while (nsp != 0) {
 		nsp--;
 		pSprite--;
-		if (((pSprite->be_flg & 1) != 0) &&
-			(flg = Flg_ck(G.SaveData.Pri_be_flg[cut], (UINT)pSprite->id), flg != 0)) {
-			p = pPsp_prim[G.Cbuf_id] + nsp;
+		if (((pSprite->be_flg & 1) != 0) && (flg = Flg_ck(G.SaveData.Pri_be_flg[cut], (UINT)pSprite->id), flg != 0)) {
+			p = ppPrim[*pCbuf] + nsp;
 			SetSprt((SPRT *)&p->sprt);
 			SetDrawMode((DR_MODE *)p, 1, 0, 0x95, (RECT *)0);
 			MargePrim(p, &p->sprt);
@@ -172,8 +169,8 @@ void Psp_ctr(UCHAR psp_id, UCHAR st)
 {
 	PSP  *pPsp;
 	UINT  nsp;
-	UCHAR nsp_total;
-	ULONG Stk_rsv[2];		/* retail reserves 8 bytes here (addiu sp,-8), never accessed */
+	ULONG nsp_total;
+	ULONG Stk_rsv[2];		/* 8-byte stack block (addiu sp,-8), never accessed */
 	(void)Stk_rsv;
 
 	nsp_total = G.pRoom->nSprite;

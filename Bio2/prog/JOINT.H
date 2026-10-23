@@ -64,14 +64,14 @@ struct tagPARTS_W {
  * JOINT.H - Joint / parts transform and motion sequencer module
  * Resident Evil 2 Dual Shock (SLUS-00748) reconstruction
  *
- * Structures used here (PARTS_W, ENEMY_WORK, MATRIX, ...) come from GLOBAL.H.
+ * Structures used here (PARTS_W, ENEMY_WORK, MATRIX, ...) come from their owner headers.
  */
 
 
 
 /*
  * JOINT_P - player-side joint motion state used by Joint_move_p (DS 0x80029e10).
- * Offsets verified against the DS: lbu +0x0 (Move_no), lbu +0x1 (Move_cnt),
+ * Offsets follow the DS: lbu +0x0 (Move_no), lbu +0x1 (Move_cnt),
  * lbu +0x2 (Hokan_flg), lbu +0x3 (P0_parts_no), lw +0x4 (On_parts_flg),
  * P0_m at +0x8 (t[1] stored at +0x20), P0_sv at +0x28. No other file uses JOINT_P.
  */
@@ -128,6 +128,7 @@ void    Pl_set_packet(void);											/* 80029c94 */
 ULONG   Joint_move_p(JOINT_P *pJp, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_flg);	/* 80029e10 */
 ULONG   Joint_move2(ENEMY_WORK *pEm, ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG Late_flg);	/* 8002a490 */
 ULONG   J_seq2(ULONG Kan_t_ptr, ULONG Seq_t_ptr, ULONG *pSeq_ptr, ULONG Late_flg);		/* 8002a508 */
+ULONG   Joint_move_skip(ENEMY_WORK *pEm, ULONG Seq_t_ptr);							/* 8002a9c8 */
 
 
 #endif /* JOINT_H_H */

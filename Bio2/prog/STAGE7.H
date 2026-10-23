@@ -11,6 +11,7 @@
 #endif
 
 
+/* Stage 7 setup routine and its data tables (defined in STAGE7.C). Sizes in the trailing comments are bytes. */
 extern VOID Stage7(VOID);
 extern USHORT Bs_size7[5][16];		// 8011A054		// 160 bytes
 extern UCHAR Bs_check_sum7[5][16];		// 8011A0F4		// 80 bytes

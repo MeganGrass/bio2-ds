@@ -30,8 +30,10 @@ extern const UCHAR Spl_mv03_rom[3];		/* DS 0x80011970 */
 extern const SHORT Spl_mv05_t1_rom[5];		/* DS 0x80011974 */
 extern const SHORT Spl_mv05_t2_rom[5];		/* DS 0x80011980 */
 
-/* Dispatch tables (RAM, filled by the game); declared here, defined elsewhere */
-extern VOID *Aida_Move_type[16];
+/* Dispatch tables (RAM, filled by the game); declared here, defined elsewhere. Aida_Move_type and
+ * Sherry_Move_type index the per-move-type branch tables (mv_br_type00..0a), which pick the motion for
+ * each AI state. The St_pos tables give the starting position for each character. */
+extern VOID *Aida_Move_type[11];
 extern VOID *Aida_mv_br_type00[];
 extern VOID *Aida_mv_br_type01[];
 extern VOID *Aida_mv_br_type02[];
@@ -50,9 +52,9 @@ extern VOID *Aida_em_at00_pl[];
 extern VOID *Aida_em_at00_spl[];
 extern VOID *Aida_em_at01[];
 extern VOID *Aida_em_at05[];
-extern UCHAR Aida_em_sel[];		/* UCHAR table at Aida_mv_br_type0a + 0x28, indexed by enemy Id */
-extern USHORT Aida_St_pos[];
-extern VOID *Sherry_Move_type[16];
+extern UCHAR E_A_at_tbl[48];		/* DS 0x800a8914, Aida attack selector, indexed by enemy Id - 0x10 */
+extern UCHAR Aida_St_pos[11];
+extern VOID *Sherry_Move_type[11];
 extern VOID *Sherry_mv_br_type00[];
 extern VOID *Sherry_mv_br_type01[];
 extern VOID *Sherry_mv_br_type02[];

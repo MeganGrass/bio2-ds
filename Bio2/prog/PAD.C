@@ -17,9 +17,29 @@
 #include "SCE2.H"
 #include "flag.h"
 
-/* DS 0x8009dba4 - PadSetActAlign table */
-UCHAR Pad_act_align[8] = {
-	0x00, 0x01, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,	/* +0x0 */
+/* DS 0x800c3b40 (Pad_type_old) */
+UCHAR Pad_type_old;
+
+/* DS 0x800e898c (Pad_act_flg) */
+UCHAR Pad_act_flg;
+
+/* DS 0x800e8984 (Pad_type1): pad mode of port 1 from the pad driver (4 digital, 7 analog). Zero at start; DS
+ * allocates it with the common symbols in .bss, so it has no initialiser here. */
+UCHAR Pad_type1;
+
+/* Vibration request queues: DS 0x800eaad8 (small motor), 0x800eac28 (large motor) */
+static VIB_REQ Vib_req0[33];
+static VIB_REQ Vib_req1[33];
+
+/* DS 0x800a268c, 0x800a2690: last request slot handed out for the small / large motor queue */
+static VIB_REQ *Vib_cur0 = Vib_req0;
+static VIB_REQ *Vib_cur1 = Vib_req1;
+
+/* DS 0x800a2694 (s__800a2694): pad speed scale, indexed by UnkMvPadFlg (12 bytes). Read by the PLAYER.C walk, run, back-walk
+ * and turn routines; DS has it in PAD's .data, between Vib_cur1 and Key_type. */
+UCHAR  s__800a2694[12] = {
+	0x00, 0x10, 0x1f, 0x2d, 0x3a, 0x48, 0x52, 0x5a,
+	0x5e, 0x62, 0x69, 0x00,
 };
 
 /* DS 0x800a26a0 */
@@ -28,22 +48,6 @@ USHORT Key_type[3][16] = {
 	{ 0x1000, 0x2000, 0x4000, 0x8000, 0x1000, 0x4000, 0x0040, 0x0040, 0x0008, 0x0080, 0x8000, 0x2000, 0x0040, 0x0090, 0x0020, 0x0000 },
 	{ 0x1000, 0x2000, 0x4000, 0x8000, 0x1000, 0x4000, 0x0040, 0x0040, 0x0008, 0x0080, 0x8000, 0x2000, 0x0040, 0x0010, 0x0020, 0x0000 },
 };
-
-/* DS 0x800c3b40 (Pad_type_old) */
-UCHAR Pad_type_old = 0x00;
-
-/* DS 0x800e898c (Pad_act_flg) */
-UCHAR Pad_act_flg = 0x00;
-
-static VIB_REQ Vib_req1[33];
-
-
-/* Vibration request queues: DS 0x800eaad8 (small motor), 0x800eac28 (large motor) */
-static VIB_REQ Vib_req0[33];
-
-/* DS 0x800a268c, 0x800a2690: last request slot handed out for the small / large motor queue */
-static VIB_REQ *Vib_cur0 = Vib_req0;
-static VIB_REQ *Vib_cur1 = Vib_req1;
 
 /* DS 0x80038bbc (Pad_set) */
 void Pad_set(void)
@@ -58,6 +62,7 @@ void Pad_set(void)
 	UCHAR  Stk_x = Stk_x;			/* analog stick X, Padd_data[0][6] (mode 7 only; unset otherwise in DS) */
 	UCHAR  Stk_y = Stk_y;			/* analog stick Y, Padd_data[0][7] (mode 7 only; unset otherwise in DS) */
 	UCHAR  Stk_act = Stk_act;			/* stick pushed outside centre this frame */
+	LONG   Stk_div;					/* Stk_x as a signed int for the divide by 8 (DS divides as signed int) */
 	UCHAR  Pow_sm;				/* small-motor power from SetPadActData */
 	UCHAR  Pow_lg;				/* large-motor power from SetPadActData */
 
@@ -105,8 +110,7 @@ pad_accepted:
 		{
 			PadActData[1] = 0;
 			PadActData[0] = 0;
-			if ((((Moji.Mess_flg & 0x80) == 0) || ((G.Status_flg & STAT_CINESCO) != 0)) &&
-				((G.System_flg & SYS_DEMO_MODE) == 0))
+			if ((((Moji.Mess_flg & 0x80) == 0) || ((G.Status_flg & STAT_CINESCO) != 0)) && ((G.System_flg & SYS_DEMO_MODE) == 0))
 			{
 				Pow_sm = SetPadActData(Vib_req0);
 				Pow_lg = SetPadActData(Vib_req1);
@@ -122,8 +126,7 @@ pad_accepted:
 	{
 		PadActData[1] = 0;
 		PadActData[0] = 0;
-		if ((((Moji.Mess_flg & 0x80) == 0) || ((G.Status_flg & STAT_CINESCO) != 0)) &&
-			((G.System_flg & SYS_DEMO_MODE) == 0))
+		if ((((Moji.Mess_flg & 0x80) == 0) || ((G.Status_flg & STAT_CINESCO) != 0)) && ((G.System_flg & SYS_DEMO_MODE) == 0))
 		{
 			PadActData[0] = SetPadActData(Vib_req0);
 			PadActData[1] = SetPadActData(Vib_req1);
@@ -137,10 +140,7 @@ pad_accepted:
 	}
 
 	G.Padd_trg = G.Padd;
-	Pad_raw    = ~(((UINT)G.Padd_data[1][2] * 0x1000000 +
-				   (UINT)G.Padd_data[1][3] * 0x10000 +
-				   (UINT)G.Padd_data[0][2] * 0x100) |
-				   (UINT)G.Padd_data[0][3]);
+	Pad_raw    = ~(((UINT)G.Padd_data[1][2] * 0x1000000 + (UINT)G.Padd_data[1][3] * 0x10000 + (UINT)G.Padd_data[0][2] * 0x100) | (UINT)G.Padd_data[0][3]);
 
 	if ((G.System_flg & SYS_DEMO_MODE) == 0)
 	{
@@ -149,8 +149,7 @@ pad_accepted:
 	else
 	{
 		G.Padd = Pad_raw;
-		if ((((G.Padd_trg ^ Pad_raw) & Pad_raw & 0xc00) == 0) &&
-			((UINT)G.Pdemo_cnt < (UINT)Demo.Pdemo_cnt))
+		if ((((G.Padd_trg ^ Pad_raw) & Pad_raw & 0xc00) == 0) && ((UINT)G.Pdemo_cnt < (UINT)Demo.Pdemo_cnt))
 		{
 			if ((G.System_flg & SYS_IN_GAME) != 0)
 			{
@@ -194,7 +193,8 @@ pad_accepted:
 				else
 				{
 					Stk_x       = 0x50 - Stk_x;
-					UnkMvPadFlg = Stk_x / 8;	/* DS divides as signed int (bgez/addiu 7/sra) */
+					Stk_div     = Stk_x;
+					UnkMvPadFlg = Stk_div / 8;	/* DS divides as signed int (bgez/addiu 7/sra) */
 				}
 				Stk_act |= 1;
 				G.Padd |= 0x8000;
@@ -206,7 +206,8 @@ pad_accepted:
 				if (Stk_x != 0xff)
 				{
 					Stk_x += 0x50;
-					UnkMvPadFlg = Stk_x / 8;
+					Stk_div     = Stk_x;
+					UnkMvPadFlg = Stk_div / 8;
 				}
 				Stk_act |= 1;
 				G.Padd |= 0x2000;
@@ -315,8 +316,10 @@ void Pad_vib_set0(int Time, USHORT Attr)
 	{
 		Vib_cur0        = Pad_vib_get_free(pReq);
 		Vib_cur0->Flg   = 1;
-		Vib_cur0->Pow   = (Time != 0);
+		/* Time is assigned before Pow: DS stores Time through the same reload of Vib_cur0 that it
+		 * uses for the Pow byte, and reloads Vib_cur0 once more for Delay and Step. */
 		Vib_cur0->Time  = (short)Time;
+		Vib_cur0->Pow   = (Time != 0);
 		Vib_cur0->Delay = Attr;
 		Vib_cur0->Step  = 0;
 	}
@@ -375,12 +378,11 @@ void Pad_vib_init(void)
 /* DS 0x800396fc (SetPadActData): advance active requests one frame, return max motor power */
 UCHAR SetPadActData(VIB_REQ *pReq)
 {
-	UINT  i;
-	UCHAR Max = 0;
-	short Step;				/* DS reads Step once (lh) and reuses it */
-	UCHAR Pow;
-	ULONG Sum;
-	ULONG Stk_rsv[2];		/* retail reserves 8 bytes here (addiu sp,-8), never accessed */
+	UINT   i;
+	UCHAR  Max = 0;
+	UCHAR *pB;			/* DS addresses the record fields from a cursor one byte past Flg */
+	short  Step;
+	ULONG  Stk_rsv[2];		/* 8-byte stack block (addiu sp,-8), never accessed */
 	(void)Stk_rsv;
 
 	for (i = 0; i < 32; i++, pReq++)
@@ -388,27 +390,25 @@ UCHAR SetPadActData(VIB_REQ *pReq)
 		if (pReq->Flg == 0)
 			continue;
 
-		if (pReq->Delay == 0)
+		pB = &pReq->Pow;
+		if (*(USHORT *)(pB + 1) == 0)
 		{
-			pReq->Time--;
-			if (pReq->Time == 0)
+			(*(USHORT *)(pB + 3))--;
+			if (*(USHORT *)(pB + 3) == 0)
 				pReq->Flg = 0;
 
-			Step = pReq->Step;
+			Step = *(short *)(pB + 5);
 			if (Step != 0)
 			{
-				/* 32-bit unsigned sum as retail: a negative sum keeps its high bits in the >> 7 */
-				Sum           = (ULONG)pReq->Pow_cur + (ULONG)(LONG)Step;
-				pReq->Pow_cur = (USHORT)Sum;
-				pReq->Pow     = (UCHAR)(Sum >> 7);
+				*(USHORT *)(pB + 7) += Step;
+				*pB = *(USHORT *)(pB + 7) >> 7;
 			}
-			Pow = pReq->Pow;
-			if (Max < Pow)
-				Max = Pow;
+			if (Max < *pB)
+				Max = *pB;
 		}
 		else
 		{
-			pReq->Delay--;
+			(*(USHORT *)(pB + 1))--;
 		}
 	}
 	return Max;
@@ -417,7 +417,7 @@ UCHAR SetPadActData(VIB_REQ *pReq)
 /* DS 0x800397b8 (Pad_vib_get_free): first free slot, or the end sentinel if all 32 are busy */
 VIB_REQ *Pad_vib_get_free(VIB_REQ *pReq)
 {
-	int i;
+	ULONG i;
 
 	for (i = 0; i < 32; i++, pReq++)
 	{
@@ -430,7 +430,7 @@ VIB_REQ *Pad_vib_get_free(VIB_REQ *pReq)
 /* DS 0x800397e4 (Pad_vib_count): number of active requests */
 int Pad_vib_count(VIB_REQ *pReq)
 {
-	int i;
+	ULONG i;
 	int Cnt = 0;
 
 	for (i = 0; i < 32; i++, pReq++)
@@ -443,10 +443,10 @@ int Pad_vib_count(VIB_REQ *pReq)
 
 
 /* DS 0x800e2a80 (UnknownPadSetFlag) */
-UCHAR UnknownPadSetFlag = 0;
+UCHAR UnknownPadSetFlag;
 
 /* DS 0x800cbc20 (PadActData) */
 UCHAR PadActData[2];
 
 /* DS 0x800d7654 (UnknownPadInfoByte) */
-UCHAR UnknownPadInfoByte = 0;
+UCHAR UnknownPadInfoByte;

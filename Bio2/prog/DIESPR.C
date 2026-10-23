@@ -5,18 +5,16 @@
  *
  * Die_spr_move_main / _hold / _erase / _end are ported from the DIEDEMO.BIN
  * bytes (DS 0x80191bac, 0x801921d8, 0x8019255c, 0x801929c0). They are not in
- * the Ghidra function index, so each body was decoded by hand and checked
+ * the Ghidra function index, so each body was decoded by hand and compared
  * against the bytes.
  */
 
 #include "TYPES.H"
 #include <INLINE_C.H>
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBSND.H>
 #include <MEMORY.H>
 #include <TYPES.H>
@@ -31,6 +29,13 @@
 #include "FILECODE.H"
 #include "flag.h"
 #include "DIVCHK.H"
+
+/* DS 0x801ad000 (Die_spr_work) */
+UCHAR *Die_spr_work = (UCHAR *)0x801ad000;
+/* DS 0x801a4220 (Die_vh_src) */
+UCHAR *Die_vh_src = (UCHAR *)0x801a4220;
+/* DS 0x801a4e88 (Die_vb_buf) */
+UCHAR *Die_vb_buf = (UCHAR *)0x801a4e88;
 
 /* ------------------------------------------------------------------ */
 /* Static data                                                         */
@@ -50,7 +55,7 @@ static long Dispr_vp[3];
 static long Dispr_vr[3];
 
 /* Sprite state dispatch table, DS 0x80193860, indexed by pDiespr->Rno */
-static void (*Die_spr_tbl[])(void) = {
+static void (*Die_spr_tbl[4])(void) = {
 	Die_spr_move_main,      /* 0x80191bac */
 	Die_spr_move_hold,      /* 0x801921d8 */
 	Die_spr_move_erase,     /* 0x8019255c */
@@ -60,17 +65,6 @@ static void (*Die_spr_tbl[])(void) = {
 /* Sprite work pointer, DS 0x801938c4 (points at DS 0x801ad000) */
 static DIESPR *pDiespr;
 
-/* Death demo work buffers (declared extern in DIESPR.H) */
-UCHAR Die_spr_work[sizeof(DIESPR)] RAM_SECTION(".buf_die_spr_work");	/* DS 0x801ad000, DIESPR sprite work area */
-/* DS 0x80198000 (Bg_img_buf) */
-/* Shared CD load buffer; 0x36000 bytes covers the largest load (CORE12_VB, 0x35ca0 bytes, sector-rounded) */
-ULONG Bg_img_buf[0xD800] RAM_SECTION(".buf_bg_img_buf");
-/* DS 0x801a4220 (Die_vh_src), death-sound VH source. Size 0xC68: both DS callers of Die_snd_trans
- * (Die_move_pause and Die_move_main, FUN_DIEDEMO__80190eec and FUN_DIEDEMO__80190fb0) pass 0xc68. */
-UCHAR Die_vh_src[0xC68] RAM_SECTION(".buf_die_vh_src");
-/* DS 0x801a4e88 (Die_vb_buf), death-sound VB body. Size UNVERIFIED: no DS caller passes a length
- * for it (SsVabTransBody reads the VAB header at runtime). 0x978 is the bound used here, not evidence. */
-UCHAR Die_vb_buf[0x978] RAM_SECTION(".buf_die_vb_buf");
 
 /* ------------------------------------------------------------------ */
 /* DS 0x801915b8 (Die_spr_init)                                         */
@@ -128,9 +122,10 @@ void Die_spr_move_init(void)
 	int       Vz;
 	POLY_GT4 *p;
 	SVECTOR  *pPos;
-	ULONG     Frame_pad[2];		/* retail reads only the first word of its 8-byte spill slots (sp+0x10,0x18,0x20,0x28); the upper halves are never read */
+	/* retail reserves 8 more bytes of locals in Die_spr_move_init (frame 88); never read */
+	volatile int Rsv0;
+	volatile int Rsv1;
 
-	(void)Frame_pad;
 	for (Grp = 0; Grp < 2; Grp++) {
 		Wy = 0;
 		p  = &pDiespr->Pgt4[Grp][0];
@@ -242,20 +237,6 @@ void Die_blood_move_init(void)
 
 /* ------------------------------------------------------------------ */
 /* Die_spr_move_main helper: colour step for one grid vertex            */
-/* Rgb + (255 - Dist) / 28, capped at 250 (retail divides by 28 with    */
-/* a magic multiply).                                                   */
-/* ------------------------------------------------------------------ */
-static UCHAR Die_spr_col_step(UCHAR Rgb, SHORT Dist)
-{
-	int v;
-
-	v = Rgb + (255 - Dist) / 28;
-	if (v >= 251) {
-		v = 250;
-	}
-	return (UCHAR)v;
-}
-
 /* Die_spr_move_main grid sizes (17x17 vertices, 16x16 quads) and the frame
  * count after Move_start at which the state advances to Die_spr_move_hold. */
 #define DIE_SPR_GRID_VERTS      17
@@ -275,10 +256,6 @@ void Die_spr_move_main(void)
 	SVECTOR   V[4];
 	short     Row;
 	short     Col;
-	short     Elapsed;
-	short     Step;
-	int       Cur;
-	int       Nxt;
 	POLY_GT4 *p;
 	POLY_GT4 *q;
 
@@ -316,14 +293,10 @@ void Die_spr_move_main(void)
 		}
 	}
 
-	/* Frames since Move_start (retail sVar6 = Free2 - Move_start, a short). */
-	Elapsed = (SHORT)((SHORT)pDiespr->Free2 - (SHORT)pDiespr->Move_start);
-	Cur = G.Cbuf_id;
-	Nxt = Cur ^ 1;
 	for (Row = 0; Row < DIE_SPR_GRID_QUADS; Row++) {
 		for (Col = 0; Col < DIE_SPR_GRID_QUADS; Col++) {
-			p = &pDiespr->Pgt4[Cur][Row * DIE_SPR_GRID_QUADS + Col];
-			q = &pDiespr->Pgt4[Nxt][Row * DIE_SPR_GRID_QUADS + Col];
+			p = &pDiespr->Pgt4[G.Cbuf_id][Row * DIE_SPR_GRID_QUADS + Col];
+			q = &pDiespr->Pgt4[G.Cbuf_id ^ 1][Row * DIE_SPR_GRID_QUADS + Col];
 
 			/* Quad corners: V[0]=Pos[Col][Row], V[1]=Pos[Col+1][Row],
 			 * V[2]=Pos[Col][Row+1], V[3]=Pos[Col+1][Row+1]. */
@@ -339,20 +312,35 @@ void Die_spr_move_main(void)
 			gte_rtps();
 			gte_stsxy((long *)&p->x3);
 
-			/* Row-dependent vz drift on the stack copies after RTPS: V[0] and V[1]
-			 * get (Elapsed*Row)>>1, V[2] and V[3] get (Elapsed*(Row+1))>>1. */
-			Step = (SHORT)((Elapsed * Row) >> 1);
-			V[0].vz += Step;
-			V[1].vz += Step;
-			Step = (SHORT)((Elapsed * (Row + 1)) >> 1);
-			V[2].vz += Step;
-			V[3].vz += Step;
-
 			/* Each vertex colour is written to the current and the other buffer */
-			p->r0 = q->r0 = Die_spr_col_step(p->r0, pDiespr->Dist[Col][Row]);
-			p->r1 = q->r1 = Die_spr_col_step(p->r1, pDiespr->Dist[Col + 1][Row]);
-			p->r2 = q->r2 = Die_spr_col_step(p->r2, pDiespr->Dist[Col][Row + 1]);
-			p->r3 = q->r3 = Die_spr_col_step(p->r3, pDiespr->Dist[Col + 1][Row + 1]);
+			{
+				int v = p->r0 + (255 - pDiespr->Dist[Col][Row]) / 28;
+				if (v >= 251) {
+					v = 250;
+				}
+				p->r0 = q->r0 = (UCHAR)v;
+			}
+			{
+				int v = p->r1 + (255 - pDiespr->Dist[Col + 1][Row]) / 28;
+				if (v >= 251) {
+					v = 250;
+				}
+				p->r1 = q->r1 = (UCHAR)v;
+			}
+			{
+				int v = p->r2 + (255 - pDiespr->Dist[Col][Row + 1]) / 28;
+				if (v >= 251) {
+					v = 250;
+				}
+				p->r2 = q->r2 = (UCHAR)v;
+			}
+			{
+				int v = p->r3 + (255 - pDiespr->Dist[Col + 1][Row + 1]) / 28;
+				if (v >= 251) {
+					v = 250;
+				}
+				p->r3 = q->r3 = (UCHAR)v;
+			}
 
 			AddPrim(G.pOt0 + 5, p);
 		}
@@ -376,7 +364,11 @@ void Die_spr_move_hold(void)
 	short     Col;
 	short     Row2;
 	POLY_GT4 *p;
-	SVECTOR   V[4];
+	SVECTOR  *pv;
+	/* Retail stages the four Pos vertices in its stack copy at sp+0x10..0x2f;
+	 * this port reads Pos directly, so V is never written or read. The
+	 * volatile keeps the 32 bytes reserved so the frame stays 80 as in retail. */
+	volatile SVECTOR V[4];
 
 	/* Phase 1: Row 15 (odd Col) gets vz += Rnd()&1 at Pos[Col][15]. Row 12
 	 * (even Col) gets vz += Rnd()&1 at Pos[Col][12..16] when Free2 is odd. */
@@ -398,15 +390,12 @@ void Die_spr_move_hold(void)
 	p = &pDiespr->Pgt4[G.Cbuf_id][0];
 	for (Row = 0; Row < 16; Row++) {
 		for (Col = 0; Col < 16; Col++) {
-			V[0] = pDiespr->Pos[Col][Row];
-			V[1] = pDiespr->Pos[Col + 1][Row];
-			V[2] = pDiespr->Pos[Col][Row + 1];
-			V[3] = pDiespr->Pos[Col + 1][Row + 1];
+			pv = &pDiespr->Pos[Col][Row];
 
-			gte_ldv3(&V[0], &V[1], &V[2]);
+			gte_ldv3(&pv[0], &pv[17], &pv[1]);
 			gte_rtpt();
 			gte_stsxy3((long *)&p->x0, (long *)&p->x1, (long *)&p->x2);
-			gte_ldv0(&V[3]);
+			gte_ldv0(&pv[18]);
 			gte_rtps();
 			gte_stsxy((long *)&p->x3);
 			AddPrim(G.pOt0 + 5, p);
@@ -440,7 +429,11 @@ void Die_spr_move_erase(void)
 	int       Rot;
 	int       Vy;
 	int       Rgb;
-	SVECTOR   V[4];
+	SVECTOR  *pv;
+	/* Retail stages the four Pos vertices in its stack copy at sp+0x10..0x2f;
+	 * this port reads Pos directly, so V is never written or read. The
+	 * volatile keeps the 32 bytes reserved so the frame stays 80 as in retail. */
+	volatile SVECTOR V[4];
 	POLY_GT4 *p;
 
 	Frame = (SHORT)pDiespr->Free2;
@@ -459,15 +452,12 @@ void Die_spr_move_erase(void)
 	p = &pDiespr->Pgt4[G.Cbuf_id][0];
 	for (Row = 0; Row < 16; Row++) {
 		for (Col = 0; Col < 16; Col++) {
-			V[0] = pDiespr->Pos[Col][Row];
-			V[1] = pDiespr->Pos[Col + 1][Row];
-			V[2] = pDiespr->Pos[Col][Row + 1];
-			V[3] = pDiespr->Pos[Col + 1][Row + 1];
+			pv = &pDiespr->Pos[Col][Row];
 
-			gte_ldv3(&V[0], &V[1], &V[2]);
+			gte_ldv3(&pv[0], &pv[17], &pv[1]);
 			gte_rtpt();
 			gte_stsxy3((long *)&p->x0, (long *)&p->x1, (long *)&p->x2);
-			gte_ldv0(&V[3]);
+			gte_ldv0(&pv[18]);
 			gte_rtps();
 			gte_stsxy((long *)&p->x3);
 
@@ -544,16 +534,29 @@ void Die_blood_move_main(void)
 			for (Row = 0; Row < 16; Row++) {
 				for (Col = 0; Col < 16; Col += 2) {
 					/* quad: V0=Pos[Col][Row], V1=Pos[Col+2][Row], V2=Pos[Col][Row+1], V3=Pos[Col+2][Row+1] */
+					if ((SHORT)pDiespr->Ctr > 0x14) {
+						Amp = rcos(Grp * 0x10000 + Col * 0x40)
+							+ rcos((Grp * 7 + Col) * 0x100) + 0x1000;
+						Amp = ((int)(((long long)Amp * 0x66666667) >> 0x27) - (Amp >> 0x1f))
+							* ((SHORT)pDiespr->Ctr - 0x14);
+						Sel = (Col >> 1) & 3;
+						a   = Amp * (Row + 1);
+						b   = Amp * (Row + 2);
+					}
+
 					V[0] = pDiespr->Pos[Col][Row];
 					V[1] = pDiespr->Pos[Col + 2][Row];
 					V[2] = pDiespr->Pos[Col][Row + 1];
 					V[3] = pDiespr->Pos[Col + 2][Row + 1];
 					pRgb = &p->r0;                     /* rgb0 UCHAR of the FT4 */
 
+					/* The Ctr tests below are signed halfword compares in retail (lh + slti),
+					 * and Ctr - 4 / Ctr - 9 are truncated to short (sll/sra 16) before the
+					 * sign test, so Ctr is read through (SHORT) casts. */
 					if (Grp == 0) {
-						if (pDiespr->Ctr < 5) {
+						if ((SHORT)pDiespr->Ctr < 5) {
 							*pRgb = (UCHAR)(pDiespr->Ctr * 40);
-							Size  = pDiespr->Ctr * pDiespr->Ctr * 14 + 0x168;
+							Size  = (SHORT)pDiespr->Ctr * (SHORT)pDiespr->Ctr * 14 + 0x168;
 						} else {
 							*pRgb = 200;
 							Size  = 600;
@@ -562,7 +565,7 @@ void Die_blood_move_main(void)
 							V[k].vx += 0x5a;
 						}
 					} else if (Grp == 1) {
-						t = pDiespr->Ctr - 4;
+						t = (SHORT)(pDiespr->Ctr - 4);
 						if (t >= 0) {
 							if (t < 5) {
 								*pRgb = (UCHAR)(t * 40);
@@ -577,7 +580,7 @@ void Die_blood_move_main(void)
 							}
 						}
 					} else if (Grp == 2) {
-						t = pDiespr->Ctr - 9;
+						t = (SHORT)(pDiespr->Ctr - 9);
 						if (t >= 0) {
 							if (t < 3) {
 								*pRgb = (UCHAR)(t * 40);
@@ -601,14 +604,7 @@ void Die_blood_move_main(void)
 							V[k].vz <<= 1;
 						}
 
-						if (pDiespr->Ctr > 0x14) {
-							Amp = rcos(Grp * 0x10000 + Col * 0x40)
-								+ rcos((Grp * 7 + Col) * 0x100) + 0x1000;
-							Amp = ((int)(((long long)Amp * 0x66666667) >> 0x27) - (Amp >> 0x1f))
-								* (pDiespr->Ctr - 0x14);
-							Sel = (Col >> 1) & 3;
-							a   = Amp * (Row + 1);
-							b   = Amp * (Row + 2);
+						if ((SHORT)pDiespr->Ctr > 0x14) {
 							switch (Sel) {
 							case 0:
 								t = (short)(((int)(((long long)a * 0x66666667) >> 0x24) - (a >> 0x1f)) >> 4);
@@ -652,8 +648,7 @@ void Die_blood_move_main(void)
 
 						gte_ldv3(&V[0], &V[1], &V[2]);
 						gte_rtpt();
-						gte_stsxy3((long *)&p->x0, (long *)&p->x1,
-							(long *)&p->x2);
+						gte_stsxy3((long *)&p->x0, (long *)&p->x1, (long *)&p->x2);
 						gte_ldv0(&V[3]);
 						gte_rtps();
 
@@ -688,10 +683,8 @@ void Die_spr_load(void)
 	char  *Mess;
 
 	die_type = G.Player.Id;
-	if (((G.System_flg & SYS_DIE_BLOOD) == 0) &&
-		((G.Status_flg & STAT_SUB_PLAYER) != 0) &&
-		(G.pEnemy[1]->Routine_0 == 3)) {
-		Die_phase = 1;
+	if (((G.System_flg & SYS_DIE_BLOOD) == 0) && ((G.Status_flg & STAT_SUB_PLAYER) != 0) && (G.pEnemy[1]->Routine_0 == 3)) {
+		Diedemo.Phase = 1;
 		die_type = 0x0e;
 		if ((G.pEnemy[1]->Id & 4) != 0) {
 			die_type = 0x0f;

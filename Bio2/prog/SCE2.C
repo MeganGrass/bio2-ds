@@ -1,17 +1,17 @@
 /*
- *	SCE2.C - SCD opcode implementations (effects / enemies / audio / light / misc)
- *	DS retail range: 0x80056428 (Se_on) .. 0x80059437 (end of Vib_fade_set, before Snd_sys_init)
+ * SCE2.C - SCD opcode implementations (effects / enemies / audio / light / misc)
+ * Resident Evil 2 (SLUS-00748) decompilation
+ * Source: D:\Bio2\prog\SCE2.C
  *
- *	Every body below was checked against the SLUS_00748 disassembly/decompile.
+ * DS range: 0x80056428 (Se_on) .. 0x80059437 (end of Vib_fade_set, before Snd_sys_init).
+ * Every body below was checked against the SLUS_00748 disassembly/decompile.
  */
 #include "TYPES.H"
 #include <ASM.H>
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBSND.H>
 #include "OM.H"
 #include "CONFIG.H"
@@ -46,6 +46,7 @@
 #include "FILECODE.H"
 #include "flag.h"
 #include "sce_defines.h"
+#include "SPL_TBL.H"
 
 /* DS 0x80011544: 3-character rodata label passed to Cd_read by Sce_Item_get
  * (text not resolved in Ghidra). */
@@ -55,16 +56,8 @@ static UCHAR Itp_mess[4];
  *	File statics / globals owned by SCE2
  * ------------------------------------------------------------------------ */
 
-/* Sub-player (partner) speed tables: [Id][0] = ?, [Id][1] = motion speed.
- * Index = Id + 0x10 for Id < 0x10, Id - 0x40 otherwise.
- * NOTE: initializer bytes are not shown by Ghidra (no data defined); must be
- * extracted from the DS image. */
-extern UCHAR Subpl_walk[32][2];			/* DS 0x800a7968 */
-extern UCHAR Subpl_back[32][2];			/* DS 0x800a79a8 */
-extern UCHAR Subpl_dir[32][2];			/* DS 0x800a79e8 */
-extern UCHAR Subpl_ato[32][2];			/* DS 0x800a7a28 */
-extern UCHAR Subpl_run[32][2];			/* DS 0x800a7a68 */
-static UCHAR Em4a_zobiparts_tbl[7][2];	/* DS 0x800a7aa8 (unused in SCE2) */
+/* SCE2.C's copy of the sub-player speed tables (SPL_TBL.H) is DS 0x800a7968; Subpl_walk[Id][1] is the motion speed,
+ * index Id + 0x10 for Id < 0x10, Id - 0x40 otherwise. */
 
 UCHAR Itp_check_sum[100] = {
 	0x2b, 0x0f, 0x94, 0xb6, 0xc9, 0x96, 0xef, 0xed, 0x52, 0x31,
@@ -362,50 +355,54 @@ typedef struct {
  *	Play a 3D sound effect at an object / enemy position (+ offset)
  * ======================================================================== */
 /* DS 0x80056428 (Se_on) */
+/* DS stack frame: 0x30 bytes. s0 and s1 are saved at sp+0x20 and sp+0x24 and ra at sp+0x28. Vec is at sp+0x10 (vx),
+ * sp+0x14 (vy) and sp+0x18 (vz); its pad word at sp+0x1c is never written. sp+0x10 is passed to Snd_se_stad. */
 ULONG Se_on(SCE_TASK *pSce)
 {
 	UCHAR		*pData;
 	UINT		D0;
 	UINT		D1;
+	UINT		Type;		/* pData[1]: sound bits 24..31, read before the switch as retail does */
 	ENEMY_WORK	*pW;		/* undefined for kind >= 5 (retail leaves in_v1 unset) */
+	LONG		ox;		/* position offset: 0 for WORK_TYPE_POSITION, else the work's Pos_x */
+	LONG		oy;		/* the work's Pos_y */
+	LONG		oz;		/* the work's Pos_z */
 	VECTOR		Vec;
 
 	pData = pSce->Data;
 	D1    = (UINT)((SCE_SE_ON_REC *)pData)->D1;
+	Type  = pData[1];
 	D0    = (UINT)((SCE_SE_ON_REC *)pData)->D0;
 
-	if ((D1 & 0xff) == WORK_TYPE_POSITION)
+	switch (D1 & 0xff)
 	{
-		Vec.vx = 0;
-		Vec.vy = 0;
-		Vec.vz = 0;
+	case WORK_TYPE_POSITION:
+		ox = 0;
+		oy = 0;
+		oz = 0;
+		goto offset_done;		/* the position is not read for this kind */
+	case WORK_TYPE_PLAYER:
+		pW = G.pEnemy[0];
+		break;
+	case WORK_TYPE_SUB_PLAYER:
+		pW = G.pEnemy[1];
+		break;
+	case WORK_TYPE_ENEMY:
+		pW = G.pEnemy[(D1 >> 8) + 2];
+		break;
+	case WORK_TYPE_OBJECT:
+		pW = (ENEMY_WORK *)&G.Ob_model[D1 >> 8];
+		break;
 	}
-	else
-	{
-		switch (D1 & 0xff)
-		{
-		case WORK_TYPE_PLAYER:
-			pW = G.pEnemy[0];
-			break;
-		case WORK_TYPE_SUB_PLAYER:
-			pW = G.pEnemy[1];
-			break;
-		case WORK_TYPE_ENEMY:
-			pW = G.pEnemy[(D1 >> 8) + 2];
-			break;
-		case WORK_TYPE_OBJECT:
-			pW = (ENEMY_WORK *)&G.Ob_model[D1 >> 8];
-			break;
-		}
-		Vec.vx = pW->Pos_x;
-		Vec.vy = pW->Pos_y;
-		Vec.vz = pW->Pos_z;
-	}
-	Vec.vx = ((SCE_SE_ON_REC *)pData)->vx + Vec.vx;
-	Vec.vy = ((SCE_SE_ON_REC *)pData)->vy + Vec.vy;
-	Vec.vz = ((SCE_SE_ON_REC *)pData)->vz + Vec.vz;
+	ox = pW->Pos_x;
+	oy = pW->Pos_y;
+	oz = pW->Pos_z;
+offset_done:
+	Vec.vx = ((SCE_SE_ON_REC *)pData)->vx + ox;
+	Vec.vy = ((SCE_SE_ON_REC *)pData)->vy + oy;
+	Vec.vz = ((SCE_SE_ON_REC *)pData)->vz + oz;
 
-	Snd_se_stad(((ULONG)pData[1] << 24) | ((D0 & 0xff) << 16) | (D0 >> 8), &Vec);
+	Snd_se_stad(((ULONG)Type << 24) | ((D0 & 0xff) << 16) | (D0 >> 8), &Vec);
 	pSce->Data = pData + 12;
 	return 1;
 }
@@ -419,9 +416,11 @@ ULONG Sca_id_set(SCE_TASK *pSce)
 {
 	UCHAR		*pData;
 	SCA_DATA	*pSca;
+	ULONG		Slot;		/* pData[1] + 1: index of the target SCA_DATA record */
 
 	pData = pSce->Data;
-	pSca  = (SCA_DATA *)G.pRoom->pSca + pData[1] + 1;
+	Slot = pData[1] + 1;
+	pSca  = (SCA_DATA *)G.pRoom->pSca + Slot;
 	pSca->Id = (pSca->Id & 0x7f) | (((SCE_SCA_ID_REC *)pData)->Id & 0xff80);
 	pSce->Data = pData + 4;
 	return 1;
@@ -432,23 +431,20 @@ ULONG Sca_id_set(SCE_TASK *pSce)
  * ======================================================================== */
 ULONG Sce_espr_on(SCE_TASK *pSce)
 {
-	UCHAR	*pData;
-	ULONG	D0;
+	SCE_ESPR_REC	*pRec;
 	MATRIX	*pMat;
 	SVECTOR	Svec;
 	SVECTOR	Pad;
+	USHORT	D0;
 
-	(void)Pad;
-
-	pData = pSce->Data;
-	D0    = ((SCE_ESPR_REC *)pData)->D0;
-	pMat  = Get_matrix((signed char)pData[4], (signed char)pData[5]);
-	Svec.vx = ((SCE_ESPR_REC *)pData)->vx;
-	Svec.vy = ((SCE_ESPR_REC *)pData)->vy;
-	Svec.vz = ((SCE_ESPR_REC *)pData)->vz;
-	Esp_call((D0 << 24) | ((D0 >> 8) << 16) | ((SCE_ESPR_REC *)pData)->Bit,
-			 ((SCE_ESPR_REC *)pData)->dir_y, pMat, &Svec);
-	pSce->Data = pData + 16;
+	pRec = (SCE_ESPR_REC *)pSce->Data;
+	D0   = pRec->D0;
+	pMat = Get_matrix(((signed char *)pRec)[4], (short)((USHORT *)pRec)[2] >> 8);
+	Svec.vx = pRec->vx;
+	Svec.vy = pRec->vy;
+	Svec.vz = pRec->vz;
+	Esp_call((D0 << 24) | ((D0 >> 8) << 16) | pRec->Bit, pRec->dir_y, pMat, &Svec);
+	pSce->Data = (UCHAR *)pRec + 16;
 	return 1;
 }
 
@@ -463,16 +459,14 @@ ULONG Sce_espr_on2(SCE_TASK *pSce)
 	SVECTOR	Svec;
 	SVECTOR	Pad;
 
-	(void)Pad;
 
 	pData = pSce->Data;
 	D0    = ((SCE_ESPR2_REC *)pData)->D0;
-	pMat  = Get_matrix((signed char)pData[4], (signed char)pData[5]);
+	pMat  = Get_matrix((signed char)pData[4], ((SHORT)((USHORT *)pData)[2]) >> 8);
 	Svec.vx = ((SCE_ESPR2_REC *)pData)->vx;
 	Svec.vy = ((SCE_ESPR2_REC *)pData)->vy;
 	Svec.vz = ((SCE_ESPR2_REC *)pData)->vz;
-	Esp_call2((D0 << 24) | ((D0 >> 8) << 16) | ((SCE_ESPR2_REC *)pData)->Bit,
-			  ((ULONG)((SCE_ESPR2_REC *)pData)->dir_y << 16) | pData[1], pMat, &Svec);
+	Esp_call2((D0 << 24) | ((D0 >> 8) << 16) | ((SCE_ESPR2_REC *)pData)->Bit, ((ULONG)((SCE_ESPR2_REC *)pData)->dir_y << 16) | pData[1], pMat, &Svec);
 	pSce->Data = pData + 16;
 	return 1;
 }
@@ -480,25 +474,33 @@ ULONG Sce_espr_on2(SCE_TASK *pSce)
 /* ==========================================================================
  *	Sce_espr3d_on				DS 0x800566f0
  * ======================================================================== */
+/* DS stack frame: 0x38 bytes. s0..s2 are saved at sp+0x28..sp+0x30 and ra at sp+0x34. Svec is at sp+0x18 (vx, vy, vz
+ * at sp+0x18, 0x1a, 0x1c) and Svec2 at sp+0x20 (sp+0x20, 0x22, 0x24); the SVECTOR pad halfwords are never written.
+ * Svec goes to Esp_call3D in a3 and Svec2 as the fifth argument, stored at sp+0x10. */
 ULONG Sce_espr3d_on(SCE_TASK *pSce)
 {
 	UCHAR	*pData;
 	ULONG	D0;
+	int		Mat;
+	ULONG	Arg;
 	MATRIX	*pMat;
 	SVECTOR	Svec;
 	SVECTOR	Svec2;
 
 	pData = pSce->Data;
 	D0    = ((SCE_ESPR3D_REC *)pData)->D0;
-	pMat  = Get_matrix((signed char)pData[4], (signed char)pData[5]);
+	/* DS reads the halfword at +4 once; the two Get_matrix arguments are its low byte and (short) >> 8 */
+	Mat   = (SHORT)((USHORT *)pData)[2];
+	pMat  = Get_matrix((signed char)Mat, Mat >> 8);
+	/* DS builds the Esp_call3D flag word before the SVECTOR copies */
+	Arg   = (D0 << 24) | ((D0 >> 8) << 16) | ((SCE_ESPR3D_REC *)pData)->Bit;
 	Svec.vx  = ((SCE_ESPR3D_REC *)pData)->vx;
 	Svec.vy  = ((SCE_ESPR3D_REC *)pData)->vy;
 	Svec.vz  = ((SCE_ESPR3D_REC *)pData)->vz;
 	Svec2.vx = ((SCE_ESPR3D_REC *)pData)->Svec2[0];
 	Svec2.vy = ((SCE_ESPR3D_REC *)pData)->Svec2[1];
 	Svec2.vz = ((SCE_ESPR3D_REC *)pData)->Svec2[2];
-	Esp_call3D((D0 << 24) | ((D0 >> 8) << 16) | ((SCE_ESPR3D_REC *)pData)->Bit,
-			   ((SCE_ESPR3D_REC *)pData)->dir_y, pMat, &Svec, &Svec2);
+	Esp_call3D(Arg, ((SCE_ESPR3D_REC *)pData)->dir_y, pMat, &Svec, &Svec2);
 	pSce->Data = pData + 22;
 	return 1;
 }
@@ -506,6 +508,8 @@ ULONG Sce_espr3d_on(SCE_TASK *pSce)
 /* ==========================================================================
  *	Sce_espr3d_on2				DS 0x800567b4
  * ======================================================================== */
+/* DS stack frame: 0x38 bytes, laid out as in Sce_espr3d_on: s0..s2 at sp+0x28..sp+0x30, ra at sp+0x34, Svec at
+ * sp+0x18, Svec2 at sp+0x20, and the Svec2 address stored at sp+0x10 as the fifth argument of Esp_call3D2. */
 ULONG Sce_espr3d_on2(SCE_TASK *pSce)
 {
 	UCHAR	*pData;
@@ -523,8 +527,7 @@ ULONG Sce_espr3d_on2(SCE_TASK *pSce)
 	Svec2.vx = ((SCE_ESPR3D2_REC *)pData)->Svec2[0];
 	Svec2.vy = ((SCE_ESPR3D2_REC *)pData)->Svec2[1];
 	Svec2.vz = ((SCE_ESPR3D2_REC *)pData)->Svec2[2];
-	Esp_call3D2((D0 << 24) | ((D0 >> 8) << 16) | ((SCE_ESPR3D2_REC *)pData)->Bit,
-				((ULONG)((SCE_ESPR3D2_REC *)pData)->dir_y << 16) | pData[1], pMat, &Svec, &Svec2);
+	Esp_call3D2((D0 << 24) | ((D0 >> 8) << 16) | ((SCE_ESPR3D2_REC *)pData)->Bit, ((ULONG)((SCE_ESPR3D2_REC *)pData)->dir_y << 16) | pData[1], pMat, &Svec, &Svec2);
 	pSce->Data = pData + 22;
 	return 1;
 }
@@ -621,10 +624,6 @@ MATRIX *Get_matrix(long Work_kind, long Work_no)
 	Kind = (signed char)Work_kind;
 	if ((Kind & 0x80) == 0)
 	{
-		if (Kind >= 5)
-		{
-			return NULL;
-		}
 		switch (Kind)
 		{
 		case WORK_TYPE_POSITION:
@@ -641,7 +640,7 @@ MATRIX *Get_matrix(long Work_kind, long Work_no)
 		return NULL;
 	}
 
-	switch ((Kind & 0x60) >> 5)
+	switch (((ULONG)Work_kind & 0x60) >> 5)
 	{
 	case 0:
 		pEm = G.pEnemy[0];
@@ -656,7 +655,7 @@ MATRIX *Get_matrix(long Work_kind, long Work_no)
 		/* retail reads an undefined register here (in_a3); no entity */
 		return NULL;
 	}
-	return (MATRIX *)&pEm->pSin_parts_ptr[Kind & 0x1f].Workm;
+	return (MATRIX *)&pEm->pSin_parts_ptr[Work_kind & 0x1f].Workm;
 }
 
 /* ==========================================================================
@@ -666,18 +665,23 @@ ULONG Plc_motion(SCE_TASK *pSce)
 {
 	UCHAR		*pData;
 	ENEMY_WORK	*pEm;
-	UINT		Rout;
+	UINT		Move_no;
+	USHORT		Flg;
+	UINT		Mode;
 
 	pData = pSce->Data;
 	pEm   = pSce->pWork;
+	/* DS reads the three record bytes before the first store, and reloads pSce->Data for the advance */
+	Move_no = pData[2];
+	Flg     = pData[3];
+	Mode    = pData[1];
 	pEm->Move_cnt = 0;
 	pEm->Sce_free0 = 0;
 	pEm->Sce_free1 = 0;
-	Rout = ((UINT)pData[1] << 8) | 4;
-	*(ULONG *)&pEm->Routine_0 = Rout;	/* DS stores the four Routine bytes as one word */
-	pEm->Move_no   = pData[2];
-	pEm->Sce_flg   = (USHORT)pData[3];
-	pSce->Data = pData + 4;
+	*(ULONG *)&pEm->Routine_0 = (Mode << 8) | 4;	/* DS stores the four Routine bytes as one word */
+	pEm->Move_no   = Move_no;
+	pEm->Sce_flg   = Flg;
+	pSce->Data += 4;
 	return 1;
 }
 
@@ -691,6 +695,7 @@ ULONG Plc_dest(SCE_TASK *pSce)
 	UINT		Id;
 	UINT		Mode;
 	UINT		Rout;
+	UCHAR		Set_no;
 
 	pEm  = pSce->pWork;
 	pData = pSce->Data;
@@ -745,9 +750,10 @@ ULONG Plc_dest(SCE_TASK *pSce)
 			break;
 		}
 	}
+	Set_no = pData[3];
 	pEm->Sce_flg    = 0;
 	pEm->Sce_free1  = 0;
-	pEm->Set_flg_no = pData[3];
+	pEm->Set_flg_no = Set_no;
 	pEm->Dest_x     = ((SCE_PLC_DEST_REC *)pData)->Dest_x;
 	pEm->Dest_z     = ((SCE_PLC_DEST_REC *)pData)->Dest_z;
 	pEm->Sce_free2  = pEm->Dest_x;
@@ -767,11 +773,11 @@ ULONG Plc_gun(SCE_TASK *pSce)
 
 	pEm   = pSce->pWork;
 	pData = pSce->Data;
+	Rout = ((UINT)pData[1] << 8) | 4;
 	pEm->Sce_free0 = 0;
 	pEm->Sce_free1 = 0;
-	Rout = ((UINT)pData[1] << 8) | 4;
 	*(ULONG *)&pEm->Routine_0 = Rout;	/* DS stores the four Routine bytes as one word */
-	pSce->Data = pData + 2;
+	pSce->Data += 2;
 	return 1;
 }
 
@@ -782,18 +788,27 @@ ULONG Plc_gun_eff(SCE_TASK *pSce)
 {
 	/* DS 0x80056df8 writes sp+0x00..0x0c (16-byte frame) with nine dead stores,
 	   in this order, and never reads the block. The stores are kept as real
-	   volatile writes so the frame and the store sequence match DS. */
+	   volatile writes so the frame and the store sequence match DS. The 0x25d
+	   and 0x91 values are materialised in the order DS loads them (0x91 is
+	   loaded into a second register before the first 0x25d store), and -0x32 is
+	   loaded before the two 0x91 stores. */
 	volatile ULONG	Dead[3];
+	ULONG			v25d;
+	ULONG			k91;
+	ULONG			k32;
 
 	Dead[0] = 0x8c;
-	Dead[1] = 0x25d;
+	__asm__ volatile ("li %0,0x25d" : "=r"(v25d));
+	__asm__ volatile ("li %0,0x91" : "=r"(k91));
+	Dead[1] = v25d;
 	Dead[1] = 0x1f4;
 	Dead[2] = 0;
 	Dead[2] = -0x19;
 	Dead[1] = 0x109;
-	Dead[0] = 0x91;
-	Dead[0] = 0x91;
-	Dead[2] = -0x32;
+	__asm__ volatile ("li %0,-0x32" : "=r"(k32));
+	Dead[0] = k91;
+	Dead[0] = k91;
+	Dead[2] = k32;
 	pSce->Data++;
 	return 1;
 }
@@ -803,31 +818,28 @@ ULONG Plc_gun_eff(SCE_TASK *pSce)
  * ======================================================================== */
 ULONG Plc_neck(SCE_TASK *pSce)
 {
-	UCHAR		*pData;
 	ENEMY_WORK	*pEm;
 	PARTS_W		*pParts;
-	UCHAR		Mode;
-	short		Px;
-	short		Py;
-	short		Pz;
+	ULONG		Mode;
+	LONG		Px;
+	LONG		Py;
+	LONG		Pz;
+	LONG		Attr;
 
 	pEm    = pSce->pWork;
-	pData  = pSce->Data;
-	Mode   = pData[1];
-	pParts = pEm->pSin_parts_ptr;
+	Mode   = pSce->Data[1];
+	pParts = pEm->pSin_parts_ptr + 8;
 	pEm->Neck_flg = 0x80;
-	Px = ((SCE_PLC_NECK_REC *)pData)->Px;
-	Py = ((SCE_PLC_NECK_REC *)pData)->Py;
-	Pz = ((SCE_PLC_NECK_REC *)pData)->Pz;
+	Px   = ((SCE_PLC_NECK_REC *)pSce->Data)->Px;
+	Py   = ((SCE_PLC_NECK_REC *)pSce->Data)->Py;
+	Pz   = ((SCE_PLC_NECK_REC *)pSce->Data)->Pz;
+	Attr = ((SCE_PLC_NECK_REC *)pSce->Data)->Attr;
 
+	/* DS lays the case bodies out as FRONT, ANGLE, YES, NO, COORD/TRACE, AUTO */
 	switch (Mode)
 	{
 	case PLC_NECK_FRONT:
 		pEm->Neck_flg |= 0x12;
-		break;
-	case PLC_NECK_COORD:
-	case PLC_NECK_TRACE:
-		pEm->Neck_flg |= 4;
 		break;
 	case PLC_NECK_ANGLE:
 		pEm->Neck_flg |= 8;
@@ -837,6 +849,10 @@ ULONG Plc_neck(SCE_TASK *pSce)
 		break;
 	case PLC_NECK_NO:
 		pEm->Neck_flg |= 0x58;
+		break;
+	case PLC_NECK_COORD:
+	case PLC_NECK_TRACE:
+		pEm->Neck_flg |= 4;
 		break;
 	case PLC_NECK_AUTO:
 		pEm->Neck_flg = 0;
@@ -848,27 +864,24 @@ ULONG Plc_neck(SCE_TASK *pSce)
 	if (Mode == PLC_NECK_TRACE)
 	{
 		/* Px is a work type (Py the enemy number); convert it to a G.pEnemy[] index */
-		if (pEm->Neck_point_x == WORK_TYPE_PLAYER)
+		switch (pEm->Neck_point_x)
 		{
+		case WORK_TYPE_PLAYER:
 			pEm->Neck_point_x = 0;
-		}
-		else
-		{
-			if (pEm->Neck_point_x == WORK_TYPE_SUB_PLAYER)
-			{
-				Px = 1;
-			}
-			else
-			{
-				Px = pEm->Neck_point_y + 2;
-			}
-			pEm->Neck_point_x = Px;
+			break;
+		case WORK_TYPE_SUB_PLAYER:
+			pEm->Neck_point_x = 1;
+			break;
+		default:
+			pEm->Neck_point_x = pEm->Neck_point_y + 2;
+			break;
 		}
 		pEm->Neck_point_y = -0x8000;
 	}
-	/* USHORT store of the Attr field into part 8's Free[6] (short array) */
-	pParts[8].Free[6] = ((SCE_PLC_NECK_REC *)pData)->Attr;
-	pSce->Data = pData + 10;
+	/* DS stores the attribute halfword of part 8 (offset 0xa4) as two bytes */
+	((UCHAR *)&pParts->Free[6])[0] = (UCHAR)Attr;
+	((UCHAR *)&pParts->Free[6])[1] = (UCHAR)((ULONG)Attr >> 8);
+	pSce->Data += 10;
 	return 1;
 }
 
@@ -880,10 +893,7 @@ ULONG Plc_ret(SCE_TASK *pSce)
 	ENEMY_WORK	*pEm;
 
 	pEm = pSce->pWork;
-	pEm->Routine_0 = 1;
-	pEm->Routine_1 = 0;
-	pEm->Routine_2 = 0;
-	pEm->Routine_3 = 0;
+	*(UINT *)&pEm->Routine_0 = 0x1;		/* Routine_0 1, Routine_1 0, Routine_2 0, Routine_3 0 (DS: one sw at +0x4) */
 	if (pEm->Id < 0x10)
 	{
 		pEm->Type &= 0xfff;
@@ -902,22 +912,21 @@ ULONG Plc_ret(SCE_TASK *pSce)
 /* DS 0x80056ff0 (Plc_stop) */
 ULONG Plc_stop(SCE_TASK *pSce)
 {
-	ENEMY_WORK	*pEm;
 	ULONG		Rout;
 
-	pEm  = pSce->pWork;
 	/* DS reads and writes the four Routine bytes as one word (lw/sw at Routine_0) */
-	Rout = *(ULONG *)&pEm->Routine_0;
+	Rout = *(ULONG *)&pSce->pWork->Routine_0;
 	if (Rout == 0x1404)
 	{
 		/* restore the saved routine word */
-		*(ULONG *)&pEm->Routine_0 = pSce->R_no_bak;
+		*(ULONG *)&pSce->pWork->Routine_0 = pSce->R_no_bak;
 	}
 	else
 	{
-		pEm = pSce->pWork;
+		/* save the current routine word, then set the 0x1404 stop marker; DS loads pWork again for this
+		 * store (lw v0,0x154(a0) at 0x80057014) because it follows the R_no_bak store */
 		pSce->R_no_bak = Rout;
-		*(ULONG *)&pEm->Routine_0 = 0x1404;
+		*(ULONG *)&pSce->pWork->Routine_0 = 0x1404;
 	}
 	pSce->Data++;
 	return 1;
@@ -950,7 +959,7 @@ ULONG Plc_flg(SCE_TASK *pSce)
 		pEm = pSce->pWork;
 		pEm->Sce_flg ^= Val;
 	}
-	pSce->Data = pData + 4;
+	pSce->Data += 4;
 	return 1;
 }
 
@@ -962,15 +971,17 @@ ULONG Plc_rot(SCE_TASK *pSce)
 	UCHAR	*pData;
 
 	pData = pSce->Data;
-	if (pData[1] == PLC_ROT_SCE_FREE0)
+	/* DS branches on the kind byte like a switch (case bodies after the compares) and reloads pSce->Data for the advance */
+	switch (pData[1])
 	{
+	case PLC_ROT_SCE_FREE0:
 		pSce->pWork->Sce_free0 = ((SCE_PLC_ROT_REC *)pData)->Val;
-	}
-	else if (pData[1] == PLC_ROT_SCE_FREE1)
-	{
+		break;
+	case PLC_ROT_SCE_FREE1:
 		pSce->pWork->Sce_free1 = ((SCE_PLC_ROT_REC *)pData)->Val;
+		break;
 	}
-	pSce->Data = pData + 4;
+	pSce->Data += 4;
 	return 1;
 }
 
@@ -991,7 +1002,6 @@ ULONG Plc_cnt(SCE_TASK *pSce)
 /* DS 0x8005714c (Sce_em_set) */
 ULONG Sce_em_set(SCE_TASK *pSce)
 {
-	UCHAR *pCid = &Sce.C_id;
 	tagGLOBAL *pG = &G;
 	ULONG	*pFlg;
 
@@ -1019,20 +1029,20 @@ ULONG Sce_em_set(SCE_TASK *pSce)
 
 			Em_bin_load(pSce_em->Id);
 			pEw = (ENEMY_WORK *)pG->pFree_work;
-			Id  = (signed char)pSce_em->Em_no;	/* DS lb: signed (-1 selects the player slot) */
-			if (Id + 2 != 1)
+			Id  = (signed char)pSce_em->Em_no + 2;	/* DS lb: signed (-1 selects the player slot); work slot = Em_no + 2 */
+			if (Id != 1)
 			{
 				pG->Enemy_num++;
 			}
-			pG->pEnemy[Id + 2] = (ENEMY_WORK *)pG->pFree_work;
-			Num = (UCHAR)(Id + 2);
+			pG->pEnemy[Id] = (ENEMY_WORK *)pG->pFree_work;
+			Num = (UCHAR)Id;
 			pEw->Work_no = Num;
-			pNext = pG->pFree_work + sizeof(ENEMY_WORK);
-			if (pG->ppEnemy_end < pG->pEnemy + Id + 3)
+			pG->pFree_work += sizeof(ENEMY_WORK);
+			if (pG->ppEnemy_end < pG->pEnemy + Id + 1)
 			{
-				pG->ppEnemy_end = pG->pEnemy + Id + 3;
+				pG->ppEnemy_end = pG->pEnemy + Id + 1;
 			}
-			pG->pFree_work = pNext;
+			pNext = pG->pFree_work;
 			pEw->Be_flg = 1;
 			pEw->Se_type = pSce_em->Sound_flg;
 
@@ -1050,16 +1060,13 @@ ULONG Sce_em_set(SCE_TASK *pSce)
 				}
 			}
 
-			pEw->Old_x = pSce_em->Pos_x;
-			pEw->Pos_x = pSce_em->Pos_x;
-			pEw->Old_y = pSce_em->Pos_y;
-			pEw->Pos_y = pSce_em->Pos_y;
-			pEw->Old_z = pSce_em->Pos_z;
-			pEw->Pos_z = pSce_em->Pos_z;
+			pEw->Pos_x = pEw->Old_x = pSce_em->Pos_x;
+			pEw->Pos_y = pEw->Old_y = pSce_em->Pos_y;
+			pEw->Pos_z = pEw->Old_z = pSce_em->Pos_z;
 			pEw->Sca_old_x = pSce_em->Pos_x;
-			pEw->Cdir_x = 0;
 			pEw->Cdir_z = 0;
 			pEw->Sca_old_z = pSce_em->Pos_z;
+			pEw->Cdir_x = 0;
 			pEw->Cdir_y = pSce_em->Cdir_y;
 			pEw->Id = pSce_em->Id;
 			pEw->Type = pSce_em->Type;
@@ -1100,7 +1107,31 @@ ULONG Sce_em_set(SCE_TASK *pSce)
 			pEw->nOba = 0;
 			pEw->Root_ck_cnt = Num & 7;
 
-			if (pEw->Id == (*pCid))
+			if (pEw->Id != Sce.C_id)
+			{
+				Sce.C_id         = pEw->Id;
+				pEm_prev         = Sce.pC_em;
+				Sce.C_model_type = pEw->Model_type;
+				Sce.pC_em        = pEw;
+				Rv = Em_kind_search(pEw->Id);
+				if (Rv != Sce.C_kind)
+				{
+					pEw->Model_type &= 0x7f;
+				}
+				Sce.C_kind = (UCHAR)Rv;
+				pNext = (UCHAR *)Emd_load(Sce.C_id, pEw, (ULONG)pNext);
+				Sce.Type   = 0;
+				Sce.pCScd  = (UCHAR *)pG->pRoom->pScd;
+				if ((pEw->Model_type & 0x80) != 0)
+				{
+					/* DS 0x80057514 reads the previous model (pEVar5 = Sce.pC_em before the reassignment) */
+					pEw->pSub0_kan_t_ptr = pEm_prev->pSub0_kan_t_ptr;
+					pEw->pSub0_seq_t_ptr = pEm_prev->pSub0_seq_t_ptr;
+					pEw->pSub1_kan_t_ptr = pEm_prev->pSub1_kan_t_ptr;
+					pEw->pSub1_seq_t_ptr = pEm_prev->pSub1_seq_t_ptr;
+				}
+			}
+			else
 			{
 				/* same model as the previous spawn: reuse its pointers */
 				pEw->pKan_t_ptr = Sce.pC_em->pKan_t_ptr;
@@ -1114,30 +1145,6 @@ ULONG Sce_em_set(SCE_TASK *pSce)
 				pEw->pSa_dat = Sce.pC_em->pSa_dat;
 				pEw->Tpage = Sce.pC_em->Tpage;
 				pEw->Clut = Sce.pC_em->Clut;
-			}
-			else
-			{
-				(*pCid)         = pEw->Id;
-				pEm_prev         = Sce.pC_em;
-				Sce.C_model_type = pEw->Model_type;
-				Sce.pC_em        = pEw;
-				Rv = Em_kind_search(pEw->Id);
-				if (Rv != Sce.C_kind)
-				{
-					pEw->Model_type &= 0x7f;
-				}
-				Sce.C_kind = (UCHAR)Rv;
-				pNext = (UCHAR *)Emd_load((*pCid), pEw, (ULONG)pNext);
-				Sce.Type   = 0;
-				Sce.pCScd  = (UCHAR *)pG->pRoom->pScd;
-				if ((pEw->Model_type & 0x80) != 0)
-				{
-					/* DS 0x80057514 reads the previous model (pEVar5 = Sce.pC_em before the reassignment) */
-					pEw->pSub0_kan_t_ptr = pEm_prev->pSub0_kan_t_ptr;
-					pEw->pSub0_seq_t_ptr = pEm_prev->pSub0_seq_t_ptr;
-					pEw->pSub1_kan_t_ptr = pEm_prev->pSub1_kan_t_ptr;
-					pEw->pSub1_seq_t_ptr = pEm_prev->pSub1_seq_t_ptr;
-				}
 			}
 			Rv = PartsWork_set(pEw, (ULONG)pNext);
 			pNext = (UCHAR *)PartsWork_link(pEw, Rv, pEw->pKan_t_ptr, 0);
@@ -1168,12 +1175,13 @@ ULONG Sce_em_set(SCE_TASK *pSce)
 /* DS 0x80057714 (Sce_em_set2) */
 ULONG Sce_em_set2(SCE_TASK *pSce)
 {
-	UCHAR *pCid = &Sce.C_id;
 	tagGLOBAL *pG = &G;
 	ULONG	*pFlg;		/* Enemy_flg / Enemy_flg2 (spawn check) */
 	ULONG	*pExFlg;	/* ExData2 / ExData3 */
+	ULONG	*pTarget;
 	ULONG	Map;
 	UCHAR	Prob;
+	UCHAR	Bit;
 	long	Rv;
 
 	pSce_em = (SCE_EM_SET_WORK *)pSce->Data;
@@ -1191,20 +1199,23 @@ ULONG Sce_em_set2(SCE_TASK *pSce)
 	if (Flg_ck(pG->SaveData.Map_flg, Map) == 0)
 	{
 		Prob = ((UCHAR *)pSce_em)[0x16];
-		Rv   = (long)Rnd() * 100;
+		Rv   = ((LONG (*)(VOID))Rnd)() * 100;
 		if (Rv < 0)
 		{
 			Rv += 0xff;
 		}
-		/* DS reloads pSce_em and Em_set_flg in each branch */
+		/* DS reloads pSce_em and Em_set_flg in each branch and reaches one shared Flg_on call */
+		pTarget = pExFlg;
 		if ((ULONG)(Rv >> 8) < (ULONG)Prob)
 		{
-			Flg_on(pExFlg, pSce_em->Em_set_flg);
+			Bit = pSce_em->Em_set_flg;
 		}
 		else
 		{
-			Flg_on(pFlg, pSce_em->Em_set_flg);
+			Bit = pSce_em->Em_set_flg;
+			pTarget = pFlg;
 		}
+		Flg_on(pTarget, Bit);
 	}
 	if ((pSce_em->Em_set_flg == 0xff) || (Flg_ck(pFlg, pSce_em->Em_set_flg) == 0))
 	{
@@ -1221,20 +1232,20 @@ ULONG Sce_em_set2(SCE_TASK *pSce)
 
 			Em_bin_load(pSce_em->Id);
 			pEw = (ENEMY_WORK *)pG->pFree_work;
-			Id  = (signed char)pSce_em->Em_no;	/* DS lb: signed (-1 selects the player slot) */
-			if (Id + 2 != 1)
+			Id  = (signed char)pSce_em->Em_no + 2;	/* DS lb: signed (-1 selects the player slot); work slot = Em_no + 2 */
+			if (Id != 1)
 			{
 				pG->Enemy_num++;
 			}
-			pG->pEnemy[Id + 2] = (ENEMY_WORK *)pG->pFree_work;
-			Num = (UCHAR)(Id + 2);
+			pG->pEnemy[Id] = (ENEMY_WORK *)pG->pFree_work;
+			Num = (UCHAR)Id;
 			pEw->Work_no = Num;
-			pNext = pG->pFree_work + sizeof(ENEMY_WORK);
-			if (pG->ppEnemy_end < pG->pEnemy + Id + 3)
+			pG->pFree_work += sizeof(ENEMY_WORK);
+			if (pG->ppEnemy_end < pG->pEnemy + Id + 1)
 			{
-				pG->ppEnemy_end = pG->pEnemy + Id + 3;
+				pG->ppEnemy_end = pG->pEnemy + Id + 1;
 			}
-			pG->pFree_work = pNext;
+			pNext = pG->pFree_work;
 			pEw->Be_flg = 1;
 			pEw->Se_type = pSce_em->Sound_flg;
 
@@ -1252,16 +1263,13 @@ ULONG Sce_em_set2(SCE_TASK *pSce)
 				}
 			}
 
-			pEw->Old_x = pSce_em->Pos_x;
-			pEw->Pos_x = pSce_em->Pos_x;
-			pEw->Old_y = pSce_em->Pos_y;
-			pEw->Pos_y = pSce_em->Pos_y;
-			pEw->Old_z = pSce_em->Pos_z;
-			pEw->Pos_z = pSce_em->Pos_z;
+			pEw->Pos_x = pEw->Old_x = pSce_em->Pos_x;
+			pEw->Pos_y = pEw->Old_y = pSce_em->Pos_y;
+			pEw->Pos_z = pEw->Old_z = pSce_em->Pos_z;
 			pEw->Sca_old_x = pSce_em->Pos_x;
-			pEw->Cdir_x = 0;
 			pEw->Cdir_z = 0;
 			pEw->Sca_old_z = pSce_em->Pos_z;
+			pEw->Cdir_x = 0;
 			pEw->Cdir_y = pSce_em->Cdir_y;
 			pEw->Id = pSce_em->Id;
 			pEw->Type = pSce_em->Type;
@@ -1302,7 +1310,31 @@ ULONG Sce_em_set2(SCE_TASK *pSce)
 			pEw->nOba = 0;
 			pEw->Root_ck_cnt = Num & 7;
 
-			if (pEw->Id == (*pCid))
+			if (pEw->Id != Sce.C_id)
+			{
+				Sce.C_id         = pEw->Id;
+				pEm_prev         = Sce.pC_em;
+				Sce.C_model_type = pEw->Model_type;
+				Sce.pC_em        = pEw;
+				Rv = Em_kind_search(pEw->Id);
+				if (Rv != Sce.C_kind)
+				{
+					pEw->Model_type &= 0x7f;
+				}
+				Sce.C_kind = (UCHAR)Rv;
+				pNext = (UCHAR *)Emd_load(Sce.C_id, pEw, (ULONG)pNext);
+				Sce.Type   = 0;
+				Sce.pCScd  = (UCHAR *)pG->pRoom->pScd;
+				if ((pEw->Model_type & 0x80) != 0)
+				{
+					/* DS 0x80057514 reads the previous model (pEVar5 = Sce.pC_em before the reassignment) */
+					pEw->pSub0_kan_t_ptr = pEm_prev->pSub0_kan_t_ptr;
+					pEw->pSub0_seq_t_ptr = pEm_prev->pSub0_seq_t_ptr;
+					pEw->pSub1_kan_t_ptr = pEm_prev->pSub1_kan_t_ptr;
+					pEw->pSub1_seq_t_ptr = pEm_prev->pSub1_seq_t_ptr;
+				}
+			}
+			else
 			{
 				/* same model as the previous spawn: reuse its pointers */
 				pEw->pKan_t_ptr = Sce.pC_em->pKan_t_ptr;
@@ -1316,30 +1348,6 @@ ULONG Sce_em_set2(SCE_TASK *pSce)
 				pEw->pSa_dat = Sce.pC_em->pSa_dat;
 				pEw->Tpage = Sce.pC_em->Tpage;
 				pEw->Clut = Sce.pC_em->Clut;
-			}
-			else
-			{
-				(*pCid)         = pEw->Id;
-				pEm_prev         = Sce.pC_em;
-				Sce.C_model_type = pEw->Model_type;
-				Sce.pC_em        = pEw;
-				Rv = Em_kind_search(pEw->Id);
-				if (Rv != Sce.C_kind)
-				{
-					pEw->Model_type &= 0x7f;
-				}
-				Sce.C_kind = (UCHAR)Rv;
-				pNext = (UCHAR *)Emd_load((*pCid), pEw, (ULONG)pNext);
-				Sce.Type   = 0;
-				Sce.pCScd  = (UCHAR *)pG->pRoom->pScd;
-				if ((pEw->Model_type & 0x80) != 0)
-				{
-					/* DS 0x80057514 reads the previous model (pEVar5 = Sce.pC_em before the reassignment) */
-					pEw->pSub0_kan_t_ptr = pEm_prev->pSub0_kan_t_ptr;
-					pEw->pSub0_seq_t_ptr = pEm_prev->pSub0_seq_t_ptr;
-					pEw->pSub1_kan_t_ptr = pEm_prev->pSub1_kan_t_ptr;
-					pEw->pSub1_seq_t_ptr = pEm_prev->pSub1_seq_t_ptr;
-				}
 			}
 			Rv = PartsWork_set(pEw, (ULONG)pNext);
 			pNext = (UCHAR *)PartsWork_link(pEw, Rv, pEw->pKan_t_ptr, 0);
@@ -1369,17 +1377,22 @@ ULONG Sce_key_ck(SCE_TASK *pSce)
 {
 	UCHAR	*pData;
 	ULONG	Res;
-	USHORT	Mask;
+	ULONG	Ret;
+	ULONG	Mask;
 
 	pData = pSce->Data;
 	Res   = pData[1];
 	Mask  = ((SCE_KEY_REC *)pData)->Mask;
 	pSce->Data = pData + 4;
-	if ((G.Key & Mask) == 0)
+	if ((G.Key & Mask) != 0)
 	{
-		Res ^= 1;
+		Ret = Res;
 	}
-	return Res;
+	else
+	{
+		Ret = Res ^ 1;
+	}
+	return Ret;
 }
 
 /* ==========================================================================
@@ -1389,7 +1402,7 @@ ULONG Sce_trg_ck(SCE_TASK *pSce)
 {
 	UCHAR	*pData;
 	ULONG	Res;
-	USHORT	Mask;
+	ULONG	Mask;
 
 	pData = pSce->Data;
 	Res   = pData[1];
@@ -1397,7 +1410,7 @@ ULONG Sce_trg_ck(SCE_TASK *pSce)
 	pSce->Data = pData + 4;
 	if ((G.Key_trg & Mask) == 0)
 	{
-		Res ^= 1;
+		return Res ^ 1;
 	}
 	return Res;
 }
@@ -1408,12 +1421,15 @@ ULONG Sce_trg_ck(SCE_TASK *pSce)
 ULONG Sce_bgm_control(SCE_TASK *pSce)
 {
 	UCHAR	*pData;
+	ULONG	Res;
 
 	pData = pSce->Data;
-	Snd_bgm_ctr(((UINT)pData[1] << 28) | ((UINT)pData[2] << 24) |
-				((UINT)pData[3] << 16) | ((UINT)pData[4] << 8) | (UINT)pData[5]);
+	Snd_bgm_ctr(((UINT)pData[1] << 28) | ((UINT)pData[2] << 24) | ((UINT)pData[3] << 16) | ((UINT)pData[4] << 8) | (UINT)pData[5]);
+	Res = 1;
+	/* Empty asm: keeps the return value load ahead of the pointer update, as in DS (0x80057e74 li v0,1; 0x80057e78 addiu). */
+	__asm__ volatile ("" : "=r"(Res) : "0"(Res));
 	pSce->Data = pData + 6;
-	return 1;
+	return Res;
 }
 
 /* ==========================================================================
@@ -1424,8 +1440,7 @@ ULONG Sce_bgmtbl_set(SCE_TASK *pSce)
 	SCE_BGMTBL_REC *pData;
 
 	pData = (SCE_BGMTBL_REC *)pSce->Data;
-	Snd_bgm_tbl_set(((UINT)pData->Unk_02 << 16) |
-					(UINT)pData->Unk_04 | (UINT)pData->Unk_06);
+	Snd_bgm_tbl_set(((UINT)pData->Unk_02 << 16) | (UINT)pData->Unk_04 | (UINT)pData->Unk_06);
 	pSce->Data += 8;
 	return 1;
 }
@@ -1433,26 +1448,29 @@ ULONG Sce_bgmtbl_set(SCE_TASK *pSce)
 /* ==========================================================================
  *	Sce_fade_set				DS 0x80057ef0
  * ======================================================================== */
+/* DS stack frame: 0x30 bytes. s0..s4 are saved at sp+0x18..sp+0x28 and ra at sp+0x2c. Rc occupies sp+0x10..0x17
+ * (x at sp+0x10, y at sp+0x12, w at sp+0x14, h at sp+0x16, each a halfword store); sp+0x10 is passed to Fade_adjust
+ * as its fourth argument. */
 ULONG Sce_fade_set(SCE_TASK *pSce)
 {
 	UCHAR	*pData;
-	USHORT	Idx;
+	UINT	Idx;
 	short	Add;
 	USHORT	Add_u;
 	short	*pFade;
 	RECT	Rc;
 
 	pData = pSce->Data;
-	Idx   = (USHORT)(pData[1] | (pData[2] << 8));
+	Idx   = pData[1];
 	Add   = ((SCE_FADE_REC *)pData)->Add;
 	Add_u = (USHORT)Add;
 	Rc.w  = 0x140;
 	Rc.x  = 0;
 	Rc.y  = 0;
 	Rc.h  = 0xf0;
-	Fade_set((USHORT)(pData[1] | (pData[2] << 8)), Add, pData[3], 7);
+	Fade_set((USHORT)(Idx | (pData[2] << 8)), Add, pData[3], 7);
 	Fade_adjust(pData[1], 0, 0, &Rc);
-	pFade = &Main.Fade[(UINT)(UCHAR)Idx].Kido;
+	pFade = &Main.Fade[Idx].Kido;
 	if (Add != 0)
 	{
 		if (Add < 1)
@@ -1504,7 +1522,7 @@ ULONG Xa_vol(SCE_TASK *pSce)
 	{
 		CD.Vol = pData[1];
 	}
-	pSce->Data = pData + 2;
+	pSce->Data += 2;
 	return 1;
 }
 
@@ -1515,22 +1533,19 @@ ULONG Xa_vol(SCE_TASK *pSce)
 /* DS 0x800580cc (Se_vol) */
 ULONG Se_vol(SCE_TASK *pSce)
 {
-	UCHAR	*pData;
-	ULONG	Pad[2];
-
-	(void)Pad;
-	pData = pSce->Data;
+	/* retail reserves 8 more bytes of locals (Se_vol frame 8); never read */
+	volatile int Rsv[2];
 	if (Sce.Se_vol == 0xff)
 	{
 		Sce.Se_vol = Volume_Se;
-		Volume_Se  = (UCHAR)(((UINT)Volume_Se * (UINT)pData[1]) / 100);
+		Volume_Se  = (Volume_Se * pSce->Data[1]) / 100;
 	}
 	else
 	{
 		Volume_Se  = Sce.Se_vol;
 		Sce.Se_vol = 0xff;
 	}
-	pSce->Data = pData + 2;
+	pSce->Data += 2;
 	return 1;
 }
 
@@ -1541,18 +1556,18 @@ ULONG Se_vol(SCE_TASK *pSce)
 /* DS 0x80058164 (Sce_shake_on) */
 ULONG Sce_shake_on(SCE_TASK *pSce)
 {
-	signed char	Amp;	/* DS lb (signed) at +1 and +2 */
-	signed char	Dir;
+	int		Amp;
+	int		Dir;
 	int		Line_no;
-	short	Ofs;
+	int		Ofs;
 
-	Amp = pSce->Data[1];
-	Dir = pSce->Data[2];
-	Ofs   = (Main.pDb)->Draw.ofs[1];
+	Amp = (signed char)pSce->Data[1];
+	Dir = (signed char)pSce->Data[2];
+	Ofs = (Main.pDb)->Draw.ofs[1];
 	line_mode_set(0, 7);
 	for (Line_no = 0; Line_no != 0xf0; Line_no++)
 	{
-		line_trans(Line_no, -(int)Amp, (int)Dir, (int)Ofs);
+		line_trans(Line_no, -Amp, Dir, Ofs);
 	}
 	line_scr_end();
 	pSce->Data += 3;
@@ -1564,7 +1579,12 @@ ULONG Sce_shake_on(SCE_TASK *pSce)
  * ======================================================================== */
 ULONG Sce_line_start(SCE_TASK *pSce)
 {
-	line_mode_set((UINT)pSce->Data[1], (UINT)((SCE_LINE_START_REC *)pSce->Data)->Prio);
+	/* DS makes this call as if line_mode_set returned a value: after the jal it reloads pSce->Data into v1
+	   and sets the return value 1 in v0 in the load delay slot (lw v1,0x1c(s0); li v0,0x1; addiu v1,v1,0x4).
+	   With the VOID prototype in scope, CCPSX reloads into v0 and sets 1 last. The original SCE2.C most
+	   likely called line_mode_set with no prototype in scope (implicit int), as Sce_espr_kill2 does with
+	   the UCHAR Esp_kill2. The cast gives the same call; the value is ignored. */
+	((LONG (*)(ULONG, ULONG))line_mode_set)((UINT)pSce->Data[1], (UINT)((SCE_LINE_START_REC *)pSce->Data)->Prio);
 	pSce->Data += 4;
 	return 1;
 }
@@ -1577,18 +1597,28 @@ ULONG Sce_line_main(SCE_TASK *pSce)
 	UCHAR	*pData;
 
 	pData = pSce->Data;
-	line_trans((UINT)pData[1], (int)((SCE_LINE_MAIN_REC *)pData)->Slide_ofs, (int)((SCE_LINE_MAIN_REC *)pData)->Copy_ofs,
-			   (int)(Main.pDb)->Draw.ofs[1]);
+	/* line_trans is VOID (LINE_SCR.C), but DS compiles this call as one whose int result is discarded: after
+	   the jal it reloads pSce->Data into v1 and fills the load delay with li v0,1 (lw v1,0x1c(s0); li v0,1;
+	   addiu v1,v1,6; sw v1,0x1c(s0)). A call through the VOID prototype puts the reload in v0 and leaves a
+	   nop instead. The cast to an int-returning function type gives the DS form; the call target, the four
+	   arguments and the behaviour are unchanged. */
+	((LONG (*)(LONG, LONG, LONG, LONG))line_trans)((UINT)pData[1], (int)((SCE_LINE_MAIN_REC *)pData)->Slide_ofs, (int)((SCE_LINE_MAIN_REC *)pData)->Copy_ofs, (int)(Main.pDb)->Draw.ofs[1]);
 	pSce->Data += 6;
 	return 1;
 }
 
 /* ==========================================================================
  *	Sce_line_end				DS 0x800582b8
+ *	line_scr_end is VOID, but the DS call is compiled as one whose int
+ *	result is discarded: the call clobbers v0, so the reload of pSce->Data
+ *	after it is allocated to v1 and "li v0,1" fills the load delay slot
+ *	(lw v1,0x1c(s0) / li v0,1 / addiu v1,v1,1 / sw v1,0x1c(s0)).  The call
+ *	is written through an int-returning function pointer cast to give the
+ *	same call form; it still calls line_scr_end directly (jal 0x8002addc).
  * ======================================================================== */
 ULONG Sce_line_end(SCE_TASK *pSce)
 {
-	line_scr_end();
+	((int (*)(VOID))line_scr_end)();
 	pSce->Data++;
 	return 1;
 }
@@ -1602,55 +1632,51 @@ ULONG Sce_line_end(SCE_TASK *pSce)
 /* DS 0x800582f0 (Mizu_div_set) */
 ULONG Mizu_div_set(SCE_TASK *pSce)
 {
-	UCHAR	*pData;
 	UCHAR	*pPrim0;
-	const UCHAR	*pCoord;
 	UINT	Div_num;
 	int		i;
 	int		j;
+	ULONG	Ret;
 
-	pData = pSce->Data;
-	Sce.Mizu_div_max = pData[1];
-	Div_num = Sce.Mizu_div_max;
-	if (Div_num == 0)
+	Ret = (ULONG)pSce->Data;
+	Div_num = ((UCHAR *)Ret)[1];
+	Sce.Mizu_div_max = Div_num;
+	if (Div_num != 0)
 	{
-		return (ULONG)pData;
-	}
-	Sce.pMizu_div = (POLY_GT4 *)G.pFree_work;
-	pPrim0 = G.pFree_work;
-	G.pFree_work = G.pFree_work + Div_num * 0x548;
-	do
-	{
-		for (i = 0; i < 13; i++)
+		Sce.pMizu_div = (POLY_GT4 *)G.pFree_work;
+		pPrim0 = G.pFree_work;
+		G.pFree_work = G.pFree_work + Div_num * 0x548;
+		do
 		{
-			pCoord = Div_prim_coord[i];
-			for (j = 0; j < 2; j++)
+			for (i = 0; i < 13; i++)
 			{
-				/* Fill one GT4 division primitive (0x34 bytes) from an 8-byte coord row.
-				 * Retail: header 00 00 00 0c; rgb 80 80 80 with code 3e in the first
-				 * vertex and 00 in the rest (asm: lui t3,0x80 gives word 0x00808080);
-				 * u = x*0x7f/0x12; v = y*7. */
-				/* DS writes the tag word and the colour words as whole words */
-				((POLY_GT4 *)pPrim0)->tag = 0x0c000000;
-				*(ULONG *)&((POLY_GT4 *)pPrim0)->r0 = 0x3e808080;
-				((POLY_GT4 *)pPrim0)->u0 = (UCHAR)(((int)pCoord[0] * 0x7f) / 0x12);
-				((POLY_GT4 *)pPrim0)->v0 = (UCHAR)(pCoord[1] * 7);
-				*(ULONG *)&((POLY_GT4 *)pPrim0)->r1 = 0x00808080;
-				((POLY_GT4 *)pPrim0)->u1 = (UCHAR)(((int)pCoord[2] * 0x7f) / 0x12);
-				((POLY_GT4 *)pPrim0)->v1 = (UCHAR)(pCoord[3] * 7);
-				*(ULONG *)&((POLY_GT4 *)pPrim0)->r2 = 0x00808080;
-				((POLY_GT4 *)pPrim0)->u2 = (UCHAR)(((int)pCoord[4] * 0x7f) / 0x12);
-				((POLY_GT4 *)pPrim0)->v2 = (UCHAR)(pCoord[5] * 7);
-				*(ULONG *)&((POLY_GT4 *)pPrim0)->r3 = 0x00808080;
-				((POLY_GT4 *)pPrim0)->u3 = (UCHAR)(((int)pCoord[6] * 0x7f) / 0x12);
-				((POLY_GT4 *)pPrim0)->v3 = (UCHAR)(pCoord[7] * 7);
-				pPrim0 = pPrim0 + sizeof(POLY_GT4);
+				for (j = 2; j != 0; j--)
+				{
+					/* Fill one GT4 division primitive (0x34 bytes) from an 8-byte coord row.
+					 * Retail: header 00 00 00 0c; rgb 80 80 80 with code 3e in the first
+					 * vertex and 00 in the rest; u = x*0x7f/0x12; v = y*7. */
+					((POLY_GT4 *)pPrim0)->tag = 0x0c000000;
+					*(ULONG *)&((POLY_GT4 *)pPrim0)->r0 = 0x3e808080;
+					((POLY_GT4 *)pPrim0)->u0 = (UCHAR)(((int)Div_prim_coord[i][0] * 0x7f) / 0x12);
+					((POLY_GT4 *)pPrim0)->v0 = (UCHAR)(Div_prim_coord[i][1] * 7);
+					*(ULONG *)&((POLY_GT4 *)pPrim0)->r1 = 0x00808080;
+					((POLY_GT4 *)pPrim0)->u1 = (UCHAR)(((int)Div_prim_coord[i][2] * 0x7f) / 0x12);
+					((POLY_GT4 *)pPrim0)->v1 = (UCHAR)(Div_prim_coord[i][3] * 7);
+					*(ULONG *)&((POLY_GT4 *)pPrim0)->r2 = 0x00808080;
+					((POLY_GT4 *)pPrim0)->u2 = (UCHAR)(((int)Div_prim_coord[i][4] * 0x7f) / 0x12);
+					((POLY_GT4 *)pPrim0)->v2 = (UCHAR)(Div_prim_coord[i][5] * 7);
+					*(ULONG *)&((POLY_GT4 *)pPrim0)->r3 = 0x00808080;
+					((POLY_GT4 *)pPrim0)->u3 = (UCHAR)(((int)Div_prim_coord[i][6] * 0x7f) / 0x12);
+					((POLY_GT4 *)pPrim0)->v3 = (UCHAR)(Div_prim_coord[i][7] * 7);
+					pPrim0 = pPrim0 + sizeof(POLY_GT4);
+				}
 			}
-		}
-		Div_num--;
-	} while (Div_num != 0);
-	pSce->Data = pData + 2;
-	return 1;
+			Div_num--;
+		} while (Div_num != 0);
+		pSce->Data += 2;
+		Ret = 1;
+	}
+	return Ret;
 }
 
 /* ==========================================================================
@@ -1661,11 +1687,13 @@ ULONG Mizu_div_set(SCE_TASK *pSce)
 ULONG Keep_Item_ck(SCE_TASK *pSce)
 {
 	UCHAR	*pData;
+	UINT	Id;
 	long	Idx;
 
 	pData = pSce->Data;
+	Id = pData[1];
 	pSce->Data = pData + 2;
-	Idx = Search_item_id((UINT)pData[1]);
+	Idx = Search_item_id(Id);
 	return (Idx >= 0) ? 1 : 0;
 }
 
@@ -1774,22 +1802,22 @@ ULONG Sce_Item_lost2(SCE_TASK *pSce)
 /* DS 0x80058704 (Weapon_chg) */
 ULONG Weapon_chg(SCE_TASK *pSce)
 {
-	UCHAR	Id;
+	ULONG	Id;
 	long	Idx;
 	ENEMY_WORK *pPl = (ENEMY_WORK *)&G.Player;
 
 	Id = pSce->Data[1];
 	G.Player.Type = (G.Player.Type & 0xf000) | (USHORT)Id;
-	if (Id == 0)
+	if (Id != 0)
 	{
-		St.Equip_item_no = 0x80;
-		St.Equip_item_id = 0;
+		Idx = Search_item_id(Id);
+		St.Equip_item_no = (UCHAR)Idx;
+		St.Equip_item_id = Id;
 	}
 	else
 	{
-		Idx = Search_item_id((UINT)Id);
-		St.Equip_item_no = (UCHAR)Idx;
-		St.Equip_item_id = Id;
+		St.Equip_item_no = 0x80;
+		St.Equip_item_id = 0;
 	}
 	Weapon_cls(pPl);
 	Pl_weapon_ch(pPl);
@@ -1826,35 +1854,43 @@ ULONG Sce_Item_get(SCE_TASK *pSce)
 /* DS 0x80058898 (Kage_set) */
 ULONG Kage_set(SCE_TASK *pSce)
 {
-	SCE_KAGE_REC *pData;
-	ENEMY_WORK	*pEm;
-	USHORT		*pKage;
+	KAGE_WORK	*pKage;
+	ULONG		D0;
+	ULONG		D1;
+	ULONG		D2;
 
-	pData = (SCE_KAGE_REC *)pSce->Data;
-	pKage = NULL;
-	switch (pData->Unk_01)
+	switch (((SCE_KAGE_REC *)pSce->Data)->Unk_01)
 	{
 	case WORK_TYPE_PLAYER:
-		pKage = (USHORT *)G.pEnemy[0]->pKage_work;
+		pKage = (KAGE_WORK *)G.pEnemy[0]->pKage_work;
 		break;
 	case WORK_TYPE_SUB_PLAYER:
-		pKage = (USHORT *)G.pEnemy[1]->pKage_work;
+		pKage = (KAGE_WORK *)G.pEnemy[1]->pKage_work;
 		break;
 	case WORK_TYPE_ENEMY:
-		pEm   = G.pEnemy[(signed char)pData->Unk_02 + 2];	/* DS lb: signed index */
-		pKage = (USHORT *)pEm->pKage_work;
-		break;
-	default:
-		/* DS leaves the shadow pointer (s0) unassigned for kinds 0 and >3 and goes on to use it */
+		pKage = (KAGE_WORK *)G.pEnemy[(signed char)((SCE_KAGE_REC *)pSce->Data)->Unk_02 + 2]->pKage_work;	/* DS lb: signed index */
 		break;
 	}
-	/* DS reloads pSce->Data before every field (stores through pKage may alias it) */
-	Kage_work_color_set((ULONG *)pKage, ((UINT)((SCE_KAGE_REC *)pSce->Data)->Unk_03) | ((UINT)((SCE_KAGE_REC *)pSce->Data)->Unk_04 << 8) | ((UINT)((SCE_KAGE_REC *)pSce->Data)->Unk_05 << 16));
-	pKage[2] = ((SCE_KAGE_REC *)pSce->Data)->Unk_06;
-	pKage[3] = ((SCE_KAGE_REC *)pSce->Data)->Unk_08;
-	pKage[0] = ((SCE_KAGE_REC *)pSce->Data)->Unk_0a;
-	pKage[1] = ((SCE_KAGE_REC *)pSce->Data)->Unk_0c;
-	pSce->Data = pSce->Data + sizeof(SCE_KAGE_REC);
+	/* DS leaves the shadow pointer (s0) unassigned for kinds 0 and >3: the default paths at 0x800588d4 and
+	   0x800588e8 jump straight to 0x80058930 without writing s0, so there is no NULL initialiser here.
+	   DS reloads pSce->Data before every field (stores through pKage may alias it). */
+	D0 = ((SCE_KAGE_REC *)pSce->Data)->Unk_03;
+	D1 = ((SCE_KAGE_REC *)pSce->Data)->Unk_04;
+	D2 = ((SCE_KAGE_REC *)pSce->Data)->Unk_05;
+	D1 <<= 8;
+	D1 |= D0;
+	D1 |= D2 << 16;
+	/* DS calls Kage_work_color_set as a function with a return value: after the last field store it reloads
+	   pSce->Data into v1 and sets the return value 1 in v0 in the load delay slot (0x800589ac lw v1,0x1c(s1);
+	   li v0,0x1; addiu v1,v1,0xe; sw v1,0x1c(s1)). Through the void prototype CCPSX puts the reload in v0 and
+	   sets 1 after the store. Retail Kage_work_color_set (0x80016fe4) only uses v0 as scratch and returns no
+	   value, so the result is not used; the cast gives the call the non-void return type that DS was built with. */
+	((ULONG (*)(ULONG *, ULONG))Kage_work_color_set)((ULONG *)pKage, D1);
+	pKage->Half_x = ((SCE_KAGE_REC *)pSce->Data)->Unk_06;
+	pKage->Half_z = ((SCE_KAGE_REC *)pSce->Data)->Unk_08;
+	pKage->Off_x  = ((SCE_KAGE_REC *)pSce->Data)->Unk_0a;
+	pKage->Off_z  = ((SCE_KAGE_REC *)pSce->Data)->Unk_0c;
+	pSce->Data += sizeof(SCE_KAGE_REC);
 	return 1;
 }
 
@@ -1870,20 +1906,18 @@ ULONG Light_pos_set(SCE_TASK *pSce)
 	pData = pSce->Data;
 	pPos_work = (G.pRoom)->pLight[G.SaveData.Cut_no].Pos + pData[2];
 	Axis  = pData[3];
-	if (Axis == MEMBER_POS_Y)
+	/* DS tests 12 first, then 11 or 13 (three-case switch), with the bodies placed after the compares */
+	switch (Axis)
 	{
+	case MEMBER_POS_X:
+		(*pPos_work)[0] = ((SCE_LIGHT_POS_REC *)pData)->Val;
+		break;
+	case MEMBER_POS_Y:
 		(*pPos_work)[1] = ((SCE_LIGHT_POS_REC *)pData)->Val;
-	}
-	else if (Axis < MEMBER_POS_Z)
-	{
-		if (Axis == MEMBER_POS_X)
-		{
-			(*pPos_work)[0] = ((SCE_LIGHT_POS_REC *)pData)->Val;
-		}
-	}
-	else if (Axis == MEMBER_POS_Z)
-	{
+		break;
+	case MEMBER_POS_Z:
 		(*pPos_work)[2] = ((SCE_LIGHT_POS_REC *)pData)->Val;
+		break;
 	}
 	pSce->Data = pData + 6;
 	return 1;
@@ -1931,20 +1965,18 @@ ULONG Light_pos_set2(SCE_TASK *pSce)
 	pData = pSce->Data;
 	pPos_work = (G.pRoom)->pLight[pData[1]].Pos + pData[2];
 	Axis  = pData[3];
-	if (Axis == MEMBER_POS_Y)
+	/* DS tests 12 first, then 11 or 13 (three-case switch), as in Light_pos_set */
+	switch (Axis)
 	{
+	case MEMBER_POS_X:
+		(*pPos_work)[0] = ((SCE_LIGHT_POS_REC *)pData)->Val;
+		break;
+	case MEMBER_POS_Y:
 		(*pPos_work)[1] = ((SCE_LIGHT_POS_REC *)pData)->Val;
-	}
-	else if (Axis < MEMBER_POS_Z)
-	{
-		if (Axis == MEMBER_POS_X)
-		{
-			(*pPos_work)[0] = ((SCE_LIGHT_POS_REC *)pData)->Val;
-		}
-	}
-	else if (Axis == MEMBER_POS_Z)
-	{
+		break;
+	case MEMBER_POS_Z:
 		(*pPos_work)[2] = ((SCE_LIGHT_POS_REC *)pData)->Val;
+		break;
 	}
 	pSce->Data = pData + 6;
 	return 1;
@@ -1997,25 +2029,27 @@ ULONG Sce_scr_move(SCE_TASK *pSce)
 /* DS 0x80058ce4 (Flr_set) */
 ULONG Flr_set(SCE_TASK *pSce)
 {
-	UCHAR	*pData;
-	UINT	No;
-	USHORT	*pFlr;
+	USHORT	*A0;
+	ULONG	D0;
 
-	pData = pSce->Data;
-	No    = (UINT)pData[1];
-	if (No < (USHORT)*(G.pRoom)->pFloor)
+	/* Data[1] is the floor number, Data[2] the mode (1 clears bit 0x80, anything else sets it).
+	   The floor block starts with a USHORT count; entries are 12 bytes (6 USHORTs) and the
+	   flag word read here is at +10 of the entry, i.e. +12 bytes from the block start for entry 0. */
+	D0 = (ULONG)pSce->Data[1];
+	A0 = (USHORT *)(G.pRoom)->pFloor;
+	if (D0 < *A0)
 	{
-		pFlr = (USHORT *)((G.pRoom)->pFloor + No * 6 + 6);
-		if (pData[2] == 1)
+		A0 += D0 * 6 + 6;
+		if (pSce->Data[2] == 1)
 		{
-			*pFlr = *pFlr & 0xff7f;
+			*A0 &= 0xff7f;
 		}
 		else
 		{
-			*pFlr = *pFlr | 0x80;
+			*A0 |= 0x80;
 		}
 	}
-	pSce->Data = pData + 3;
+	pSce->Data += 3;
 	return 1;
 }
 
@@ -2024,7 +2058,10 @@ ULONG Flr_set(SCE_TASK *pSce)
  * ======================================================================== */
 ULONG Movie_on(SCE_TASK *pSce)
 {
-	Init_movie_work((UINT)pSce->Data[1]);
+	/* DS calls Init_movie_work as a function that returns a value in v0: after the call the reloaded Data
+	   pointer is kept in v1 and "li v0,1" fills the load delay slot.  MOVIE.H declares it void (as in the
+	   Oct 97 mockup), so the call goes through a ULONG-returning cast here; the result is not used. */
+	((ULONG (*)(ULONG))Init_movie_work)((UINT)pSce->Data[1]);
 	pSce->Data += 2;
 	return 1;
 }
@@ -2039,19 +2076,19 @@ ULONG Splc_ret(SCE_TASK *pSce)
 	ENEMY_WORK	*pEw;
 
 	pEw = pSce->pWork;
-	pEw->Routine_0 = 1;
-	pEw->Routine_1 = 0;
-	pEw->Routine_2 = 0;
-	pEw->Routine_3 = 0;
+	*(UINT *)&pEw->Routine_0 = 0x1;		/* Routine_0 1, Routine_1 0, Routine_2 0, Routine_3 0 (DS: one sw at +0x4) */
 	pEw->pEnemy_neck = &G.Player.Be_flg;
 	pEw->Neck_flg = 0;
 	pEw->Type = (pEw->Type & 0xafff) | 0x400;
 	G.Status_flg |= STAT_SUB_PLAYER;
-	pEw->Max_life = 200;
+	/* Life is written before Max_life: DS loads the saved life (lhu a0) ahead of the Status_flg store,
+	   keeps it in a0 (so pSce moves to a2 at entry) and puts the Life store in the delay slot of the
+	   first Id branch, after the Max_life store. */
 	pEw->Life = G.SaveData.Dummy[0];
+	pEw->Max_life = 200;
 	if ((pEw->Id == 0x45) || (pEw->Id == 0x4f))
 	{
-		*(USHORT *)&pEw->Free[2] = (USHORT)pEw->Free[2] & 0xdfff;
+		*(USHORT *)&pEw->Free[2] &= 0xdfff;
 	}
 	pSce->Data++;
 	return 1;
@@ -2065,13 +2102,10 @@ ULONG Splc_sce(SCE_TASK *pSce)
 	ENEMY_WORK	*pEw;
 
 	pEw = pSce->pWork;
-	pEw->Routine_0 = 4;
-	pEw->Routine_1 = 6;
-	pEw->Routine_2 = 0;
-	pEw->Routine_3 = 0;
+	*(UINT *)&pEw->Routine_0 = 0x604;		/* Routine_0 4, Routine_1 6, Routine_2 0, Routine_3 0 (DS: one sw at +0x4) */
 	pEw->Neck_flg = 0x92;
 	pEw->pEnemy_neck = &pEw->Be_flg;
-	pEw->Type = (pEw->Type & 0xfbff) | 0x5000;
+	pEw->Type = (pEw->Type | 0x5000) & 0xfbff;
 	G.Status_flg &= ~STAT_SUB_PLAYER;
 	pEw->Life = -1;
 	pEw->Max_life = -1;
@@ -2147,7 +2181,7 @@ ULONG Sce_parts_down(SCE_TASK *pSce)
 	pP_ptr->Old_x2 = ((SCE_PARTS_DOWN_REC *)pData)->Old_x2;
 	pP_ptr->Old_y2 = ((SCE_PARTS_DOWN_REC *)pData)->Old_y2;
 	pP_ptr->Old_z2 = ((SCE_PARTS_DOWN_REC *)pData)->Old_z2;
-	pSce->Data = pData + 0x10;
+	pSce->Data += 0x10;
 	return 1;
 }
 
@@ -2158,11 +2192,11 @@ ULONG Sce_parts_down(SCE_TASK *pSce)
 /* DS 0x800590e0 (Col_chg_set) */
 ULONG Col_chg_set(SCE_TASK *pSce)
 {
+	/* retail reserves 8 more bytes of locals (Col_chg_set frame 8); never read */
+	volatile int Rsv[2];
 	UCHAR	*pData;
 	UINT	Idx;
-	ULONG	Pad[2];
 
-	(void)Pad;
 	Idx = 0;
 	if (Cc_work.Ccol_no != 0)
 	{
@@ -2203,10 +2237,9 @@ ULONG St_map_hint(SCE_TASK *pSce)
 {
 	St.St_type = 4;
 	Game.Doordemo_flg = 1;
-	G.Status_flg |= STAT_STATUS_SCREEN;
 	Game.Stop_bak = G.Stop_flg;
-	/* low byte of St.dm00 (retail sb at St + 0xE02, which is dm00) */
-	*(UCHAR *)&St.dm00 = pSce->Data[1];
+	G.Status_flg |= STAT_STATUS_SCREEN;
+	St.dm00 = pSce->Data[1];
 	pSce->Data += 2;
 	return 1;
 }
@@ -2216,21 +2249,28 @@ ULONG St_map_hint(SCE_TASK *pSce)
  *	Line check between two enemies' positions; 1 when clear
  * ======================================================================== */
 /* DS 0x8005922c (Sce_em_pos_ck) */
+/* DS stack frame: 0x38 bytes, only ra is saved (sp+0x30). Vec1 is at sp+0x10 (vx, vy, vz at sp+0x10, 0x14, 0x18) and
+ * Vec2 at sp+0x20 (sp+0x20, 0x24, 0x28); the VECTOR pad words at sp+0x1c and sp+0x2c are never written. Both
+ * addresses go to Sca_ck_line in a0 and a1. */
 ULONG Sce_em_pos_ck(SCE_TASK *pSce)
 {
 	UCHAR	*pData;
+	ENEMY_WORK	**ppEm1;
+	ENEMY_WORK	**ppEm2;
 	VECTOR	Vec1;
 	VECTOR	Vec2;
 	ULONG	Res;
 
 	pData = pSce->Data;
-	Vec1.vx = G.pEnemy[pData[1]]->Pos_x;
-	Vec1.vy = G.pEnemy[pData[1]]->Pos_y;
-	Vec1.vz = G.pEnemy[pData[1]]->Pos_z;
-	Vec2.vx = G.pEnemy[pData[2]]->Pos_x;
-	Vec2.vy = G.pEnemy[pData[2]]->Pos_y;
-	Vec2.vz = G.pEnemy[pData[2]]->Pos_z;
-	pSce->Data = pData + 6;
+	ppEm1 = &G.pEnemy[pData[1]];
+	ppEm2 = &G.pEnemy[pData[2]];
+	Vec1.vx = (*ppEm1)->Pos_x;
+	Vec1.vy = (*ppEm1)->Pos_y;
+	Vec1.vz = (*ppEm1)->Pos_z;
+	Vec2.vx = (*ppEm2)->Pos_x;
+	Vec2.vy = (*ppEm2)->Pos_y;
+	Vec2.vz = (*ppEm2)->Pos_z;
+	pSce->Data = pSce->Data + 6;
 	Res = Sca_ck_line(&Vec1, &Vec2, ((SCE_EM_POS_REC *)pData)->Att, pData[3]);
 	return (Res == 0);
 }
@@ -2249,10 +2289,7 @@ ULONG Poison_ck(SCE_TASK *pSce)
  * ======================================================================== */
 ULONG Poison_clr(SCE_TASK *pSce)
 {
-	G.Player.Routine_0 = 1;
-	G.Player.Routine_1 = 0;
-	G.Player.Routine_2 = 0;
-	G.Player.Routine_3 = 0;
+	*(UINT *)&G.Player.Routine_0 = 0x1;		/* Routine_0 1, Routine_1 0, Routine_2 0, Routine_3 0 (DS: one sw) */
 	pSce->Data++;
 	G.Pl_poison_timer = 0;
 	G.Pl_poison_down  = 0;
@@ -2266,7 +2303,12 @@ ULONG Poison_clr(SCE_TASK *pSce)
 /* DS 0x80059348 (Vib_set0) */
 ULONG Vib_set0(SCE_TASK *pSce)
 {
-	Pad_vib_set0(((SCE_VIB_REC *)pSce->Data)->Time, ((SCE_VIB_REC *)pSce->Data)->Attr);
+	/* DS calls Pad_vib_set0 as an int-returning function (as if no void prototype were in scope): after the jal
+	   it reloads pSce->Data into v1 and sets the return value in the load delay slot (lw v1,0x1c(s0) /
+	   li v0,0x1 / addiu v1,v1,0x6 / sw v1,0x1c(s0)). Calling through the void prototype lets CCPSX put the
+	   pointer in v0 and set the return value after the store. Pad_vib_set0 itself returns nothing; the value
+	   is unused here. */
+	((int (*)(int, USHORT))Pad_vib_set0)(((SCE_VIB_REC *)pSce->Data)->Time, ((SCE_VIB_REC *)pSce->Data)->Attr);
 	pSce->Data += 6;
 	return 1;
 }
@@ -2281,7 +2323,12 @@ ULONG Vib_set1(SCE_TASK *pSce)
 	UCHAR	*pData;
 
 	pData = pSce->Data;
-	Pad_vib_set1(((SCE_VIB_REC *)pData)->Time, pData[1], ((SCE_VIB_REC *)pData)->Attr);
+	/* DS calls Pad_vib_set1 as a function with a return value: after the jal it reloads pSce->Data into v1 and
+	   sets the return value 1 in v0 in the load delay slot (lw v1,0x1c(s0); li v0,0x1; addiu v1,v1,0x6;
+	   sw v1,0x1c(s0)). Through the void prototype CCPSX puts the reload in v0 and sets 1 after the store.
+	   Retail Pad_vib_set1 (0x80039514) never sets v0, so the value is not used; the cast gives the call the non-void
+	   return type that DS was built with. */
+	((UCHAR (*)(int, UCHAR, USHORT))Pad_vib_set1)(((SCE_VIB_REC *)pData)->Time, pData[1], ((SCE_VIB_REC *)pData)->Attr);
 	pSce->Data += 6;
 	return 1;
 }
@@ -2296,7 +2343,11 @@ ULONG Vib_fade_set(SCE_TASK *pSce)
 	UCHAR	*pData;
 
 	pData = pSce->Data;
-	Pad_vib_fade_set(((SCE_VIB_FADE_REC *)pData)->Time, pData[2], pData[3], ((SCE_VIB_FADE_REC *)pData)->Attr);
+	/* DS treats Pad_vib_fade_set as a value-returning call here: after the jal it reloads pSce->Data into v1
+	   and puts li v0,1 in the load delay slot (lw v1,0x1c(s0) / li v0,0x1 / addiu v1,v1,0x8). With the void
+	   prototype from PAD.H CCPSX reuses v0 for the reload and leaves a nop instead. The callee itself sets
+	   no return value (DS 0x800395b8 ends without writing v0), and the value is discarded here. */
+	((LONG (*)(int, int, int, USHORT))Pad_vib_fade_set)(((SCE_VIB_FADE_REC *)pData)->Time, pData[2], pData[3], ((SCE_VIB_FADE_REC *)pData)->Attr);
 	pSce->Data += 8;
 	return 1;
 }

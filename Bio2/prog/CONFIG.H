@@ -8,7 +8,7 @@
  * Overlay range: CONFIG::801bfa18 -- CONFIG::801c6683.
  *
  * All addresses in comments are retail DS addresses (Ghidra).  Layouts and
- * field offsets were checked against the decompiled / disassembled overlay.
+ * field offsets follow the decompiled / disassembled overlay.
  */
 
 #include <libgs.h>
@@ -38,7 +38,7 @@ struct tagCNF_SPR {
 };
 
 /* EDT table slot, 4 bytes; pEdt_adr[6] at DS 800dbb70. Slot 0 holds the BGM
- * fade flag bytes. Defined here, before the old global.h's extern pEdt_adr. */
+ * fade flag bytes. Defined here, ahead of the extern pEdt_adr declaration. */
 struct tagEDT_TABLE_WORK {
 	UCHAR id_check;
 	UCHAR pan_prog;
@@ -50,8 +50,8 @@ typedef struct tagEDT_TABLE_WORK EDT_TABLE_WORK;
 struct tagSEQCTR {
 	UCHAR Flg;
 	UCHAR Ctrl;
-	CHAR Seq_no;
-	CHAR Vab_id;
+	signed char Seq_no;
+	signed char Vab_id;
 	SndVolume Vol;
 };
 
@@ -128,7 +128,7 @@ extern unsigned char  Cnf_mode_next;     /* DS 801c40ea  pending option / mode  
 extern unsigned long  B_rgb;             /* DS 801c40ec  pulse colour (RGBC)      */
 extern void          *pBak_light;        /* DS 801c40f0  saved pRoom->pLight      */
 extern unsigned char  Cnf_err;           /* DS 801c40f4  load error bits (byte)   */
-extern POLY_FT4       Cnf_Oprim[2][120]; /* DS 801c40f8  prim double buffer       */
+extern POLY_FT4 (*Cnf_Oprim)[120]; /* DS 801c40f8  prim double buffer       */
 extern unsigned char  Suuji[6];          /* DS 801c6678  volume digit glyph ids   */
 extern void          *pOprim;            /* DS 801c6680  current prim pointer     */
 extern unsigned char  Pad_type1;         /* DS 800e8984  port-1 pad type from the pad driver
@@ -145,7 +145,7 @@ extern unsigned char  Cnf_r_no;          /* DS 801c3cde  current option row     
 extern unsigned char  Cnf_cdf;           /* DS 801c3cdf  cheat counter            */
 extern unsigned char  Cnf_scrl_bak;      /* DS 801c3ce0  saved Main.Scrl_type     */
 extern unsigned char  Cnf_ce1;           /* DS 801c3ce1  animation counter        */
-extern unsigned short Cnf_eclt[512];     /* DS 801c3ce8  CLUT save buffer         */
+extern unsigned short *Cnf_eclt;
 
 /* Cnf_cur[5] (DS 801c3cdd) is also the key-config working copy: same byte. */
 #define Cnf_cdd          Cnf_cur[5]
@@ -183,6 +183,6 @@ void Config_suuji(int channel, unsigned int vol, int option);  /* DS 801c362c   
 
 
 
-/* Globals defined in CONFIG.C */
+/* Defined in SND.C; declared here because the struct type is defined in this header */
 	extern tagEDT_TABLE_WORK pEdt_adr[6];				// 0x800dbb70
 #endif /* CONFIG_H_H */

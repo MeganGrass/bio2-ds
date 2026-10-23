@@ -59,14 +59,14 @@ extern CHAR Opening_str_op_tim_ld[10];	// 801BFA2C		// 10 bytes
 /* The words at 801BFA3C-801BFAD4 are the compiler's switch jump tables of the
  * scene timelines (.rdata), not source data. */
 
-/* TIM buffers used by Opening_init and the timelines (not typed in Ghidra) */
-extern ULONG Opening_scene_tim_buf[0x9600];	// 8013F814		// 0x25800 bytes: OPEN11/OPEN14 (floc size)
-extern ULONG Opening_tim_load_buf[0x9708];	// 80165028		// 0x25C20 bytes: OPEN01_TIM, the largest bank TIM (floc size)
+/* TIM buffers used by Opening_init and the timelines */
+extern ULONG *Opening_scene_tim_buf;	// 8013F814		// 0x25800 bytes: OPEN11/OPEN14 (floc size)
+extern ULONG *Opening_tim_load_buf;	// 80165028		// 0x25C20 bytes: OPEN01_TIM, the largest bank TIM (floc size)
 
 /* Cd_read file numbers. [0..3] TIM loads at Opening_init, [4..9] scene loads */
 extern USHORT Opening_cd_no[10];		// 801C24AC		// 20 bytes
-/* Overlay function tables: [draw/fade mode] and [scene no]; every entry checked
- * against OPENING.BIN (801C2068 and 801C2078). */
+/* Overlay function tables: [draw/fade mode] and [scene no]; the entries are the
+ * words stored in OPENING.BIN at 801C2068 and 801C2078. */
 extern VOID *Opening_draw_tbl[4];		// 801C2068		// 16 bytes
 extern VOID *Opening_scene_tbl[5];		// 801C2078		// 20 bytes
 
@@ -82,7 +82,7 @@ extern USHORT Opening_scene_no;			// 801C24D2		// 2 bytes
 extern UCHAR Opening_trans_phase;		// 801C24D4		// 1 byte
 
 /* Double-buffered primitive list: [Cbuf_id][32] POLY_FT4 */
-extern POLY_FT4 Opening_prim[2][32];		// 801C24D8		// 2560 bytes
+extern POLY_FT4 (*Opening_prim)[32];		// 801C24D8		// 2560 bytes
 
 /* Moji / picture sprite tables (10 bytes each, indexed by OP_WORK.no) */
 extern OP_MOJI_TBL Opening_moji_tbl[14];	// 801C208C		// 140 bytes

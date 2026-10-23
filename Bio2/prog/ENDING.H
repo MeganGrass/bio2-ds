@@ -12,6 +12,8 @@
 #include "TYPES.H"
 
 /* ---- types migrated from data.h ---- */
+/* Sprite record of the ending sequence, laid out as in the retail ENDING.BIN data (packed, so the
+ * fields sit at their retail byte offsets). */
 struct tagEND_SPR {
 	UCHAR Be_flg;
 	UCHAR Id;
@@ -30,4 +32,8 @@ struct tagEND_SPR {
 
 /* Globals defined in ENDING.C */
 	extern LONG mode;									// 0x8009db40
+	extern UCHAR Ending_inittbl_buf[0x2d90];
+	extern POLY_FT4 Ending_prim[2][200];
+	extern ULONG Ending_save_copy[0x598 / 4];
+	extern UCHAR *Ending_work_buf;
 #endif /* ENDING_H_H */

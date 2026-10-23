@@ -10,12 +10,10 @@
 #include "SLD.H"
 #include <ASM.H>
 #include <INLINE_C.H>
-#include <INLINE_S.H>
 #include <LIBCD.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <MALLOC.H>
 #include "MD_SUB.H"
 #include "EM_SUB.H"
@@ -50,10 +48,7 @@ ULONG *m_pl_weapon_parts;		/* DS 0x800d8ce8 - mirrored player weapon PARTS_W blo
 ULONG *m_pl_weapon_packet;		/* DS 0x800df334 - mirrored weapon packet area          */
 
 /* DS 0x800e2a90 (GsMWSMATRIX) */
-MATRIX GsMWSMATRIX = {
-	{ { 0x0000, 0x0000, 0x0000 }, { 0x0000, 0x0000, 0x0000 }, { 0x0000, 0x0000, 0x0000 } },
-	{ 0x00000000, 0x00000000, 0x00000000 }
-};
+MATRIX GsMWSMATRIX;
 
 ULONG *m_pl_w00_packet;			/* DS 0x800ea248 - player parts[11] pPacket backup      */
 ULONG *m_pl_w00_packet2;		/* DS 0x800eae38 - player parts[11] pPacket2 backup     */
@@ -168,6 +163,8 @@ ULONG PresetObjectGT4_neo(MODEL_WORK *pMw, ULONG *G_packet, ULONG Flg)
 /* DS 0x8002ce94 (CompM) */
 void CompM(MATRIX *m0, MATRIX *m1, MATRIX *m2)
 {
+	/* load m0 as the GTE rotation and translation, then rotate each column of m1 (ldclmv + rtir)
+	 * and store it into m2. The last column is the translation: ldlv0 + rt + stlvnl. */
 	gte_SetRotMatrix(m0);
 	gte_SetTransMatrix(m0);
 	gte_ldclmv(&m1->m[0][0]);
@@ -239,23 +236,27 @@ void MulLMatrix(MATRIX *lwm, MATRIX *klwm, MATRIX *nlm)
 /* DS 0x8002d0e8 (SortGT3_lno) */
 void SortGT3_lno(TMD_MEM *pT_head, POLY_GT3 *bp, ULONG Cv, ULONG D0)
 {
-	SVECTOR *sp;
-	short   *p_prim;
-	ULONG   *tmp;
-	SVECTOR *s1;
+	ULONG   *ot;
+	ULONG    n;
 	SVECTOR *s2;
 	SVECTOR *s3;
-	ULONG    n;
 	long     D2;
+	SVECTOR *s1;
+	short   *p_prim;
+	ULONG   *tmp;
+	SVECTOR *sp;
 
 	p_prim = (short *)pT_head->prim_top;
 	sp     = (SVECTOR *)pT_head->ver_top;
-	Cv     = (Cv & 0x00ffffff) | (ULONG)(UCHAR)(D0 << 1 | 0x34) << 24;
 	n      = pT_head->n_poly;
+	ot     = G.Ot1[G.Cbuf_id];
+	((UCHAR *)&Cv)[3] = D0 << 1 | 0x34;
 	s1     = &sp[p_prim[1]];
 	s2     = &sp[p_prim[3]];
 	s3     = &sp[p_prim[5]];
-	while (n != 0)
+top:
+	if (n == 0) goto done;
+body:
 	{
 		gte_ldv3(s1, s2, s3);
 		p_prim += 6;
@@ -269,7 +270,7 @@ void SortGT3_lno(TMD_MEM *pT_head, POLY_GT3 *bp, ULONG Cv, ULONG D0)
 		if (D2 < 0)
 		{
 			bp += 2;
-			continue;
+			goto top;
 		}
 		gte_avsz3();
 		*(ULONG *)&bp->r0 = Cv;
@@ -279,12 +280,15 @@ void SortGT3_lno(TMD_MEM *pT_head, POLY_GT3 *bp, ULONG Cv, ULONG D0)
 		{
 			D2 = 0x1fff;
 		}
-		tmp     = G.Ot1[G.Cbuf_id] + ((ULONG)D2 >> 3);
+		tmp     = (ULONG *)((char *)ot + (((ULONG)D2 >> 1) & 0x0ffc));
 		D2      = *tmp;
 		*tmp    = (ULONG)bp & 0x00ffffff;
 		bp->tag = (D2 & 0x00ffffff) | 0x09000000;
 		bp += 2;
+		if (n != 0) goto body;
 	}
+done:
+	;
 }
 
 /*
@@ -295,25 +299,27 @@ void SortGT3_lno(TMD_MEM *pT_head, POLY_GT3 *bp, ULONG Cv, ULONG D0)
 void SortGT4_lno(TMD_MEM *pT_head, POLY_GT4 *bp, ULONG Cv, ULONG D0)
 {
 	SVECTOR *sp;
-	short   *p_prim;
-	ULONG   *ot;
-	ULONG   *tmp;
-	long     D2;
 	SVECTOR *s0;
-	SVECTOR *s1;
 	SVECTOR *s2;
+	ULONG   *ot;
+	SVECTOR *s1;
+	ULONG   *tmp;
+	short   *p_prim;
 	SVECTOR *s3;
+	long     D2;
 	ULONG    n;
 
-	p_prim = (short *)pT_head->prim_top;
-	Cv     = (Cv & 0x00ffffff) | (ULONG)(UCHAR)(D0 << 1 | 0x3c) << 24;
 	sp     = (SVECTOR *)pT_head->ver_top;
-	n      = pT_head->n_poly;
+	p_prim = (short *)pT_head->prim_top;
 	ot     = G.Ot1[G.Cbuf_id];
+	((UCHAR *)&Cv)[3] = D0 << 1 | 0x3c;
 	s1     = &sp[p_prim[1]];
+	n      = pT_head->n_poly;
 	s2     = &sp[p_prim[3]];
 	s3     = &sp[p_prim[5]];
-	while (n != 0)
+top:
+	if (n == 0) goto done;
+body:
 	{
 		gte_ldv3(s1, s2, s3);
 		p_prim += 8;
@@ -328,7 +334,7 @@ void SortGT4_lno(TMD_MEM *pT_head, POLY_GT4 *bp, ULONG Cv, ULONG D0)
 		if (D2 < 0)
 		{
 			bp += 2;
-			continue;
+			goto top;
 		}
 		gte_stsxy3_gt3(bp);
 		gte_ldv0(s0);
@@ -341,12 +347,15 @@ void SortGT4_lno(TMD_MEM *pT_head, POLY_GT4 *bp, ULONG Cv, ULONG D0)
 		{
 			D2 = 0x1fff;
 		}
-		tmp     = ot + ((ULONG)D2 >> 3);
+		tmp     = (ULONG *)((char *)ot + (((ULONG)D2 >> 1) & 0x0ffc));
 		D2      = *tmp;
 		*tmp    = (ULONG)bp & 0x00ffffff;
 		bp->tag = (D2 & 0x00ffffff) | 0x0c000000;
 		bp += 2;
+		if (n != 0) goto body;
 	}
+done:
+	;
 }
 
 /*
@@ -377,6 +386,9 @@ void Bomb_Parts_SortGT3(TMD_MEM *pT_head, POLY_GT3 *pPacket, PARTS_W *pP_ptr)
 	ULONG     cnt0;
 	ULONG     rgb;
 	ULONG     Tb_no;
+	ULONG     w;
+	long      bomb;
+	ULONG    *rp;
 
 	bp     = pPacket;
 	p_prim = pT_head->prim_top;
@@ -384,20 +396,23 @@ void Bomb_Parts_SortGT3(TMD_MEM *pT_head, POLY_GT3 *pPacket, PARTS_W *pP_ptr)
 	np     = (SVECTOR *)pT_head->nor_top;
 	sp     = (SVECTOR *)pT_head->ver_top;
 	Tb_no  = (USHORT)pP_ptr->Free[4];
+	pBomb = &Bomb_tbl[Tb_no >> 15][Tb_no & 0x7fff];
 	s0     = &np[((USHORT *)p_prim)[0]];
 	ot     = G.Ot1[G.Cbuf_id];
 	gte_ReadRotMatrix(&bbm0);
-	pBomb = &Bomb_tbl[Tb_no >> 15][Tb_no & 0x7fff];
 	v  = (VECTOR *)bbm1.t;
-	v->vx = (s0->vx >> 10) * *pBomb;
-	v->vy = (s0->vy >> 10) * *pBomb;
-	v->vz = (s0->vz >> 10) * *pBomb;
+	bomb = *pBomb;
+	v->vx = (s0->vx >> 10) * bomb;
+	v->vy = (s0->vy >> 10) * bomb;
+	D2    = bomb;
+	v->vz = (s0->vz >> 10) * bomb;
 	gte_ldlv0(v);
 	rgb = (pP_ptr->Poly_rgb & 0x00ffffff) | 0x34000000;
 	gte_rtv0tr();
 	s1 = &sp[((USHORT *)p_prim)[1]];
 	s2 = &sp[((USHORT *)p_prim)[3]];
 	s3 = &sp[((USHORT *)p_prim)[5]];
+	rp = (ULONG *)&bp->r2;
 	while (cnt0 != 0)
 	{
 		gte_stlvnl(v);
@@ -406,14 +421,15 @@ void Bomb_Parts_SortGT3(TMD_MEM *pT_head, POLY_GT3 *pPacket, PARTS_W *pP_ptr)
 		p_prim += 3;
 		cnt0--;
 		gte_rtpt();
-		s1 = &sp[((USHORT *)p_prim)[1]];
+		w  = *p_prim;
+		s1 = &sp[w >> 16];
 		s2 = &sp[((USHORT *)p_prim)[3]];
-		s0 = &np[((USHORT *)p_prim)[0]];
+		s0 = &np[w & 0xffff];
 		s3 = &sp[((USHORT *)p_prim)[5]];
 		gte_avsz3();
-		*(ULONG *)&bp->r0 = rgb;
-		*(ULONG *)&bp->r1 = rgb;
-		*(ULONG *)&bp->r2 = rgb;
+		rp[-6] = rgb;
+		rp[-3] = rgb;
+		rp[0]  = rgb;
 		gte_stsxy3_gt3(bp);
 		gte_stotz(&D2);
 		gte_SetTransMatrix(&bbm0);
@@ -426,11 +442,12 @@ void Bomb_Parts_SortGT3(TMD_MEM *pT_head, POLY_GT3 *pPacket, PARTS_W *pP_ptr)
 		{
 			D2 = 0x1fff;
 		}
-		tmp     = ot + ((ULONG)D2 >> 3);
+		tmp     = (ULONG *)((char *)ot + (((ULONG)D2 >> 1) & 0x0ffc));
 		D2      = *tmp;
 		*tmp    = (ULONG)bp & 0x00ffffff;
 		bp->tag = (D2 & 0x00ffffff) | 0x09000000;
 		bp += 2;
+		rp += 20;
 	}
 }
 
@@ -513,7 +530,7 @@ void Bomb_Parts_SortGT4(TMD_MEM *pT_head, POLY_GT4 *pPacket, PARTS_W *pP_ptr)
 		{
 			D2 = 0x1fff;
 		}
-		tmp     = ot + ((ULONG)D2 >> 3);
+		tmp     = (ULONG *)((char *)ot + (((ULONG)D2 >> 1) & 0x0ffc));
 		D2      = *tmp;
 		*tmp    = (ULONG)bp & 0x00ffffff;
 		bp->tag = (D2 & 0x00ffffff) | 0x0c000000;
@@ -533,6 +550,7 @@ void Ryu_Parts_SortGT3(TMD_MEM *pT_head, POLY_GT3 *bp, PARTS_W *pP_ptr, ULONG D0
 	SVECTOR *sp;
 	short   *p_prim;
 	ULONG   *tmp;
+	ULONG   *ot;
 	SVECTOR *s0;
 	SVECTOR *s1;
 	SVECTOR *s2;
@@ -558,6 +576,7 @@ void Ryu_Parts_SortGT3(TMD_MEM *pT_head, POLY_GT3 *bp, PARTS_W *pP_ptr, ULONG D0
 	v      = (VECTOR *)bbm1.t;
 	p_prim = (short *)pT_head->prim_top;
 	n      = pT_head->n_poly;
+	ot     = G.Ot1[G.Cbuf_id];
 	rgb    = (pP_ptr->Poly_rgb & 0x00ffffff) | 0x34000000;
 	Y      = pP_ptr->Workm.t[1];
 	sp     = (SVECTOR *)pT_head->ver_top;
@@ -570,6 +589,7 @@ gt3_top:
 	{
 		goto gt3_end;
 	}
+gt3_body:
 	{
 		gte_ldv3(s1, s2, s3);
 		p_prim += 6;
@@ -591,7 +611,7 @@ gt3_top:
 		{
 			D2 = 0x1fff;
 		}
-		tmp     = G.Ot1[G.Cbuf_id] + ((ULONG)D2 >> 3);
+		tmp     = (ULONG *)((char *)ot + (((ULONG)D2 >> 1) & 0x0ffc));
 		D2      = *tmp;
 		*tmp    = (ULONG)bp & 0x00ffffff;
 		bp->tag = (D2 & 0x00ffffff) | 0x09000000;
@@ -618,7 +638,7 @@ gt3_top:
 		gte_stsxy(&bp[-2].x0);
 		gte_SetRotMatrix(&bbm0);
 		gte_SetTransMatrix(&bbm0);
-		goto gt3_top;
+		if (n != 0) goto gt3_body;
 	}
 gt3_end:
 	;
@@ -673,6 +693,7 @@ gt4_top:
 	{
 		goto gt4_end;
 	}
+gt4_body:
 	{
 		gte_ldv3(s1, s2, s3);
 		p_prim += 8;
@@ -702,7 +723,7 @@ gt4_top:
 		{
 			D2 = 0x1fff;
 		}
-		tmp     = ot + ((ULONG)D2 >> 3);
+		tmp     = (ULONG *)((char *)ot + (((ULONG)D2 >> 1) & 0x0ffc));
 		D2      = *tmp;
 		*tmp    = (ULONG)bp & 0x00ffffff;
 		bp->tag = (D2 & 0x00ffffff) | 0x0c000000;
@@ -729,7 +750,7 @@ gt4_top:
 		gte_stsxy(&bp[-2].x0);
 		gte_SetRotMatrix(&bbm0);
 		gte_SetTransMatrix(&bbm0);
-		goto gt4_top;
+		if (n != 0) goto gt4_body;
 	}
 gt4_end:
 	;
@@ -746,8 +767,9 @@ void mirror_TMD_GT3(ULONG *tmd_top)
 	ULONG  tmp;
 	ULONG *p_v;
 
+	p_v = ((TMD_MEM *)tmd_top)->prim_top;
+	p_v += 1;
 	n   = ((TMD_MEM *)tmd_top)->n_poly;
-	p_v = ((TMD_MEM *)tmd_top)->prim_top + 1;
 	while (n-- != 0)
 	{
 		tmp    = p_v[0];
@@ -790,8 +812,9 @@ void mirror_TMD_GT4(ULONG *tmd_top)
 	ULONG  tmp;
 	ULONG *p_v;
 
+	p_v = ((TMD_MEM *)tmd_top)->prim_top;
+	p_v += 1;
 	n   = ((TMD_MEM *)tmd_top)->n_poly;
-	p_v = ((TMD_MEM *)tmd_top)->prim_top + 1;
 	while (n-- != 0)
 	{
 		tmp    = p_v[0];
@@ -808,17 +831,27 @@ void mirror_TMD_GT4(ULONG *tmd_top)
 /* DS 0x8002e288 (mirror_PACKET_GT4) */
 void mirror_PACKET_GT4(ULONG *tmd_top, POLY_GT4 *p_top)
 {
-	USHORT    n;
+	ULONG     n;
+	ULONG     cnt;
+	ULONG     old;
 	USHORT    tmp;
 	POLY_GT4 *gt4;
 
-	gt4 = p_top;
-	for (n = (USHORT)(((TMD_MEM *)tmd_top)->n_poly * 2); n != 0; n--)
+	n   = ((TMD_MEM *)tmd_top)->n_poly * 2;
+	cnt = n - 1;
+	/* n is twice the packet count, so bit 0 is clear and 0xfffe tests the 16-bit count */
+	if ((n & 0xfffe) != 0)
 	{
-		tmp                  = *(USHORT *)&gt4->u1;
-		*(USHORT *)&gt4->u1 = *(USHORT *)&gt4->u2;
-		*(USHORT *)&gt4->u2 = tmp;
-		gt4++;
+		gt4 = p_top;
+		do
+		{
+			old  = cnt;
+			cnt += 0xffff;
+			tmp                 = *(USHORT *)&gt4->u1;
+			*(USHORT *)&gt4->u1 = *(USHORT *)&gt4->u2;
+			*(USHORT *)&gt4->u2 = tmp;
+			gt4++;
+		} while ((USHORT)old != 0);
 	}
 }
 
@@ -913,12 +946,13 @@ ULONG Init_mirror_weapon(ENEMY_WORK *pEm, ULONG Mem)
 
 	pM_ptr             = (PARTS_W *)pEm->pM_char_ptr;
 	m_pl_weapon_tmd    = (ULONG *)Mem;
-	m_pl_weapon_packet = (ULONG *)(Mem + 0x3000);
-	m_pl_w00_packet2   = pM_ptr[11].pPacket2;
+	Mem += 0x3000;
+	m_pl_weapon_packet = (ULONG *)Mem;
 	m_pl_w00_tmd       = pM_ptr[11].pTmd;
 	m_pl_w00_packet    = pM_ptr[11].pPacket;
 	m_pl_w00_tmd2      = pM_ptr[11].pTmd2;
-	return Mem + 0x5200;
+	m_pl_w00_packet2   = pM_ptr[11].pPacket2;
+	return Mem + 0x2200;
 }
 
 /*
@@ -945,8 +979,7 @@ void Mirror_weapon_cp(ENEMY_WORK *pEm)
 	pM_ptr->pTmd = (ULONG *)Mem;
 	Memcpy((void *)Mem, pP_ptr[11].pTmd, byte);
 	Mem += byte;
-	Memcpy((void *)Mem, (void *)((TMD_MEM *)pP_ptr[11].pTmd)->prim_top,
-		   pP_ptr[11].pTmd[-3] - ((ULONG)((TMD_MEM *)pP_ptr[11].pTmd)->prim_top + 0xc - (ULONG)pP_ptr[11].pTmd));
+	Memcpy((void *)Mem, (void *)((TMD_MEM *)pP_ptr[11].pTmd)->prim_top, pP_ptr[11].pTmd[-3] - ((ULONG)((TMD_MEM *)pP_ptr[11].pTmd)->prim_top + 0xc - (ULONG)pP_ptr[11].pTmd));
 
 	pM_ptr     = (PARTS_W *)m_pl_weapon_parts;
 	byte       = (ULONG)pM_ptr->pTmd - (ULONG)pP_ptr[11].pTmd;
@@ -1008,18 +1041,7 @@ void Parts_work_cp(ENEMY_WORK *pEm)
 	do
 	{
 		pM_ptr->Be_flg     = pP_ptr->Be_flg;
-		pM_ptr->M[0][0]    = pP_ptr->M[0][0];	/* 0x18..0x37: M, Pos_x/y/z */
-		pM_ptr->M[0][1]    = pP_ptr->M[0][1];
-		pM_ptr->M[0][2]    = pP_ptr->M[0][2];
-		pM_ptr->M[1][0]    = pP_ptr->M[1][0];
-		pM_ptr->M[1][1]    = pP_ptr->M[1][1];
-		pM_ptr->M[1][2]    = pP_ptr->M[1][2];
-		pM_ptr->M[2][0]    = pP_ptr->M[2][0];
-		pM_ptr->M[2][1]    = pP_ptr->M[2][1];
-		pM_ptr->M[2][2]    = pP_ptr->M[2][2];
-		pM_ptr->Pos_x      = pP_ptr->Pos_x;
-		pM_ptr->Pos_y      = pP_ptr->Pos_y;
-		pM_ptr->Pos_z      = pP_ptr->Pos_z;
+		*(MATRIX *)&pM_ptr->M[0][0] = *(MATRIX *)&pP_ptr->M[0][0];	/* 0x18..0x37: M[3][3], 2 pad bytes, Pos_x/y/z (one 32-byte MATRIX) */
 		pM_ptr->Workm      = pP_ptr->Workm;
 		pM_ptr->pSuper     = pP_ptr->pSuper;
 		pM_ptr->pOya_parts = pP_ptr->pOya_parts;
@@ -1027,32 +1049,15 @@ void Parts_work_cp(ENEMY_WORK *pEm)
 		pM_ptr->Timer1     = pP_ptr->Timer1;
 		pM_ptr->Timer2     = pP_ptr->Timer2;
 		pM_ptr->Timer3     = pP_ptr->Timer3;
-		pM_ptr->Size_x     = pP_ptr->Size_x;
-		pM_ptr->Size_y     = pP_ptr->Size_y;
-		pM_ptr->Size_z     = pP_ptr->Size_z;
-		pM_ptr->dummy03    = pP_ptr->dummy03;
-		pM_ptr->Rot_x      = pP_ptr->Rot_x;
-		pM_ptr->Rot_y      = pP_ptr->Rot_y;
-		pM_ptr->Rot_z      = pP_ptr->Rot_z;
-		pM_ptr->Sabun_cnt0 = pP_ptr->Sabun_cnt0;
-		pM_ptr->Cdir_x     = pP_ptr->Cdir_x;
-		pM_ptr->Cdir_y     = pP_ptr->Cdir_y;
-		pM_ptr->Cdir_z     = pP_ptr->Cdir_z;
-		pM_ptr->dummy01    = pP_ptr->dummy01;
-		pM_ptr->Old_x      = pP_ptr->Old_x;
-		pM_ptr->Old_y      = pP_ptr->Old_y;
-		pM_ptr->Old_z      = pP_ptr->Old_z;
-		pM_ptr->Old_x2     = pP_ptr->Old_x2;
-		pM_ptr->Free[0]    = pP_ptr->Free[0];	/* 0x98..0xab: Free[0..9] */
-		pM_ptr->Free[1]    = pP_ptr->Free[1];
-		pM_ptr->Free[2]    = pP_ptr->Free[2];
-		pM_ptr->Free[3]    = pP_ptr->Free[3];
-		pM_ptr->Free[4]    = pP_ptr->Free[4];
-		pM_ptr->Free[5]    = pP_ptr->Free[5];
-		pM_ptr->Free[6]    = pP_ptr->Free[6];
-		pM_ptr->Free[7]    = pP_ptr->Free[7];
-		pM_ptr->Free[8]    = pP_ptr->Free[8];
-		pM_ptr->Free[9]    = pP_ptr->Free[9];
+		*(SVECTOR *)&pM_ptr->Size_x = *(SVECTOR *)&pP_ptr->Size_x;	/* 0x8c..0x93: Size_x/y/z, dummy03 (one SVECTOR) */
+		*(SVECTOR *)&pM_ptr->Rot_x = *(SVECTOR *)&pP_ptr->Rot_x;	/* 0x7c..0x83: Rot_x/y/z, Sabun_cnt0 (one SVECTOR) */
+		*(SVECTOR *)&pM_ptr->Cdir_x = *(SVECTOR *)&pP_ptr->Cdir_x;	/* 0x68..0x6f: Cdir_x/y/z, dummy01 (one SVECTOR) */
+		*(SVECTOR *)&pM_ptr->Old_x = *(SVECTOR *)&pP_ptr->Old_x;	/* 0x38..0x3f: Old_x/y/z, Old_x2 (one SVECTOR) */
+		((ULONG *)pM_ptr->Free)[0] = ((ULONG *)pP_ptr->Free)[0];	/* 0x98..0xab: Free[0..9] as five words */
+		((ULONG *)pM_ptr->Free)[1] = ((ULONG *)pP_ptr->Free)[1];
+		((ULONG *)pM_ptr->Free)[2] = ((ULONG *)pP_ptr->Free)[2];
+		((ULONG *)pM_ptr->Free)[3] = ((ULONG *)pP_ptr->Free)[3];
+		((ULONG *)pM_ptr->Free)[4] = ((ULONG *)pP_ptr->Free)[4];
 		pP_ptr++;
 		p_num--;
 		pM_ptr++;
@@ -1091,25 +1096,32 @@ void Mirror_view(RCUT *pV0, RCUT *pV1, UCHAR flg, short mxz)
  * mirror axis (0: plane Z = Mirror_pos, 1: plane X = Mirror_pos). The ray
  * camera->pos must cross the plane between Mirror_min and Mirror_max.
  */
-/* DS 0x8002ea40 (Mirror_in_view) */
-UCHAR Mirror_in_view(RCUT *pV0, UCHAR flg, VECTOR *pos)
+/* DS 0x8002ea40 (Mirror_in_view). Returns 0 or 1. The result is a full word, so the EM_SUB and TRANS callers
+ *    use it without truncation, as DS does. The two callers in this file cast it to UCHAR, which DS does too
+ *    (andi v0,v0,0xff after the jal). */
+ULONG Mirror_in_view(RCUT *pV0, UCHAR flg, VECTOR *pos)
 {
 	ULONG ck;
+	ULONG ret;
 	long  D5;
 	long  Dp;
 	long  Dv;
 
-	ck = flg & 0x7f;
-	Dp = (&pos->vx)[2 - ck * 2] - G.Mirror_pos;
-	Dv = pV0->View_p[2 - ck * 2] - G.Mirror_pos;
+	ck = (flg << 3) & 0x3f8;
+	Dp = *(long *)((UCHAR *)pos - ck + 8) - G.Mirror_pos;
+	Dv = *(long *)((UCHAR *)pV0 - ck + 12) - G.Mirror_pos;
 	if ((Dp ^ Dv) < 0)
 	{
-		return 0;
+		ret = 0;
 	}
-	/* DS divides with the 3-operand div macro (zero/overflow checks) */
-	DIV_S(D5, ((&pos->vx)[ck * 2] - pV0->View_p[ck * 2]) * Dv, Dp + Dv);
-	D5 += pV0->View_p[ck * 2];
-	return (ULONG)(D5 - G.Mirror_min) < (ULONG)(G.Mirror_max - G.Mirror_min);
+	else
+	{
+		/* DS divides with the 3-operand div macro (zero/overflow checks) */
+		DIV_S(D5, ((&pos->vx)[ck >> 2] - *(long *)((UCHAR *)pV0->View_p + ck)) * Dv, Dp + Dv);
+		D5 += *(long *)((UCHAR *)pV0->View_p + ck);
+		ret = (ULONG)(D5 - G.Mirror_min) < (ULONG)(G.Mirror_max - G.Mirror_min);
+	}
+	return ret;
 }
 
 /*
@@ -1121,24 +1133,27 @@ void Mirror_trans(ENEMY_WORK *pEm)
 {
 	MATRIX   T_Wsmatrix;
 	PARTS_W *pTmp;
-	ULONG    Frame_pad[12];		/* retail reserves 0x80 bytes; its locals are sp+0x30..0x4c only */
+	MATRIX  *pWs = &GsWSMATRIX;
+	MATRIX  *pMws = &GsMWSMATRIX;
+	/* Retail uses its 0x80 frame for the 8-word copy at sp+0x30..0x4c and the saves
+	 * at sp+0x70..0x7c, and never references the other stack bytes. This unread
+	 * volatile array only keeps our frame at the retail size. */
+	volatile ULONG unused_stk[12];
 
-	(void)Frame_pad;
 
-	if (G.Mirror_flg != 2
-	 && Mirror_in_view(&G.pRoom->pRcut[G.SaveData.Cut_no], G.Mirror_flg, (VECTOR *)&pEm->Pos_x) == 0)
+	if (G.Mirror_flg != 2 && (UCHAR)Mirror_in_view(&G.pRoom->pRcut[G.SaveData.Cut_no], G.Mirror_flg, (VECTOR *)&pEm->Pos_x) == 0)
 	{
 		return;
 	}
 	Parts_work_cp(pEm);
 	pTmp                = pEm->pSin_parts_ptr;
 	pEm->pSin_parts_ptr = (PARTS_W *)pEm->pM_char_ptr;
-	T_Wsmatrix          = GsWSMATRIX;
-	GsWSMATRIX          = GsMWSMATRIX;
+	T_Wsmatrix          = *pWs;
+	*pWs                = *pMws;
 	Mirror_parts_view_ck(pEm);
 	/* retail Joint_trans2 takes (pEm, pP_ptr, Be_flg, pPos) */
 	Joint_trans2(pEm, pEm->pSin_parts_ptr, pEm->Be_flg, (VECTOR *)&pEm->Pos_x);
-	GsWSMATRIX          = T_Wsmatrix;
+	*pWs                = T_Wsmatrix;
 	pEm->pSin_parts_ptr = pTmp;
 }
 
@@ -1164,7 +1179,7 @@ void Mirror_parts_view_ck(ENEMY_WORK *pEm)
 		if (pM_ptr->Be_flg & 0x8000)
 		{
 			pM_ptr->Be_flg &= ~0x4000;
-			if (Mirror_in_view(pRcut, flg, (VECTOR *)pM_ptr->Workm.t) == 0)
+			if ((UCHAR)Mirror_in_view(pRcut, flg, (VECTOR *)pM_ptr->Workm.t) == 0)
 			{
 				pM_ptr->Be_flg |= 0x4000;
 			}
@@ -1178,6 +1193,8 @@ void Mirror_parts_view_ck(ENEMY_WORK *pEm)
  * Mirror_matrix_set - DS 0x8002ed30
  * GsMWSMATRIX = (axis flip) * world/screen matrix of the reflected camera.
  * GsWSMATRIX is preserved.
+ * The axis flip multiplies the GsIDMATRIX element by -1; DS loads that
+ * element sign-extended (lh) before the negate.
  */
 /* DS 0x8002ed30 (Mirror_matrix_set) */
 void Mirror_matrix_set(void)
@@ -1190,13 +1207,13 @@ void Mirror_matrix_set(void)
 	T_Wsmatrix = GsWSMATRIX;
 	Set_view(M_cut.View_p, M_cut.View_r);
 	m = GsIDMATRIX;
-	if (G.Mirror_flg == 2)
+	if (G.Mirror_flg != 2)
 	{
-		m.m[1][1] = -m.m[1][1];
+		m.m[0][0] *= -1;
 	}
 	else
 	{
-		m.m[0][0] = -m.m[0][0];
+		m.m[1][1] *= -1;
 	}
 	CompM(&m, &GsWSMATRIX, &GsMWSMATRIX);
 	GsWSMATRIX = T_Wsmatrix;
@@ -1212,18 +1229,17 @@ void Late_set(MODEL_WORK *pMw, USHORT Late)
 	POLY_GT3 *gt3;
 	POLY_GT4 *gt4;
 	ULONG     i;
-	ULONG    *pT_head;
 
-	gt4     = (POLY_GT4 *)pMw->pPacket2;
-	gt3     = (POLY_GT3 *)pMw->pPacket;
-	pT_head = pMw->pTmd;
-	for (i = ((TMD_MEM *)pT_head)->n_poly * 2; i != 0; i--)
+	gt3 = (POLY_GT3 *)pMw->pPacket;
+	gt4 = (POLY_GT4 *)pMw->pPacket2;
+	i = ((TMD_MEM *)pMw->pTmd)->n_poly * 2;
+	while (i-- != 0)
 	{
 		gt3->tpage = (gt3->tpage & 0xff9f) | Late << 5;
 		gt3++;
 	}
-	pT_head = pMw->pTmd2;
-	for (i = ((TMD_MEM *)pT_head)->n_poly * 2; i != 0; i--)
+	i = ((TMD_MEM *)pMw->pTmd2)->n_poly * 2;
+	while (i-- != 0)
 	{
 		gt4->tpage = (gt4->tpage & 0xff9f) | Late << 5;
 		gt4++;

@@ -26,6 +26,9 @@
 #include "FILECODE.H"
 #include "flag.h"
 
+/* DS 0x80159A48 (Result_prim) */
+POLY_FT4 (*Result_prim)[128] = (POLY_FT4 (*)[128])0x80159A48;
+
 /* Result overlay work table (declared extern in RESULT.H) */
 
 /* DS 0x80158000 (Result_mess_bg_tim) */
@@ -122,8 +125,6 @@ VOID *Result_sel_tbl[4] = {
 	(VOID *)Result_bgm_end,	/* 3: RESULT::80158310 */
 };
 
-/* DS 0x80159A48 (Result_prim) */
-POLY_FT4 Result_prim[2][128] RAM_SECTION(".buf_result_prim");
 
 /* DS 0x8015C248 (Result_timer) */
 SHORT Result_timer;
@@ -135,20 +136,25 @@ UCHAR Result_state;
 UCHAR Result_sel;
 
 /* DS 0x8015C250 (Result_moji) */
-RESULT_MOJI Result_moji[31];
+RESULT_MOJI Result_moji[32];
 
+/* Result screen task. Result_state_tbl runs one state per frame (init, fade wait, main, BGM end, exit)
+ * and the loop stops when the state reaches 4. The task holds slot 0 suspended while it runs. */
 /* DS 0x80158020 (Result_task) */
 VOID Result_task(VOID)
 {
-	Result_state = 0;
+	VOID **tbl = Result_state_tbl;
+	UCHAR *state_p = &Result_state;
+
+	*state_p = 0;
 	Result_sel = 0;
 	Result_timer = 0;
 	Task_suspend(0);
 	do {
-		((VOID (*)(VOID))Result_state_tbl[Result_state])();
+		((VOID (*)(VOID))tbl[*state_p])();
 		Result_moji_draw();
 		Task_sleep(1);
-	} while (Result_state < 4);
+	} while (*state_p < 4);
 	Task_signal(0);
 	Task_exit();
 }
@@ -203,6 +209,8 @@ VOID Result_sel_rtn(VOID)
 	}
 }
 
+/* Rank page: once the rank timeline has finished, a confirm press (pad mask 0x8e0) fades out and moves
+ * to state 3. */
 /* DS 0x80158240 (Result_rank_main) */
 VOID Result_rank_main(VOID)
 {
@@ -215,6 +223,8 @@ VOID Result_rank_main(VOID)
 	}
 }
 
+/* Score page: after the score timeline finishes, a confirm press (pad mask 0x8e0) starts the result BGM fade
+ * and fades the screen, then waits 0x5a frames (Result_timer) in selection 3. */
 /* DS 0x8015829c (Result_score_main) */
 VOID Result_score_main(VOID)
 {
@@ -229,6 +239,8 @@ VOID Result_score_main(VOID)
 	}
 }
 
+/* Wait for the fade, clear the Result_moji slots, then count Result_timer down. When the timer runs out
+ * the BGM sequencer is reset to its defaults (main and sub bank 0xff, full volume) and the state moves to 3. */
 /* DS 0x80158310 (Result_bgm_end) */
 VOID Result_bgm_end(VOID)
 {
@@ -341,6 +353,8 @@ VOID Result_moji_set(SHORT X, SHORT Y, UCHAR Str_no, ULONG Mode)
 /* DS 0x80158634 (Result_moji_draw) */
 VOID Result_moji_draw(VOID)
 {
+	/* retail reserves 32 more bytes of locals (Result_moji_draw frame 104); never read */
+	volatile int Rsv[8];
 	RESULT_MOJI *pMoji;
 	POLY_FT4 *pPrim;
 	UCHAR *pStr;
@@ -456,10 +470,10 @@ VOID Result_moji_draw(VOID)
 /* DS 0x801589e4 (Result_rank_timeline) */
 ULONG Result_rank_timeline(VOID)
 {
+	/* retail reserves 8 more bytes of locals (Result_rank_timeline frame 32); never read */
+	volatile int Rsv[2];
 	ULONG over;
-	ULONG   Frame_pad[2];		/* retail reserves sp+0x10-0x17 and never references it */
 
-	(void)Frame_pad;
 
 	if (Result_timer == 0x1e) {
 		Result_rank_name_set();
@@ -576,6 +590,8 @@ VOID Result_rank_time_set(VOID)
 /* DS 0x80158ef4 (Result_score_timeline) */
 ULONG Result_score_timeline(VOID)
 {
+	/* retail reserves 8 more bytes of locals (Result_score_timeline frame 56); never read */
+	volatile int Rsv[2];
 	RESULT_EX *pEx;
 	RESULT_REC *pRec;
 	ULONG rec_total;
@@ -584,9 +600,7 @@ ULONG Result_score_timeline(VOID)
 	ULONG over;
 	UCHAR cur_rec;
 	UCHAR rank;
-	ULONG   Frame_pad[2];		/* retail reserves sp+0x10-0x17 and never references it */
 
-	(void)Frame_pad;
 	pEx = (RESULT_EX *)G.ExData;
 	pRec = &pEx->Rec[(UCHAR)(pEx->Cur_rec - 1)];
 	cur_rec = pEx->Cur_rec;

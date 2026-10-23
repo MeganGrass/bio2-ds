@@ -35,7 +35,7 @@
 #include "sce_defines.h"
 
 /* DS 0x800a7400 */
-UCHAR em_se_tbl[] = {
+UCHAR em_se_tbl[200] = {
 	3, 0, 5, 0, 6, 0, 36, 0, 46, 0, 47, 0, 12, 0, 13, 0,
 	14, 0, 51, 0, 15, 0, 16, 0, 18, 0, 19, 0, 48, 0, 50, 0,
 	20, 0, 22, 0, 23, 0, 24, 0, 28, 0, 33, 0, 35, 0, 34, 0,
@@ -51,7 +51,10 @@ UCHAR em_se_tbl[] = {
 	0, 0, 1, 1, 255, 0, 0, 0
 };
 
-/* DS 0x800a74c8: 143 handlers, script opcodes 0x00..0x8e (all 143 words checked against the exe) */
+/* DS 0x800a74c8: 143 handlers, script opcodes 0x00..0x8e (all 143 words). The retail label list puts the next
+ * label (Em_kind_tbl) at 0x800a7704, so the table is 0x23c = 143 * 4 bytes. Sce_scheduler_set copies 0x400 bytes
+ * from here into ScratchPad (retail 0x800535a0, li a2,0x400), which reads past the end of the table into the
+ * following data; the copy length is kept as retail has it. */
 SCE_JMP_FUNC Sce_jmp_tbl[143] = {
 	(SCE_JMP_FUNC)Nop, (SCE_JMP_FUNC)Evt_end, (SCE_JMP_FUNC)Evt_next, (SCE_JMP_FUNC)Evt_chain,
 	(SCE_JMP_FUNC)Evt_exec, (SCE_JMP_FUNC)Evt_kill, (SCE_JMP_FUNC)Ifel_ck, (SCE_JMP_FUNC)Else_ck,
@@ -145,7 +148,7 @@ void Sce_test_init(void)
 /* DS 0x800529fc (Sce_rnd_item_set) */
 void Sce_rnd_item_set(void)
 {
-	int   Cnt;
+	ULONG Cnt;		/* unsigned count: DS tests the pre-decrement copy against zero (move, bne, addiu in the delay slot) */
 	ULONG Bit;
 	ULONG Hit;
 	ULONG Mask;
@@ -158,7 +161,7 @@ void Sce_rnd_item_set(void)
 	Mask = 0;
 	Hit  = 0;
 	Bit  = 0;
-	while (1) {
+	do {			/* DS tests Bit < 8 at the loop bottom (sltiu in the delay slot, bne back to the Rnd call) */
 		if ((Rnd() & 1) != 0) {
 			Hit++;
 			Mask |= 1 << Bit;
@@ -172,10 +175,7 @@ void Sce_rnd_item_set(void)
 			Mask |= 0xf0 << Hit;
 			break;
 		}
-		if (Bit >= 8) {
-			break;
-		}
-	}
+	} while (Bit < 8);
 	*(UCHAR *)&G.SaveData.Item_flg[7] = (UCHAR)Mask;
 	*(UCHAR *)&G.SaveData.ExData0[7]  = (UCHAR)~Mask;
 }
@@ -221,12 +221,10 @@ void Sce_se_set(void)
 		A0             = em_se_tbl;
 		G.Em_se_set_no = 0;
 		while (A0[0] != 0xff) {
-			if (A0[0] == Sce.Se_tmp0 &&
-				(Sce.Se_tmp1 == 0 || Sce.Se_tmp1 == A0[1])) {
+			if (A0[0] == Sce.Se_tmp0 && (Sce.Se_tmp1 == 0 || Sce.Se_tmp1 == A0[1])) {
 				goto step1;
 			}
-			if (A0[1] == Sce.Se_tmp0 &&
-				(Sce.Se_tmp1 == 0 || Sce.Se_tmp1 == A0[0])) {
+			if (A0[1] == Sce.Se_tmp0 && (Sce.Se_tmp1 == 0 || Sce.Se_tmp1 == A0[0])) {
 				Flg = 1;
 				goto step1;
 			}
@@ -265,12 +263,14 @@ void Sce_rnd_set(void)
 	ULONG D0;
 	ULONG D1;
 
-	if ((G.System_flg & SYS_EX_BATTLE) == 0) {
+	if (G.System_flg & SYS_EX_BATTLE) {
+		/* DS keeps Rnd()'s v0 as is (no andi 0xff after the jal), so the call goes
+		 * through a ULONG-returning type. Rnd itself already returns 0..255. */
+		D0 = ((ULONG (*)(VOID))Rnd)();
+	} else {
 		D1 = Sce.Random_base << 1;
 		D0 = ((Sce.Random_base + (D1 >> 16)) & 0xffff) + (D1 & 0xffff0000);
 		Sce.Random_base = D0;
-	} else {
-		D0 = Rnd();
 	}
 	G.SaveData.Sce_random = (short)D0;
 }
@@ -365,8 +365,7 @@ void Sce_work_clr_at(void)
 	for (ppEm = G.pEnemy + 2; ppEm != G.ppEnemy_end; ppEm++) {
 		pEw = *ppEm;
 		if ((pEw->Be_flg & 1) != 0) {
-			pEw->At_obj_no = 0xff;
-			pEw->At_sce_no = 0xff;
+			*(USHORT *)&pEw->At_obj_no = 0xFFFF;		/* At_obj_no 255, At_sce_no 255 (DS: one sh at +0xa) */
 		}
 	}
 	pOm2 = G.Ob_model + G.pRoom->nOmodel;
@@ -389,6 +388,7 @@ void Sce_work_clr_set(void)
 	ULONG     i;
 	ULONG    *A0;
 	SCE_TASK *pTask;
+	tagGLOBAL *pG = &G;
 
 	pTask = Sce.Sce_task;
 	for (i = 0; i < 10; i++) {
@@ -401,14 +401,14 @@ void Sce_work_clr_set(void)
 	}
 
 	Sce_aot_init();
-	G.SaveData.Room_flg[0]  = 0;
+	pG->SaveData.Room_flg[0]  = 0;
 	Sce.Mizu_div_max        = 0;
 	Sce.Mizu_div_ctr        = 0;
 	Sce.Rbj_reset_flg       = 0;
-	G.SaveData.Def_em_set   = -1;
-	G.SaveData.Def_aot_set  = -1;
-	G.Room_enemy_flg        = 0;
-	G.Room_player_flg       = 0;
+	pG->SaveData.Def_em_set   = -1;
+	pG->SaveData.Def_aot_set  = -1;
+	pG->Room_enemy_flg        = 0;
+	pG->Room_player_flg       = 0;
 	Cc_work.Ctex_old        = 0xff;
 	Sce.C_id                = 0xff;
 	Sce.C_model_type        = 0xff;
@@ -418,17 +418,18 @@ void Sce_work_clr_set(void)
 	Sce.Se_tmp0             = 0;
 	Sce.Se_tmp1             = 0;
 	CD.Vol                  = 0x78;
-	G.Status_flg           &= 0xfffff3ff;
-	Sce.pC_em               = G.pEnemy[2];
+	pG->Status_flg           &= 0xfffff7ff;
+	pG->Status_flg           &= 0xfffffbff;
+	Sce.pC_em               = pG->pEnemy[2];
 
-	A0 = &G.SaveData.Pri_be_flg[0][0];
+	A0 = &pG->SaveData.Pri_be_flg[0][0];
 	for (i = 0x40; i != 0; i--) {
 		*A0++ = 0xffffffff;
 	}
-	if ((G.Player.Be_flg & 0x400) != 0) {
-		G.Player.Be_flg &= ~0x400;
+	if ((pG->Player.Be_flg & 0x400) != 0) {
+		pG->Player.Be_flg &= ~0x400;
 	}
-	G.Player.Type &= 0xfff;
+	pG->Player.Type &= 0xfff;
 }
 
 /*
@@ -460,11 +461,17 @@ void Event_init(SCE_TASK *pSce, ULONG Evt_no)
 
 	pScd               = Sce.pCScd;
 	D0                 = ((USHORT *)pScd)[Evt_no];
-	pSce->pS_SP        = pSce->Stack[(signed char)pSce->Sub_ctr];
+	/* DS sets Status and Routine0 before pS_SP: the constant 1 is loaded
+	 * at the top of the function (li v1,1) and pScd stays in a2 */
 	pSce->Status       = 1;
 	pSce->Routine0     = 0;
-	pSce->Ifel_ctr[0]  = -1;
-	pSce->Loop_ctr[0]  = -1;
+	pSce->pS_SP        = pSce->Stack[(signed char)pSce->Sub_ctr];
+	/* Ifel_ctr and Loop_ctr are CHAR; DS compiled plain char as signed and
+	 * loads the stored value as li v0,-1 (0xffff), where the unsigned char
+	 * of this build gives 0xff.  The signed char store keeps the DS form;
+	 * the byte written (0xff) is the same either way. */
+	*(signed char *)&pSce->Ifel_ctr[0] = -1;
+	*(signed char *)&pSce->Loop_ctr[0] = -1;
 	pSce->Data         = pScd + D0;
 }
 
@@ -528,23 +535,28 @@ void Event_exec(ULONG Task_level, ULONG Evt_no)
 /* DS 0x80053244 (Sce_col_chg_init) */
 void Sce_col_chg_init(void)
 {
+	/* retail frame is 40 bytes: one 8-byte local slot above the 16-byte argument area; never read.
+	 * One int rounds up to that 8-byte slot. */
+	volatile int Rsv[1];
 	ULONG    D0;
 	ULONG    i;
 	CC_WORK *pCcp;
-	ULONG    Pad[2];
 
-	(void)Pad;
+	/* DS clears the counter in the delay slot of the Ccol_no == 0 branch and tests i < D0 only at
+	 * the bottom of the loop, so the loop is a do-while under a single guard. */
 	D0 = (ULONG)Cc_work.Ccol_no;
+	i  = 0;
 	if (D0 != 0) {
 		pCcp = &Cc_work;
-		for (i = 0; i < D0; i++) {
+		do {
 			if ((pCcp->Cc_parts[0].Cc_ctr & 0x80) != 0) {
 				Col_chg_init(i, pCcp->Cc_parts);
 			} else if ((pCcp->Cc_parts[0].Cc_ctr & 0x40) != 0) {
 				Tex_chg_init(i, pCcp->Cc_parts);
 			}
+			i++;
 			pCcp = (CC_WORK *)&pCcp->Cc_parts[1];
-		}
+		} while (i < D0);
 	}
 }
 
@@ -558,8 +570,8 @@ void Sce_mirror_init(void)
 	ENEMY_WORK *pEm;
 	PARTS_W    *pParts;
 
+	pEm = (ENEMY_WORK *)&G.Player;
 	if ((G.Status_flg & STAT_MIRROR_MATRIX) != 0) {
-		pEm = (ENEMY_WORK *)&G.Player;
 		Weapon_cls(pEm);
 		pParts               = G.Player.pSin_parts_ptr;
 		pParts[11].pTmd      = (ULONG *)gpPl_tmd_ptr;
@@ -585,23 +597,27 @@ void Sce_kirakira_set(void)
 	ULONG           Cnt;
 	ULONG           i;
 	ULONG           D0;
-	SVECTOR         Svec[2];	/* retail reserves two SVECTORs; only Svec[0] is used */
+	SVECTOR         Svec;
 	OBJ_MODEL_WORK *pOm;
 
 	Cnt = G.pRoom->nOmodel;
-	for (i = 0; i < Cnt; i++) {
-		pOm = &G.Ob_model[i];
-		if ((pOm->Be_flg & OM_ENABLED) == 0 || (pOm->Free0 & ITEM_ACTION_80) == 0) {
+	for (i = 0; i < Cnt;) {
+		pOm = &G.Ob_model[i++];
+		if ((pOm->Be_flg & OM_ENABLED) == 0) {
 			continue;
 		}
-		D0 = (pOm->Free0 & 0x60) >> 5;
-		Svec[0].vx = 0;
-		Svec[0].vy = -90;
-		Svec[0].vz = 0;
+		D0 = pOm->Free0;
+		if ((D0 & ITEM_ACTION_80) == 0) {
+			continue;
+		}
+		D0 = (D0 & 0x60) >> 5;
+		Svec.vx = 0;
+		Svec.vy = -90;
+		Svec.vz = 0;
 		if (D0 == 0) {
 			D0 = 1;
 		}
-		Esp_call(((D0 * 8 + 7) << 16) | 0x5002800, 0, (MATRIX *)pOm->M, &Svec[0]);
+		Esp_call(((D0 * 8 + 7) << 16) | 0x5002800, 0, (MATRIX *)pOm->M, &Svec);
 	}
 }
 
@@ -620,8 +636,10 @@ void Sce_fade_chk(void)
 /*
  * Stage_room_to_mapno  (DS 0x800534c4)
  * Returns the Map_flg bit index for (Stage_no, Room_no).
- * Note: for Stage_no > 6 the DS code returns an uninitialised base
- * (register v1) + Room_no; 0 is used here.
+ * Note: there is no default case, as in DS. For Stage_no > 6 the DS
+ * jump-table bound check (sltiu v0,a0,7; beq v0,zero) branches straight
+ * to the return with Base never written, so the result is whatever
+ * register v1 held plus Room_no. Stage_no is always 0..6 in play.
  */
 /* DS 0x800534c4 (Stage_room_to_mapno) */
 int Stage_room_to_mapno(int Stage_no, int Room_no)
@@ -636,7 +654,6 @@ int Stage_room_to_mapno(int Stage_no, int Room_no)
 	case 4:  Base = 0x59; break;
 	case 5:  Base = 0x63; break;
 	case 6:  Base = 0x7b; break;
-	default: Base = 0;    break;
 	}
 	return Base + Room_no;
 }

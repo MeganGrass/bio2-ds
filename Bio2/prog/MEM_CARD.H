@@ -9,8 +9,85 @@
 #include <LIBSPU.H>
 #include "TYPES.H"
 #include "STATUS.H"
+/* Memory card message and area indices (from the beta enum list in enum.h). Values follow that list and are
+ * not yet checked against retail; no code uses these names yet. */
+enum {
+	CMOJI_00,
+	CMOJI_01,
+	CMOJI_02,
+	CMOJI_03,
+	CMOJI_04,
+	CMOJI_05,
+	CMOJI_06,
+	CMOJI_07,
+	CMOJI_08,
+	CMOJI_09,
+	CMOJI_10,
+	CMOJI_11,
+	CMOJI_12,
+	CMOJI_13,
+	CMOJI_14,
+	CMOJI_15,
+	CMOJI_16,
+	CMOJI_17,
+	EMESS_0,
+	EMESS_1,
+	EMESS_2,
+	EMESS_3,
+	EMESS_4,
+	EMESS_5,
+	EMESS_6,
+	EMESS_7,
+	EMESS_8,
+	MESS_LEON,
+	MESS_CLAIRE,
+	MESS_LEON_R,
+	MESS_CLAIRE_R,
+	MESS_SPY,
+	MESS_SAVE_CNT,
+	AREA_0,
+	AREA_1,
+	AREA_2,
+	AREA_3,
+	AREA_4,
+	AREA_5,
+	AREA_6,
+	AREA_7,
+	AREA_8,
+	AREA_9,
+	AREA_10,
+	AREA_11,
+	AREA_12,
+	AREA_13,
+	AREA_14,
+	AREA_15,
+	AREA_16,
+	AREA_17,
+};
+
+/* Card_access state numbers (switch on Rno). Each name is used only where the retail handler supports it:
+ *   SLOT_CHECK = 0x0   calls Wslot_check
+ *   SEL_SLOT   = 0x2   slot-select options
+ *   ERR_MESS   = 0x3   error message
+ *   LOAD       = 0xE   Card_read into G.SaveData
+ *   CARD_CHECK = 0x10  calls Card_check, Card_format_check and Card_format
+ *   SCRL_UP    = 0x13  slide +0x14 toward 0
+ *   SCRL_DOWN  = 0x14  slide -0x14
+ * Beta names not used (no retail evidence settles them yet): USE_CARD (1), NOW_CHECKING (4), FILE_SEL (6),
+ * READY (7), SAVE (8), SAVE_DEMO (9), LOAD2 (0xB), FORMAT_CHECK (0xC), FORMAT (0xD), OVERWRITE (0xF), PAGE_CHANGE (0x12). */
+enum {
+	SLOT_CHECK = 0x0,
+	SEL_SLOT = 0x2,
+	ERR_MESS = 0x3,
+	LOAD = 0xE,
+	CARD_CHECK = 0x10,
+	SCRL_UP = 0x13,
+	SCRL_DOWN = 0x14,
+};
 
 /* ---- types migrated from data.h ---- */
+/* Directory listing of the save files on a memory card: up to 15 entries, each with a title and block
+ * size, plus the number of entries and the total block count. */
 struct tagCFILE_INFO {
 	UCHAR title[15][22];
 	UCHAR num;
@@ -18,6 +95,8 @@ struct tagCFILE_INFO {
 	ULONG size[15];
 };
 
+/* Save image written to the memory card: the card header, play-time counters, the player and option
+ * settings and the saved game state. Field order follows the retail save layout. */
 struct tagSAVE_DATA {
 	//ULONG Save_data_head[0];
 	_CARD Card_Head;
@@ -165,33 +244,33 @@ struct tagMWORK {
 /* Overlay data (MEMCARD overlay; Ghidra label address in comment)      */
 /* ------------------------------------------------------------------ */
 extern MWORK *pMwork;               /* 801c431c: current card work block   */
-extern UCHAR Mess_text[];           /* 801c3e1c: message string pool       */
-extern USHORT Mess_offs[];          /* 801c4260: per-message pool offsets  */
+extern UCHAR Mess_text[1092];           /* 801c3e1c: message string pool       */
+extern USHORT Mess_offs[76];          /* 801c4260: per-message pool offsets  */
 extern UCHAR Mess_ctrl[6];          /* 801c4584: string control codes, [0] = end */
-extern UCHAR Card_font[];           /* 801bfad8: font argument to Print14  */
-extern UCHAR Mc_search_pat[];       /* 801bfa1c: Card_search name pattern string */
+extern UCHAR Card_font[4];           /* 801bfad8: font argument to Print14  */
+extern UCHAR Mc_search_pat[4];       /* 801bfa1c: Card_search name pattern string */
 extern UCHAR Mc_name_tmpl[15];      /* 801bfa40: save-slot file-name template, copied by Card_access */
 extern UCHAR Mc_wait_tbl[34];        /* 801c42f8: per-step wait counts (halved) for the slot animation; byte table, 1-byte stride (retail lbu) */
-extern UCHAR Mc_slot_ofs[];         /* 801c458c: slot index -> digit offset table */
+extern UCHAR Mc_slot_ofs[16];         /* 801c458c: slot index -> digit offset table */
 extern UCHAR Mc_prev_slot;          /* 801c45a0: last slot index (pMwork+3) */
 extern UCHAR Mc_fname_tmpl[6];      /* 801bfd0c: memory-card file name head "bu00"+2 */
-extern UCHAR Mc_area_name[][29];    /* 801c4320: save area names, 29-byte rows */
-extern UCHAR Mc_icon_801bfb40[];    /* card icon header templates (38 bytes each) */
-extern UCHAR Mc_icon_801bfb68[];
-extern UCHAR Mc_icon_801bfb90[];
-extern UCHAR Mc_icon_801bfbb8[];
-extern UCHAR Mc_icon_801bfbe0[];
-extern UCHAR Mc_icon_801bfc08[];
-extern UCHAR Mc_icon_801bfc30[];
-extern UCHAR Mc_icon_801bfc58[];
-extern UCHAR Mc_icon_801bfc80[];
-extern UCHAR Mc_icon_801bfca8[];
-extern UCHAR Mc_icon_801bfcd0[];
-extern UCHAR Mc_icon_801bfcf8[];    /* 2-byte icon fragments */
-extern UCHAR Mc_icon_801bfcfc[];
-extern UCHAR Mc_icon_801bfd00[];
-extern UCHAR Mc_icon_801bfd04[];
-extern UCHAR Mc_icon_801bfd08[];
+extern UCHAR Mc_area_name[21][29];    /* 801c4320: save area names, 29-byte rows */
+extern UCHAR Mc_icon_801bfb40[40];    /* card icon header templates (40 bytes each) */
+extern UCHAR Mc_icon_801bfb68[40];
+extern UCHAR Mc_icon_801bfb90[40];
+extern UCHAR Mc_icon_801bfbb8[40];
+extern UCHAR Mc_icon_801bfbe0[40];
+extern UCHAR Mc_icon_801bfc08[40];
+extern UCHAR Mc_icon_801bfc30[40];
+extern UCHAR Mc_icon_801bfc58[40];
+extern UCHAR Mc_icon_801bfc80[40];
+extern UCHAR Mc_icon_801bfca8[40];
+extern UCHAR Mc_icon_801bfcd0[40];
+extern UCHAR Mc_icon_801bfcf8[4];    /* 2-byte icon fragments */
+extern UCHAR Mc_icon_801bfcfc[4];
+extern UCHAR Mc_icon_801bfd00[4];
+extern UCHAR Mc_icon_801bfd04[4];
+extern UCHAR Mc_icon_801bfd08[4];
 
 /* Message index n -> pointer into Mess_text */
 #define MESS_STR(n)        (&Mess_text[Mess_offs[n]])
@@ -202,6 +281,7 @@ extern UCHAR Mc_icon_801bfd08[];
 /* Function prototypes                                                  */
 /* ------------------------------------------------------------------ */
 
+void          Mem_card(void);
 void          Card_access(void);
 void Cardaccess_init(char Mode);
 void Cardaccess_exit(int Param);

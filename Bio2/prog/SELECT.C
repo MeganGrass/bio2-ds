@@ -6,14 +6,11 @@
 #include "TYPES.H"
 #include "ROOM.H"
 #include <ASM.H>
-#include <LIBAPI.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBPAD.H>
 #include <LIBSND.H>
-#include <MCGUI.H>
 #include <MEMORY.H>
 #include <STRINGS.H>
 #include "SELECT.H"
@@ -34,18 +31,18 @@
 
 
 /* DS 0x801bfa1c (Select_mess_tim) */
-UCHAR Select_mess_tim[] = { 'P', 'L', 'W', 0 };
+UCHAR Select_mess_tim[4] = { 'P', 'L', 'W', 0 };
 
 /* DS 0x801bfa20 (Select_mess_pl) */
-UCHAR Select_mess_pl[] = { 'P', 'L', 'D', 0 };
+UCHAR Select_mess_pl[4] = { 'P', 'L', 'D', 0 };
 
 /* DS 0x801bfa24 (Select_str_bg) */
-CHAR Select_str_bg[] = {
+CHAR Select_str_bg[10] = {
 	'S', 'e', 'l', 'e', 'c', 't', ' ', 'B',
 	'G', 0 };
 
 /* DS 0x801bfa30 (Select_str_sel) */
-CHAR Select_str_sel[] = { 'S', 'e', 'l', 'e', 'c', 't', 0 };
+CHAR Select_str_sel[12] = { 'S', 'e', 'l', 'e', 'c', 't', 0 };	/* retail reserves 12 bytes here (0x801bfa30..0x801bfa3b, zero after the text) */
 
 /* DS 0x801c2af0 (Select_sprt_def) */
 SELECT_SPRT_DEF Select_sprt_def[12] = {
@@ -437,8 +434,7 @@ VOID Select_init(VOID)
 	/* Load the four models; Cursor_no is the model index during the load */
 	for (k = 0; k < 4; k++) {
 		Select_wk.Cursor_no = (UCHAR)k;
-		Select_wk.pHeap = (UCHAR *)Select_pl_load(G.pEnemy[k], (ULONG *)Select_wk.pHeap,
-			(UCHAR)(5 + 2 * k), (UCHAR)((k << 1) & 0xfe));
+		Select_wk.pHeap = (UCHAR *)Select_pl_load(G.pEnemy[k], (ULONG *)Select_wk.pHeap, (UCHAR)(5 + 2 * k), (UCHAR)((k << 1) & 0xfe));
 	}
 
 	/* Message window work, 0x20C0 bytes, sits after the models */
@@ -495,10 +491,10 @@ VOID Select_view_init(VOID)
 	Select_view_eye[0] = 0x1446;
 	Select_view_eye[1] = -0x960;
 	Select_view_eye[2] = 0x30c;
+	Select_view_unk = 0;
 	Select_view_ref[0] = 0;
 	Select_view_ref[1] = -0x7d0;
 	Select_view_ref[2] = 0x82;
-	Select_view_unk = 0;
 }
 
 // 801BFE44
@@ -855,10 +851,7 @@ VOID Select_pl_set(ENEMY_WORK *pEm, ULONG No)
 
 	pEm->Spd_y = 0;
 	pEm->Fpos_y = Select_dir_fpos[1][No];
-	pEm->Move_no = 0;
-	pEm->Move_cnt = 0;
-	pEm->Hokan_flg = 0;
-	pEm->Mplay_flg = 0;
+	*(UINT *)&pEm->Move_no = 0x0;		/* Move_no 0, Move_cnt 0, Hokan_flg 0, Mplay_flg 0 (DS: one sw at +0x14c) */
 }
 
 // 801C09F4
@@ -879,8 +872,7 @@ VOID Select_cursor_move(VOID)
 
 		if ((G.Padd1 & 0x8000) != 0) {
 			/* Up is refused for cursor 1 with lock bit 1, and for cursor 0 with lock bit 2 */
-			if (((Select_wk.Cursor_no == 1) && ((Select_wk.Flg & 0x02) != 0)) ||
-				((Select_wk.Cursor_no == 0) && ((Select_wk.Flg & 0x04) != 0))) {
+			if (((Select_wk.Cursor_no == 1) && ((Select_wk.Flg & 0x02) != 0)) || ((Select_wk.Cursor_no == 0) && ((Select_wk.Flg & 0x04) != 0))) {
 				goto update_rot;
 			}
 			bVar = Select_wk.Cursor_no - 1;
@@ -893,8 +885,7 @@ VOID Select_cursor_move(VOID)
 		}
 
 		/* Down is refused for cursor 2 with lock bit 2 */
-		if (((G.Padd1 & 0x2000) != 0) &&
-			!((Select_wk.Cursor_no == 2) && ((Select_wk.Flg & 0x04) != 0))) {
+		if (((G.Padd1 & 0x2000) != 0) && !((Select_wk.Cursor_no == 2) && ((Select_wk.Flg & 0x04) != 0))) {
 			cVar = Select_wk.Cursor_no + 1;
 			Select_wk.Cursor_no = (UCHAR)cVar;
 			if (cVar > 3) {
@@ -915,19 +906,13 @@ VOID Select_decide(VOID)
 	ENEMY_WORK	*pEm;
 
 	pEm = G.pEnemy[Select_wk.Cursor_no];
-	if (Select_wk.Cursor_no == 0) {
-		pEm->Move_no = 1;
-		pEm->Move_cnt = 0;
-		pEm->Hokan_flg = 0;
-		pEm->Mplay_flg = 0;
-		pEm->Routine_2 = 1;
+	if (Select_wk.Cursor_no != 0) {
+		*(UINT *)&pEm->Move_no = 0x2;		/* Move_no 2, Move_cnt 0, Hokan_flg 0, Mplay_flg 0 (DS: one sw at +0x14c) */
+		pEm->Routine_2 = 3;
 	}
 	else {
-		pEm->Move_no = 2;
-		pEm->Move_cnt = 0;
-		pEm->Hokan_flg = 0;
-		pEm->Mplay_flg = 0;
-		pEm->Routine_2 = 3;
+		*(UINT *)&pEm->Move_no = 0x1;		/* Move_no 1, Move_cnt 0, Hokan_flg 0, Mplay_flg 0 (DS: one sw at +0x14c) */
+		pEm->Routine_2 = 1;
 	}
 
 	Fade_set(0x100, -0x400, 7, 1);
@@ -1107,7 +1092,7 @@ VOID Select_ada_disp(ENEMY_WORK *pEm)
 /* DS 0x801c12d4 (Select_ada_sort) */
 VOID Select_ada_sort(ENEMY_WORK *pEm)
 {
-	/* Retail reserves 0x20 bytes at sp+0x10 that are never read or written: an unused MATRIX */
+	/* Retail keeps a 0x20-byte slot at sp+0x10 that is never read or written (the unused MATRIX M), so the stack layout matches retail */
 	MATRIX		M;
 	PARTS_W		*pH;
 	MATRIX		*m2_00;
@@ -1310,7 +1295,7 @@ VOID Select_light_set(ULONG No, VECTOR *pVec, UCHAR *pCol)
 /* DS 0x801c1a58 (Select_pl_trans) */
 VOID Select_pl_trans(ENEMY_WORK *pEm, PARTS_W *pParts, ULONG Be_flg, LONG *pPos)
 {
-	/* Retail reserves 0x30 bytes at sp+0x10 that are never read or written. They are the
+	/* Retail keeps a 0x30-byte slot at sp+0x10 that is never read or written. It holds the
 	 * unused MATRIX M and VECTOR v of Joint_trans2 (same arguments), which this routine is
 	 * cut down from; the (void) casts keep them without an unused-variable warning. */
 	MATRIX	M;
@@ -1368,33 +1353,35 @@ VOID Select_pl_move(VOID)
 	ULONG		i;
 	ENEMY_WORK	*pEm;
 	ULONG		ret;
+	UCHAR		*pRt;
 
 	/* DS walks the four models as one array from G.pEnemy[0] (Select_init allocates them together) */
 	pEm = G.pEnemy[0];
 	for (i = 0; i < 4; i++, pEm++) {
 		G.pEm = pEm;
+		pRt = &pEm->Routine_2;
 
 		if (pEm->Id == 14) {
 			/* Ada: state 0 moves the joints, state 1 moves until done, then latches state 2 */
-			if (pEm->Routine_2 == 1) {
+			if (*pRt == 1) {
 				ret = Joint_move(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, 0x200);
 				if (ret != 0) {
-					pEm->Routine_2 = 2;
+					*pRt = 2;
 				}
 			}
-			else if (pEm->Routine_2 == 0) {
+			else if (*pRt == 0) {
 				Joint_move(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, 0x200);
 			}
 		}
 		else if ((pEm->Id == 0x00) || (pEm->Id == 0x01) || (pEm->Id == 0x0b)) {
-			switch (pEm->Routine_2) {
+			switch (*pRt) {
 			case 0:
 				pEm->Move_no = 0;
 				pEm->Move_cnt = 0;
 				pEm->Hokan_flg = 0;
 				pEm->Mplay_flg = 0;
 				pEm->Timer0 = 0;
-				pEm->Routine_2 = 1;
+				*pRt = 1;
 				/* fall through */
 			case 1:
 				ret = Joint_move(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, 0x200);
@@ -1403,7 +1390,7 @@ VOID Select_pl_move(VOID)
 					pEm->Move_cnt = 0;
 					pEm->Hokan_flg = 0;
 					pEm->Mplay_flg = 0;
-					pEm->Routine_2 = 2;
+					*pRt = 2;
 				}
 				break;
 			case 2:
@@ -1411,9 +1398,7 @@ VOID Select_pl_move(VOID)
 				break;
 			case 3:
 				ret = Joint_move(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, 0x200);
-				if (ret != 0) {
-					pEm->Routine_2 = 4;
-				}
+				*pRt = (ret != 0) ? 4 : 3;
 				break;
 			default:
 				break;
@@ -1805,6 +1790,7 @@ VOID Select_moji_trans(LONG Num)
 	ULONG		*p;
 	ULONG		*pNext;
 	ULONG		*pP3;
+	ULONG		*pOt;
 
 	/* Like retail, the record is walked with two pointers (pW at its first word, pB at its
 	 * Ot byte) and the packet with two (p and pP3 = p + 3, so p[1], p[2], p[3], p[4] are
@@ -1815,6 +1801,7 @@ VOID Select_moji_trans(LONG Num)
 	pEnd = pW + Num * 4;
 	pB = &pM->Rec[0].Ot;
 	pP3 = p + 3;
+	pOt = G.Ot1[G.Cbuf_id];
 
 	do {
 		pNext = p;
@@ -1827,7 +1814,7 @@ VOID Select_moji_trans(LONG Num)
 			pNext = p + 5;
 			pP3[0] = *(ULONG *)(pB - 4);		/* Word2 */
 			pP3 += 5;
-			AddPrim(&G.Ot1[G.Cbuf_id][pB[0]], p);
+			AddPrim(&pOt[pB[0]], p);
 		}
 		pW += 4;
 		pB = pB + sizeof(SELECT_MOJI_REC);

@@ -10,6 +10,8 @@
 
 
 /* ------------------------------------------------------------------ */
+/* Enemy motion playback, steering and parts-direction helpers from EM_SUB2.C. The entries are in
+ * retail address order; the addresses in the trailing comments are the retail SLUS-00748 locations. */
 /* Prototypes (DS address order)                                        */
 /* ------------------------------------------------------------------ */
 

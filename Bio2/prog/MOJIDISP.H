@@ -17,6 +17,9 @@ struct tagBRANCH_TBL {
 	USHORT Str_no;
 };
 
+/* Message printing. Print8 and Print14 print a string with the 8-dot or 14-dot font (Print14 adds the
+ * 0x200 font flag). Mess_set queues a retail message, Mess_disp and mess_trans advance it, and the
+ * moji_trans_* functions turn the queued glyph codes into sprites. */
 long Print8(ULONG x, ULONG y, ULONG c, ULONG p, UCHAR *pPtr);
 long Print14(ULONG x, ULONG y, ULONG c, ULONG p, UCHAR *pPtr);
 long Print_main(ULONG x, ULONG y, ULONG attr, UCHAR **pSave);
@@ -36,8 +39,8 @@ void Moji_init(void);
 void Moji_mode_init(void);
 
 /* DS 0x80010a1c: blinking next-page mark string, DS 0x80010a40: selection cursor string (Print14) */
-extern UCHAR s_Moji_next_mark_80010a1c[];
-extern UCHAR s_Moji_sel_cursor_80010a40[];
+extern UCHAR s_Moji_next_mark_80010a1c[8];
+extern UCHAR s_Moji_sel_cursor_80010a40[4];
 
 
 

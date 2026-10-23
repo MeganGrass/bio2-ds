@@ -8,11 +8,9 @@
 
 #include "TYPES.H"
 #include "MAIN.H"
-#include <LIBAPI.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include "EM_SUB2.H"
 #include "EM_SUB.H"
 #include "JOINT.H"
@@ -39,6 +37,9 @@ ULONG Approach(VECTOR *pPos, VECTOR *pDest, SHORT Spd)
 	Add.vz = 0;
 	Add.vy = 0;
 
+	/* Remember the sign bit of each delta (X in bit 31, Z in bit 30) before stepping. The step is
+	 * along the direction to pDest at speed Spd; if either delta changes sign the enemy has
+	 * overshot, so the position is snapped onto the destination below. */
 	Pos_info = ((pPos->vx - pDest->vx) & 0x80000000)
 			 | (((pPos->vz - pDest->vz) & 0x80000000) >> 1);
 
@@ -48,12 +49,13 @@ ULONG Approach(VECTOR *pPos, VECTOR *pDest, SHORT Spd)
 
 	Pos_info ^= (pPos->vx - pDest->vx) & 0x80000000;
 	Pos_info ^= ((pPos->vz - pDest->vz) & 0x80000000) >> 1;
-	if (Pos_info == 0)
-		return 0;
-
-	pPos->vx = pDest->vx;
-	pPos->vz = pDest->vz;
-	return 1;
+	if (Pos_info != 0)
+	{
+		pPos->vx = pDest->vx;
+		pPos->vz = pDest->vz;
+		return 1;
+	}
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -65,17 +67,21 @@ ULONG Approach_one(LONG *pX, LONG Dx, SHORT Spd)
 {
 	ULONG	Pos_info;
 
+	/* step toward Dx: the sign bit of (*pX - Dx) picks the direction (0 means *pX is above Dx) */
 	Pos_info = (*pX - Dx) & 0x80000000;
-	if (Pos_info == 0)
-		*pX -= Spd;
-	else
+	if (Pos_info != 0)
 		*pX += Spd;
+	else
+		*pX -= Spd;
 
-	if (Pos_info == ((*pX - Dx) & 0x80000000))
-		return 0;
-
-	*pX = Dx;
-	return 1;
+	/* same sign as before the step: still short of Dx; otherwise snap onto it and report arrival */
+	Pos_info ^= (*pX - Dx) & 0x80000000;
+	if (Pos_info != 0)
+	{
+		*pX = Dx;
+		return 1;
+	}
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -87,6 +93,8 @@ ULONG Mot_play(ENEMY_WORK *pEm, ULONG No, ULONG Hokan, ULONG Flg)
 {
 	ULONG	Div;
 
+	/* a new motion number restarts the counter. Div = 0x1000 / (Hokan + 1) sets the blend step from
+	 * Hokan, and Flg is packed into the high half of the argument passed to Joint_move. */
 	if (pEm->Move_no != No)
 	{
 		pEm->Move_no   = (UCHAR)No;
@@ -94,8 +102,7 @@ ULONG Mot_play(ENEMY_WORK *pEm, ULONG No, ULONG Hokan, ULONG Flg)
 		pEm->Hokan_flg = (UCHAR)Hokan;
 	}
 	DIV_U(Div, 0x1000, Hokan + 1);	/* DS: unsigned divide with the zero check */
-	return Joint_move(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr,
-					  (Div) | (Flg << 16)) != 0;
+	return Joint_move(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, (Div) | (Flg << 16)) != 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -114,8 +121,7 @@ ULONG Mot_play2(ENEMY_WORK *pEm, ULONG No, ULONG Hokan, ULONG Flg)
 		pEm->Hokan_flg = (UCHAR)Hokan;
 	}
 	DIV_U(Div, 0x1000, Hokan + 1);	/* DS: unsigned divide with the zero check */
-	return Joint_move2(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr,
-					   (Div) | (Flg << 16)) != 0;
+	return Joint_move2(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, (Div) | (Flg << 16)) != 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -126,15 +132,28 @@ ULONG Mot_play2(ENEMY_WORK *pEm, ULONG No, ULONG Hokan, ULONG Flg)
 /* DS 0x8001a308 (Mot_play_init) */
 ULONG Mot_play_init(ENEMY_WORK *pEm, ULONG Routine_bak)
 {
-	/* Only Routine_0..Routine_2 take part (low three bytes, Routine_0 in the lowest) */
-	if (((ULONG)pEm->Routine_0 | ((ULONG)pEm->Routine_1 << 8) | ((ULONG)pEm->Routine_2 << 16)) != (Routine_bak & 0xffffff))
-		pEm->Move_no = 0xff;
-	return 0xff;
+	ULONG	Ret;
+
+	/* Only Routine_0..Routine_2 take part (low three bytes, Routine_0 in the lowest).    */
+	/* DS loads the four Routine bytes as one word (lw +0x4) and masks both it and        */
+	/* Routine_bak with 0xffffff, so Routine_3 is ignored.                                 */
+	/* Ret is set to 0xff on both paths: DS loads v0 = 0xff once, in the branch delay     */
+	/* slot, and uses that same register for the Move_no store and the return value.      */
+	if ((*(ULONG *)&pEm->Routine_0 & 0xffffff) != (Routine_bak & 0xffffff))
+	{
+		Ret = 0xff;
+		pEm->Move_no = Ret;
+	}
+	else
+		Ret = 0xff;
+	return Ret;
 }
 
 /* ------------------------------------------------------------------ */
 /* Mot_play_sp                                       DS 0x8001a330     */
 /* Mot_play with root-motion speed: moves pEm in XZ while playing.     */
+/* Spd_get is called before the joint step. The XZ root speed (Add_speedXZ) is applied only while  */
+/* the motion is still running (End == 0), so the enemy stops moving when its motion ends.          */
 /* ------------------------------------------------------------------ */
 /* DS 0x8001a330 (Mot_play_sp) */
 ULONG Mot_play_sp(ENEMY_WORK *pEm, ULONG No, ULONG Hokan, ULONG Flg)
@@ -150,11 +169,12 @@ ULONG Mot_play_sp(ENEMY_WORK *pEm, ULONG No, ULONG Hokan, ULONG Flg)
 	}
 	Spd_get(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, 0);
 	DIV_U(Div, 0x1000, Hokan + 1);	/* DS: unsigned divide with the zero check */
-	End = Joint_move(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr,
-					 (Div) | (Flg << 16));
-	if (End == 0)
-		Add_speedXZ(pEm, 0);
-	return End != 0;
+	End = Joint_move(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, (Div) | (Flg << 16));
+	if (End != 0) {
+		return 1;
+	}
+	Add_speedXZ(pEm, 0, 0);
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -175,11 +195,12 @@ ULONG Mot_play2_sp(ENEMY_WORK *pEm, ULONG No, ULONG Hokan, ULONG Flg)
 	}
 	Spd_get(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, 0);
 	DIV_U(Div, 0x1000, Hokan + 1);	/* DS: unsigned divide with the zero check */
-	End = Joint_move2(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr,
-					  (Div) | (Flg << 16));
-	if (End == 0)
-		Add_speedXYZsuper(pEm, 0, 0);
-	return End != 0;
+	End = Joint_move2(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, (Div) | (Flg << 16));
+	if (End != 0) {
+		return 1;
+	}
+	Add_speedXYZsuper(pEm, 0, 0);
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -200,11 +221,12 @@ ULONG Mot_play2_spxz(ENEMY_WORK *pEm, ULONG No, ULONG Hokan, ULONG Flg)
 	}
 	Spd_get(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, 0);
 	DIV_U(Div, 0x1000, Hokan + 1);	/* DS: unsigned divide with the zero check */
-	End = Joint_move2(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr,
-					  (Div) | (Flg << 16));
-	if (End == 0)
-		Add_speedXZ(pEm, 0);
-	return End != 0;
+	End = Joint_move2(pEm, (ULONG)pEm->pKan_t_ptr, (ULONG)pEm->pSeq_t_ptr, (Div) | (Flg << 16));
+	if (End != 0) {
+		return 1;
+	}
+	Add_speedXZ(pEm, 0, 0);
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -276,6 +298,15 @@ void Goto00_super(ENEMY_WORK *pEm, VECTOR *pVec, SHORT Add_dir)
 	LONG	Dir;
 	LONG	Rot;
 	SVECTOR	Svec;
+	/* Direction_ck returns long, and every value it returns
+	   is 0..0xfff (0x400 or 0xc00 when XX is 0, else andi 0xfff at DS
+	   0x80015540). DS uses the returned v0 directly after all eight calls
+	   here, with no sll/sra 16 after the jal: move s0,v0 at 0x8001a6f0,
+	   0x8001a748 and 0x8001a7a0; subu s0,zero,v0 at 0x8001a71c, 0x8001a774
+	   and 0x8001a7d8; and, for the shared second calls, subu s0,s0,v0 at
+	   0x8001a7bc and addu s0,s0,v0 at 0x8001a7f0. The result is therefore
+	   used as returned (callers that store it in a short narrow it themselves).
+	   The value is the same either way. */
 
 	Svec = Super_front;
 	Rot_vector_super(pEm->Cdir_y, (MATRIX *)pEm->pSuper, &Svec, &Svec);
@@ -328,6 +359,12 @@ void Goto01_super(ENEMY_WORK *pEm, LONG Dir, SHORT Add_dir)
 {
 	LONG	Rot;
 	SVECTOR	Svec;
+	/* Direction_ck returns long, and every value it returns is 0..0xfff
+	   (0x400 or 0xc00 when XX is 0, else andi 0xfff at DS 0x80015540). DS
+	   0x8001a934 and 0x8001a950 use the returned v0 directly (subu s0,s0,v0
+	   and subu s0,v0,s0) with no sll/sra 16 after the jal, so the result is
+	   used as returned.
+	   The value is the same either way. */
 
 	Svec = Super_front;
 	Rot_vector_super(pEm->Cdir_y, (MATRIX *)pEm->pSuper, &Svec, &Svec);

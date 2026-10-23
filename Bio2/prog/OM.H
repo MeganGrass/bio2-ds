@@ -27,6 +27,10 @@ struct tagCC_WORK {
 	USHORT Ccol_old;
 	UCHAR Ccol_no;
 	UCHAR Ctex_old;
+	/* Cc_work+0x8EC..0x94F. Retail places the next global, Pan_vol, at Cc_work+0x950, and no retail
+	 * function reads or writes these bytes (sampled addresses 0x800D7540, 0x800D7570, 0x800D7590 have
+	 * no xrefs). Keeps the struct's extent at the retail offset. */
+	UCHAR Unknown_tail[100];
 };
 
 /* Cross-module globals used by OM.C */
@@ -48,7 +52,7 @@ void    Om_move_box(OBJ_MODEL_WORK *pOm);                               /* 0x800
 void    Om_set_fall_dir(OBJ_MODEL_WORK *pOm);                           /* 0x80036c5c */
 ULONG   Ob_test_load2(void);                                            /* 0x80036cf8 */
 void    Oma_set_ofs(OBJ_MODEL_WORK *pOm);                               /* 0x80036e30 */
-void    Om_explosion_set(OBJ_MODEL_WORK *pOm);                          /* 0x80036eb4 (undefined in Ghidra) */
+void    Om_explosion_set(OBJ_MODEL_WORK *pOm);                          /* 0x80036eb4 */
 
 
 #endif /* OM_H_H */

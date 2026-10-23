@@ -17,6 +17,9 @@
 #define ENABLED		1
 #define DISABLED	0
 
+/* Fixed RAM addresses of the shared load buffers: RDTFile holds room (RDT) data, BSSFile and TIMFile
+ * are the 320x240 background and texture buffers, LZin is the compressed TIM input (same address as
+ * TIMFile), and LZout is where a decompressed TIM is written. PLDFile and VBFile share 0x801BFA14. */
 #define SCRATCHPAD					0x1F800000	// Scratchpad Memory (0x400 bytes)
 
 #define RDTFile						0x8011A000	// RDT Buffer

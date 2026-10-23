@@ -7,6 +7,9 @@
  */
 #include "TYPES.H"
 
+/* Object-versus-enemy hit tests (OBA.C). Oba_ck_hit and Oba_ck_em_at test an enemy against others or against
+ * a point; Oba_ck_only tests a single vector; Oba_set_ofs and the Oba_ck_em* wrappers prepare the owner's hit
+ * offsets and run the check. Sca_ck_em is the scene-AT variant. */
 ULONG   Oba_ck_hit(ENEMY_WORK *pEm1, ENEMY_WORK *pEm2);             /* 0x80034d0c */
 ULONG   Oba_ck_em_at(SVECTOR *pPos, LONG R, LONG H);                /* 0x8003513c (retail-only) */
 ULONG   Oba_ck_only(VECTOR *pV, ENEMY_WORK *pEm1, ENEMY_WORK *pEm2);/* 0x800352d8 */

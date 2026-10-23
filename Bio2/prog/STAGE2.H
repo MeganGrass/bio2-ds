@@ -12,6 +12,7 @@
 #endif
 
 
+/* Stage 2 setup routine and its data tables (defined in STAGE2.C). Sizes in the trailing comments are bytes. */
 extern VOID Stage2(VOID);
 extern USHORT Bs_size2[28][16];		// 8011A054		// 896 bytes
 extern UCHAR Bs_check_sum2[28][16];		// 8011A3D4		// 448 bytes

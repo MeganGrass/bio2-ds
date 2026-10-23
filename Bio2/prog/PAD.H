@@ -26,8 +26,11 @@ extern USHORT Key_type[][16];
 extern UCHAR  Pad_type1;		/* DS 0x800e8984 pad mode: 4 digital, 7 analog */
 extern UCHAR  Pad_type_old;		/* DS 0x800c3b40 pad mode of the previous frame */
 extern UCHAR  Pad_act_flg;		/* DS 0x800e898c set when pad activity is seen this frame */
-extern UCHAR  Pad_act_align[];	/* DS 0x8009dba4 PadSetActAlign table */
+extern UCHAR  s__800a2694[12];	/* DS 0x800a2694 pad speed scale, indexed by UnkMvPadFlg (read by PLAYER.C) */
+/* Pad_act_align (DS 0x8009dba4) is defined in MAIN.C and declared in MAIN.H */
 
+/* Pad_vib_set0 / set1 / fade_set queue a vibration request (VIB_REQ) that Pad_vib_init and the per-frame
+ * pad code step through. SetPadActData, Pad_vib_get_free and Pad_vib_count manage that request table. */
 void Pad_set(void);
 void    Pad_rep_set(ULONG Mask, USHORT Data);
 void    Pad_vib_set0(int Time, USHORT Attr);

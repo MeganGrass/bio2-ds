@@ -8,6 +8,9 @@
 
 #include "CD.H"
 
+/* One FLOC entry per disc file, in FILECODE.H index order. The fields are: the file checksum (sum), its
+ * size in bytes (size), and the start sector split into a high half (sec_high, shifted by 16 bits) and a
+ * low half (sector). Cd_read combines the halves as sec_high * 0x10000 + sector. */
 FLOC floc[859] = {
 	{ 0x00006C6C, 0x0019, 0x00, 0xA8 },	/* CONFIG_BIN:0 */
 	{ 0x000038C8, 0x0027, 0x00, 0xD6 },	/* DIEDEMO_BIN:1 */

@@ -22,9 +22,14 @@ struct tagT_WORK {
 // D:\Bio2\prog\TRANS.H
 
 
+/* Polygon transform buffers: two frames of POLY_FT4 quads (double-buffered by Cbuf_id), and the keep
+ * pointer that marks the next free quad in the current frame. */
 struct TRANS {
 	POLY_FT4 Prim_poly_ft4[2][384];		// 00000000
 	POLY_FT4 * pPoly_ft4_keep;			// 00007800
+	/* Trans+0x7804..0x7807. No retail function reads or writes these bytes (no xrefs at 0x800CBC1C), and the
+	 * next retail global starts at Trans+0x7808 (0x800CBC20). Keeps the struct's extent at the retail offset. */
+	UCHAR Unknown_tail[4];
 };
 
 extern VOID Prim_trans(VOID);

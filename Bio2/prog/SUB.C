@@ -20,25 +20,18 @@
 #include "flag.h"
 #include "DIVCHK.H"
 
+/* DS 0x8018f040 (Prim_work_buf) */
+UCHAR *Prim_work_buf = (UCHAR *)0x8018f040;
+
 /* DS 0x800d5ba0 */
-MEMORY_MANAGE Mem_man[8] = {
-	{ (VOID *)0x00000000, 0x00000000 },
-	{ (VOID *)0x00000000, 0x00000000 },
-	{ (VOID *)0x00000000, 0x00000000 },
-	{ (VOID *)0x00000000, 0x00000000 },
-	{ (VOID *)0x00000000, 0x00000000 },
-	{ (VOID *)0x00000000, 0x00000000 },
-	{ (VOID *)0x00000000, 0x00000000 },
-	{ (VOID *)0x00000000, 0x00000000 },
-};
+MEMORY_MANAGE Mem_man[8];
 
 
 /* DS 0x800ab204 (pCmem_man) */
 MEMORY_MANAGE *pCmem_man = Mem_man;	/* retail initial value = Mem_man */
 
-/* DS 0x8018f040 (Prim_work_buf) */
-UCHAR Prim_work_buf[0xfb0] RAM_SECTION(".buf_prim_work_buf");
 
+/* Clear a rectangle of VRAM to black (ClearImage with a zero colour). */
 /* DS 0x800769c4 (Vram_clr) */
 VOID Vram_clr(register USHORT x, register USHORT y, register USHORT w, register USHORT h)
 {
@@ -64,6 +57,7 @@ VOID Memcpy(register VOID *p, register VOID *q, register LONG r)
 	} while ((ULONG)p < end_adr);
 }
 
+/* Zero r 32-bit words starting at p. The loop tests after the decrement, so r must be at least 1. */
 /* DS 0x80076a28 (Memclr) */
 VOID Memclr(register VOID *p, register LONG r)
 {
@@ -81,28 +75,28 @@ VOID Mapping_tim(register ULONG *pTim_Adr)
 	register TIM_IMAGE *pTim;				// 20 bytes
 
 	SHORT vram_x;
-	INT img_w;
 	INT tp_cnt;
+	tagGLOBAL *g;
 
+	g = &G;
 	OpenTIM(pTim_Adr);
 	pTim = ReadTIM(&Tim_image);
-	vram_x = (USHORT)G.Ctpage * 0x40;
-	if (G.Ctpage > 0x0f) {
+	vram_x = (USHORT)g->Ctpage * 0x40;
+	if (g->Ctpage > 0x0f) {
 		vram_x -= 0x400;
 	}
 	pTim->prect->x = vram_x;
-	pTim->prect->y = (SHORT)((G.Ctpage >= 0x10) << 8);
+	pTim->prect->y = (SHORT)((g->Ctpage >= 0x10) << 8);
 	LoadImage(pTim->prect, pTim->paddr);
-	img_w = (INT)pTim->prect->w;
-	tp_cnt = img_w + 0x3f;
+	tp_cnt = (INT)pTim->prect->w + 0x3f;
 	if (tp_cnt < 0) {
-		tp_cnt = img_w + 0x7e;
+		tp_cnt = (INT)pTim->prect->w + 0x7e;
 	}
-	G.Ctpage += (CHAR)(tp_cnt >> 6);
+	g->Ctpage += (CHAR)(tp_cnt >> 6);
 	if (pTim->caddr != (ULONG *)0) {
-		pTim->crect->y = G.Cclut + 0x1e0;
+		pTim->crect->y = g->Cclut + 0x1e0;
 		LoadImage(pTim->crect, pTim->caddr);
-		G.Cclut += (CHAR)pTim->crect->h;
+		g->Cclut += (CHAR)pTim->crect->h;
 	}
 	DrawSync(0);
 }
@@ -113,20 +107,23 @@ ULONG Mapping_tmd(register ULONG Mode, register ULONG *pTmd_adr, register ULONG 
 	register ULONG *pPrim;
 	register ULONG *pPrim2;
 	register ULONG *pTmd;
+	register ULONG *pHdr;
 	register ULONG i;
 	register ULONG nObj;
 	register ULONG nPoly;
 	register ULONG Psize;
 	ULONG tmd_id;
 	INT size;
-	ULONG Frame_pad[4];	/* unused; retail Mapping_tmd never references sp+0x10..0x1f (frame 0x40) */
+	/* Retail reserves 16 bytes of stack here (sp+0x10..0x1f) but never reads or writes them;
+	 * the array keeps our frame at the same 0x40 size without changing any other access. */
+	volatile ULONG frame_pad[4];
 
-	(void)Frame_pad;
 	tmd_id = *pTmd_adr;
 	mapModelingData(pTmd_adr + 1);
 	size = 0;
 	nObj = pTmd_adr[2];
-	pPrim = (ULONG *)pTmd_adr[9];
+	pHdr = pTmd_adr + 3;
+	pPrim = (ULONG *)pHdr[6];
 	i = 0;
 	if (nObj != 0) {
 		pTmd = pTmd_adr + 8;
@@ -159,7 +156,7 @@ ULONG Mapping_tmd(register ULONG Mode, register ULONG *pTmd_adr, register ULONG 
 		memcpy16(pPrimDst, pPrim, size);
 		i = 0;
 		if (nObj != 0) {
-			pObj = pTmd_adr + 8;
+			pObj = pHdr + 5;
 			do {
 				parity = i & 1;
 				pObj[1] = (ULONG)pPrimDst;
@@ -296,9 +293,9 @@ VOID Set_Light_data(register ULONG No, register VECTOR *pLig, register UCHAR *pR
 	pLm = &LIGHTMATRIX.m[No][0];
 	pCm = &COLORMATRIX.m[0][No];
 	VectorNormal(pLig, &normVec);
-	pLm[0] = (SHORT)normVec.vx * -(USHORT)pLight->Mag;
-	pLm[1] = (SHORT)normVec.vy * -(USHORT)pLight->Mag;
-	pLm[2] = (SHORT)normVec.vz * -(USHORT)pLight->Mag;
+	pLm[0] = normVec.vx * -(USHORT)pLight->Mag;
+	pLm[1] = normVec.vy * -(USHORT)pLight->Mag;
+	pLm[2] = normVec.vz * -(USHORT)pLight->Mag;
 	pCm[0] = (USHORT)*pRgb << 4;
 	pCm[3] = (USHORT)pRgb[1] << 4;
 	pCm[6] = (USHORT)pRgb[2] << 4;
@@ -325,7 +322,7 @@ ULONG Flg_ck(register ULONG *p, register ULONG x)
 /* DS 0x80077384 (Rot_vector) */
 VOID Rot_vector(register SHORT dir, register SVECTOR *p, register SVECTOR *q)
 {
-	static SVECTOR Svec;					// 800AB208		// 8 bytes
+	static SVECTOR Svec = {0, 0, 0, 0};	// 800AB208		// 8 bytes
 	register MATRIX *pMat;
 
 	Svec.vy = dir;
@@ -337,7 +334,7 @@ VOID Rot_vector(register SHORT dir, register SVECTOR *p, register SVECTOR *q)
 /* DS 0x800773ec (Rot_vector_super) */
 VOID Rot_vector_super(register SHORT dir, register MATRIX *pM, register SVECTOR *p, register SVECTOR *q)
 {
-	static SVECTOR Svec;					// 800AB210		// 8 bytes
+	static SVECTOR Svec = {0, 0, 0, 0};	// 800AB210		// 8 bytes
 	register MATRIX *pMat;
 
 	Svec.vy = dir;
@@ -433,40 +430,62 @@ VOID Set_front_pos(register ENEMY_WORK *pEm)
 #define SPAD_SAVE_SP_LOAD(dst, src)	__asm__ volatile ("sw $29, %0\n\tlw $29, %1" : "=m"(dst) : "m"(src))
 /* sp = src */
 #define SPAD_LOAD_SP(src)	__asm__ volatile ("lw $29, %0" : : "m"(src))
+#define SPAD_LOAD_SP_AT(ptr)	__asm__ volatile ("lw $29, 0(%0)" : : "r"(ptr))
 #else
 #define SPAD_SAVE_SP_TOP(dst)	((void)0)
 #define SPAD_SAVE_SP_LOAD(dst, src)	((void)0)
 #define SPAD_LOAD_SP(src)	((void)0)
+#define SPAD_LOAD_SP_AT(ptr)	((void)0)
 #endif
 
+/* Scratchpad stack switch. SetSpadStack and ResetSpadStack bracket code that runs with the stack in the
+ * scratchpad (SYS_SPAD_STACK set while active). The saved main stack pointer is pStack_bak. The *2 pair
+ * works the same way but keeps the saved pointer in G.Sp_bak. */
 /* DS 0x8007769c (SetSpadStack): flag on, pStack_bak = sp, sp = 0x1f8003fc */
 VOID SetSpadStack(VOID)
 {
 	G.System_flg |= SYS_SPAD_STACK;
-	SPAD_SAVE_SP_TOP(pStack_bak);
+#if defined(__mips__) || defined(__psx__) || defined(__R3000__)
+	__asm__ volatile ("move $8, %0\n\tsw $29, 0($8)" : : "r"(&pStack_bak) : "$8", "memory");
+	__asm__ volatile ("move $29, %0" : : "r"(0x1f8003fc));
+#endif
 }
 
 /* DS 0x800776d8 (ResetSpadStack): flag off, sp = pStack_bak */
+/* DS reads the saved sp as a value (lui a1 / lw a1,pStack_bak) and copies it with move sp,a1; the "r"
+ * operand makes CCPSX load pStack_bak into a register the same way. Host builds have no sp to switch. */
 VOID ResetSpadStack(VOID)
 {
 	G.System_flg &= ~SYS_SPAD_STACK;
-	SPAD_LOAD_SP(pStack_bak);
+#if defined(__mips__) || defined(__psx__) || defined(__R3000__)
+	__asm__ volatile ("move $29, %0" : : "r"(pStack_bak));
+#endif
 }
 
 /* DS 0x80077708 (SetSpadStack2): flag off, G.Sp_bak = sp, sp = pStack_bak */
 VOID SetSpadStack2(VOID)
 {
 	G.System_flg &= ~SYS_SPAD_STACK;
-	SPAD_SAVE_SP_LOAD(G.Sp_bak, pStack_bak);
+#if defined(__mips__) || defined(__psx__) || defined(__R3000__)
+	__asm__ volatile ("move $8, %0\n\tsw $29, 0($8)" : : "r"(&G.Sp_bak) : "$8", "memory");
+	__asm__ volatile ("move $8, %0\n\tlw $29, 0($8)" : : "r"(&pStack_bak) : "$8");
+#endif
 }
 
 /* DS 0x8007774c (ResetSpadStack2): flag on, sp = G.Sp_bak */
 VOID ResetSpadStack2(VOID)
 {
 	G.System_flg |= SYS_SPAD_STACK;
-	SPAD_LOAD_SP(G.Sp_bak);
+	/* DS builds the address of G.Sp_bak in a1, copies it to t0 and loads sp through t0
+	   (move t0,a1 / lw sp,0(t0)), so the asm takes the address in a register and moves it to
+	   $8 (t0) itself; $8 is listed as clobbered. */
+#if defined(__mips__) || defined(__psx__) || defined(__R3000__)
+	__asm__ volatile ("move $8, %0\n\tlw $29, 0($8)" : : "r"(&G.Sp_bak) : "$8");
+#endif
 }
 
+/* Allocate Size bytes from the free-work pool. The pointer is recorded in Mem_man so Free_work can find it
+ * again; the result is returned through *p. */
 /* DS 0x8007777c (Get_work) */
 ULONG Get_work(register VOID **p, register ULONG Size)
 {
@@ -516,7 +535,7 @@ ULONG Free_work(register VOID **p)
 }
 
 /* DS 0x800c3c28 (pStack_bak) */
-ULONG *pStack_bak = 0;
+ULONG *pStack_bak;
 
 /* DS 0x800c3be0 (Tmp_matrix) */
 MATRIX Tmp_matrix[2];

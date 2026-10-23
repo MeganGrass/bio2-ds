@@ -36,6 +36,7 @@ struct tagLINE_SCR {
 
 extern LINE_SCR Line;			/* 800dfd68 */
 extern signed char sin_tbl[256];	/* 8009d9f4 signed byte (lb, unscaled index in Scr_rasta) */
+/* quake_tbl1 / quake_tbl2 hold 16 (X, Y) byte pairs each, one per quake step (Quake_ctr0 & 0xf). */
 extern UCHAR    quake_tbl1[32];	/* 8009daf4 */
 extern UCHAR    quake_tbl2[32];	/* 8009db14 */
 

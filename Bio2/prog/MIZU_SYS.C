@@ -23,7 +23,7 @@
 /* ------------------------------------------------------------------ */
 
 /* DS 0x8009dca0 (Mizu_size_tbl) */
-UCHAR Mizu_size_tbl[][2] =
+UCHAR Mizu_size_tbl[15][2] =
 {
 	{ 0x08, 0x07 }, { 0x02, 0x04 }, { 0x02, 0x0b }, { 0x02, 0x05 },
 	{ 0x0b, 0x0a }, { 0x02, 0x0c }, { 0x03, 0x0b }, { 0x02, 0x0c },
@@ -90,13 +90,12 @@ void Mizu_trans(OBJ_MODEL_WORK *pOwork, ULONG toumei)
 	LONG    XX, ZZ;
 	POLY_GT4 *pP;
 	VECTOR  Vec;
+	/* retail never touches sp 0x20..0x3f; CCPSX 4.7 spills two words to 0x38/0x3c, so 24 bytes keep Vec at 0x10 and the saves at 0x40 */
+	volatile int Rsv[6];
 	USHORT  *A0;
-	UCHAR    frame_pad[24];	/* retail reserves the 24 bytes after Vec and never reads them */
 
 	D0 = pOwork->Cdir_y;
-	SortGT4_lno((TMD_MEM *)pOwork->pTmd2,
-				(POLY_GT4 *)pOwork->pPacket2 + G.Cbuf_id,
-				pOwork->Poly_rgb, toumei);
+	SortGT4_lno((TMD_MEM *)pOwork->pTmd2, (POLY_GT4 *)pOwork->pPacket2 + G.Cbuf_id, pOwork->Poly_rgb, toumei);
 
 	/* Quadrant of the Y rotation selects the walk direction of the cell grid.
 	   DS tests 1, 0, 2, 3 in that order (an if chain; 0 and 3 share the +900 Z setup) */
@@ -143,10 +142,9 @@ void Mizu_trans(OBJ_MODEL_WORK *pOwork, ULONG toumei)
 			/* rows run along Z, cells along X */
 			for (i = 0; i < Dz; i++)
 			{
-				j = 0;
-				if (j < Dx)
+				if (Dx)
+					for (j = 0; j < Dx; j++)
 				{
-Inner1:
 					if (*A0 & (0x8000 >> j))
 					{
 						if (Hit_ck_point4(&Vec, G.Cccut))
@@ -156,9 +154,6 @@ Inner1:
 						pP += 2;
 					}
 					Vec.vx += XX;
-					j++;
-					if (j < Dx)
-						goto Inner1;
 				}
 				A0++;
 				Vec.vz += ZZ;
@@ -172,10 +167,9 @@ Inner1:
 	/* rows run along X, cells along Z */
 	for (i = 0; i < Dz; i++)
 	{
-		j = 0;
-		if (j < Dx)
+		if (Dx)
+			for (j = 0; j < Dx; j++)
 		{
-Inner2:
 			if (*A0 & (0x8000 >> j))
 			{
 				if (Hit_ck_point4(&Vec, G.Cccut))
@@ -185,9 +179,6 @@ Inner2:
 				pP += 2;
 			}
 			Vec.vz += ZZ;
-			j++;
-			if (j < Dx)
-				goto Inner2;
 		}
 		A0++;
 		Vec.vx += XX;
@@ -209,6 +200,7 @@ void Mizu_div_ck(OBJ_MODEL_WORK *pOwork, ULONG Size_x, ULONG Size_z)
 	ENEMY_WORK  *pEw2;
 	ENEMY_WORK  **ppEw;
 
+	/* the player (pEnemy[0]) is always subdivided; the partner (pEnemy[1]) only while its Be_flg bit 0 is set */
 	Mizu_div_main(pOwork, Size_x, Size_z, G.pEnemy[0]);
 
 	if (G.pEnemy[1]->Be_flg & 1)
@@ -223,10 +215,12 @@ void Mizu_div_ck(OBJ_MODEL_WORK *pOwork, ULONG Size_x, ULONG Size_z)
 			Mizu_div_main(pOwork, Size_x, Size_z, pEw);
 	}
 
+	/* enemies (pEnemy[2] up to ppEnemy_end); DS loads each entry into pEw (s0) and passes that register */
 	for (ppEw = &G.pEnemy[2]; ppEw != G.ppEnemy_end; ppEw++)
 	{
-		if ((*ppEw)->Be_flg & 1)
-			Mizu_div_main(pOwork, Size_x, Size_z, *ppEw);
+		pEw = *ppEw;
+		if (pEw->Be_flg & 1)
+			Mizu_div_main(pOwork, Size_x, Size_z, pEw);
 	}
 }
 
@@ -236,9 +230,10 @@ void Mizu_div_ck(OBJ_MODEL_WORK *pOwork, ULONG Size_x, ULONG Size_z)
 /* 13-prim subdivided replacement into Sce.pMizu_div.                  */
 /* ------------------------------------------------------------------ */
 /* DS 0x8002f3fc (Mizu_div_main) */
-void Mizu_div_main(OBJ_MODEL_WORK *pOwork, ULONG Size_x, ULONG Size_z,
-				   ENEMY_WORK *pEwork)
+void Mizu_div_main(OBJ_MODEL_WORK *pOwork, ULONG Size_x, ULONG Size_z, ENEMY_WORK *pEwork)
 {
+	/* retail reserves 16 more bytes of locals (Mizu_div_main frame 200); never read */
+	volatile int Rsv[4];
 	LONG     D0, D1, D2;
 	LONG     Dx, Dz;
 	ULONG    i, j;
@@ -252,9 +247,7 @@ void Mizu_div_main(OBJ_MODEL_WORK *pOwork, ULONG Size_x, ULONG Size_z,
 	USHORT   *A0;
 	UCHAR    *A1;
 	ULONG    *A2;
-	ULONG    Frame_pad[4];	/* unused; retail Mizu_div_main keeps sp+0x90..0x9f free (frame 0xc8) */
 
-	(void)Frame_pad;
 	Box.W = (SHORT)(Size_x * 0x708 - 1);
 	Box.D = (SHORT)(Size_z * 0x708 - 1);
 	Box.X = 0;

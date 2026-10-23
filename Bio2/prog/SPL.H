@@ -92,13 +92,7 @@ extern ENEMY_WORK *pSpl_near_em[3];
 extern SHORT Em_dir[3];
 extern USHORT Em_l[3];
 
-/* Per-kind walk / back / dir / ato / run speed tables, defined in SPL.C */
-extern UCHAR Subpl_walk[32][2];		/* DS 0x800a8268 */
-extern UCHAR Subpl_back[32][2];		/* DS 0x800a82a8 */
-extern UCHAR Subpl_dir[32][2];		/* DS 0x800a82e8 */
-extern UCHAR Subpl_ato[32][2];		/* DS 0x800a8328 */
-extern UCHAR Subpl_run[32][2];		/* DS 0x800a8368 */
-extern UCHAR Em4a_zobiparts_tbl[7][2];	/* DS 0x800a83a8 */
+/* Subpl_walk/back/dir/ato/run and Em4a_zobiparts_tbl are static tables in SPL_TBL.H (one copy per including file) */
 
 extern VOID *Spl_routine_0[9];
 extern VOID *Spl_mv[28];
@@ -141,7 +135,7 @@ extern UCHAR Spl_chenge09_kao4_rom[];		/* DS 0x80011918 */
 extern UCHAR Spl_chenge10_body3_rom[];		/* DS 0x80011924 */
 extern UCHAR Spl_chenge10_body4_rom[];		/* DS 0x80011948 */
 
-/* Spl_Init per-Id tables: DS block 0x80011620..0x80011738 (see Spl_Init; per-array split not byte-verified) */
+/* Spl_Init per-Id tables: DS block 0x80011620..0x80011738 (see Spl_Init; per-array split not established from the binary) */
 extern SHORT Spl_init_parts0_y_rom[];
 extern SHORT Spl_init_ofs_y_rom[];
 extern USHORT Spl_init_at_rom[];

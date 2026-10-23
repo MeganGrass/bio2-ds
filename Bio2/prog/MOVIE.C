@@ -1,11 +1,11 @@
 /*
  * MOVIE.C - STR movie playback (DS streaming + MDEC)
- * Resident Evil 2 Dual Shock Ver. (SLUS-00748) decompilation
+ * Resident Evil 2 (SLUS-00748) decompilation
+ * Source: D:\Bio2\prog\MOVIE.C
  */
 
 #define _MOVIE_C_
 #include "TYPES.H"
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBDS.H>
 #include <LIBETC.H>
@@ -61,65 +61,31 @@ MOVIE_TBL   Movie_tbl[] =
 /* uninitialised global would go to bss and move).                      */
 /* ------------------------------------------------------------------ */
 /* DS 0x800d5b80 (Channel) */
-DslFILTER   Channel = { 0, 0, 0 };				/* file, chan, pad */
+DslFILTER   Channel;				/* file, chan, pad */
 
 /* DS 0x800d75d8 (Vm_disp) */
-VM_DISP     Vm_disp =
-{
-	{ 0, 0, 0, 0 },						/* 0x00 Rect (x, y, w, h) */
-	{									/* 0x08 Cinesco[2][2] (TILE) */
-		{ { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
-		{ { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0, 0, 0, 0 } }
-	},
-	0,									/* 0x48 Cine_switch */
-	0,									/* 0x4c Pos_x */
-	0,									/* 0x4e Cur_pos_x */
-	0,									/* 0x50 Pos_y */
-	0,									/* 0x52 Width */
-	0,									/* 0x54 Size */
-	0,									/* 0x56 Count */
-	0,									/* 0x58 Loop */
-	0,									/* 0x5a Attribute */
-	0									/* 0x5c Isrgb24 */
-};
+VM_DISP     Vm_disp;
 
 /* DS 0x800d763c (pVm_frm) */
-VM_FRAME    *pVm_frm = 0;
+VM_FRAME    *pVm_frm;
 
 /* DS 0x800d7670 (Vm_work) */
-VM_WORK     Vm_work =
-{
-	{ 0, 0 },							/* 0x00 Rl_buff[2] */
-	0,									/* 0x08 pImage_buff */
-	0,									/* 0x0c End_frame */
-	0,									/* 0x0e Movie_volume */
-	0,									/* 0x10 Rno */
-	0,									/* 0x11 Cbuf_id */
-	0,									/* 0x12 Movie_w */
-	0,									/* 0x14 Movie_sync */
-	0,									/* 0x15 Status */
-	0,									/* 0x16 Eom */
-	0,									/* 0x17 Free0 */
-	0,									/* 0x18 Frame */
-	0,									/* 0x1a Volume */
-	0,									/* 0x1c Start_sector */
-	0									/* 0x20 Movie_cancel */
-};
+VM_WORK     Vm_work;
 
 /* DS 0x800d8cd8 (Loc) */
-DslLOC      Loc = { 0, 0, 0, 0 };
+DslLOC      Loc;
 
 /* DS 0x800df338 (pMovie_result) */
-UCHAR       *pMovie_result = 0;
+UCHAR       *pMovie_result;
 
 /* DS 0x800e2a88 (Ret_Value) */
-UCHAR       Ret_Value[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+UCHAR       Ret_Value[8];
 
 /* DS 0x800e8980 (pAtv) */
-DslATV      *pAtv = 0;
+DslATV      *pAtv;
 
 /* DS 0x800eae34 (pFile) */
-DslFILE     *pFile = 0;
+DslFILE     *pFile;
 
 /* ------------------------------------------------------------------ */
 /* DS 0x80032150 (Init_movie_work)                                     */
@@ -127,10 +93,11 @@ DslFILE     *pFile = 0;
 void Init_movie_work(ULONG Id)
 {
 	ULONG       *pBuff;
+	ULONG       width;
 	MOVIE_TBL   *pMovie_tbl;
-	ULONG       unused_slot[2];
+	VM_WORK     *pWork = &Vm_work;
+	VM_DISP     *pDisp = &Vm_disp;
 
-	(void)unused_slot;
 	pMovie_tbl = &Movie_tbl[Id];
 	switch (pMovie_tbl->Work_top)
 	{
@@ -144,53 +111,61 @@ void Init_movie_work(ULONG Id)
 		pBuff = (ULONG *)G.pFree_work;
 		break;
 	}
-	pVm_frm = (VM_FRAME *)pBuff;            /* any other Work_top leaves pBuff unset (as retail) */
+	/* Work_top picks the memory for the frame buffers: 0 = background image buffer, 1 = MOVIE_WORK_TOP1,
+	 * 2 = the free work area. Any other value leaves pBuff unset, as in retail. */
+	pVm_frm = (VM_FRAME *)pBuff;
 
 	G.Movie_id      = (UCHAR)Id;
 	G.Movie_Isrgb24 = pMovie_tbl->Isrgb24;
 	pFile           = (DslFILE *)(pVm_frm + 1);
 	pAtv            = (DslATV *)(pVm_frm + 4);
-	Vm_work.Movie_w = pMovie_tbl->Disp_w;
+	pWork->Movie_w = pMovie_tbl->Disp_w;
 	pMovie_result   = Ret_Value;
-	Vm_work.Rno        = 0;
-	Vm_work.Movie_sync = 0;
+	pWork->Rno        = 0;
+	pWork->Movie_sync = 0;
 
-	Vm_disp.Rect.w = 16;
+	width = 16;
 	if (G.Movie_Isrgb24 == 1)
-		Vm_disp.Rect.w = 24;
-	Vm_disp.Pos_x     = (USHORT)pMovie_tbl->Pos;
-	Vm_disp.Pos_y     = (USHORT)(pMovie_tbl->Pos >> 16);
-	Vm_disp.Attribute = pMovie_tbl->Attribute;
-	Vm_disp.Isrgb24   = pMovie_tbl->Isrgb24;
+		width = 24;
+	pDisp->Width        = width;
+	pDisp->Rect.w = width;
+	pDisp->Pos_x     = (USHORT)pMovie_tbl->Pos;
+	pDisp->Pos_y     = (USHORT)(pMovie_tbl->Pos >> 16);
+	pDisp->Attribute = pMovie_tbl->Attribute;
+	pDisp->Isrgb24   = pMovie_tbl->Isrgb24;
 
-	if ((Vm_disp.Attribute & 2) == 0)
+	if ((pDisp->Attribute & 2) == 0)
 	{
-		Vm_work.Eom = 0;
+		pWork->Eom = 0;
 	}
-	else if (Vm_work.Eom == 2)
+	else if (pWork->Eom == 2)
 	{
 		/* previous movie of a chain was skipped: skip this one too */
-		Vm_work.Eom = 1;
+		pWork->Eom = 1;
 		Main.Padoff_stop_flg[1][1] = 2;
-		Vm_disp.Attribute = (Vm_disp.Attribute & ~0x80) | 0x40;
+		pDisp->Attribute = (pDisp->Attribute & ~0x80) | 0x40;
 	}
 	else
 	{
-		Vm_work.Eom = 0;
+		pWork->Eom = 0;
 		Main.Padoff_stop_flg[1][1] = 0;
 	}
 
-	Vm_work.Frame        = 0;
-	Vm_work.Free0        = 0;
-	Vm_work.Movie_volume = ((UINT)pMovie_tbl->Volume * (UINT)Volume_Bgm) / 100;
-	Vm_work.Movie_cancel = pMovie_tbl->Cancel;
+	pWork->Frame        = 0;
+	pWork->Free0        = 0;
+	/* movie volume is the table volume scaled by the BGM volume setting (percent). The USHORT and UCHAR
+	 * operands promote to int, so the division by 100 is signed, as in retail (mult by 0x51eb851f, sra 5);
+	 * the product is at most 65535 * 255, so it is never negative and the quotient equals the unsigned one. */
+	pWork->Movie_volume = pMovie_tbl->Volume * Volume_Bgm / 100;
+	pWork->Movie_cancel = pMovie_tbl->Cancel;
 	G.System_flg         = (G.System_flg & ~SYS_XA_MOVIE) | SYS_STR_MOVIE;
-	Vm_disp.Width        = Vm_disp.Rect.w;
 	Pad_vib_init();
 }
 
 /* ------------------------------------------------------------------ */
 /* DS 0x80032340 (Movie)                                               */
+/* Movie state machine: Vm_work.Rno selects init (0), main (1) or exit (2) and the loop runs until Rno
+ * reaches 2. The draw buffer flips after any frame that was drawn (Vm_work.Frame != 0). */
 /* ------------------------------------------------------------------ */
 void Movie(void)
 {
@@ -217,22 +192,30 @@ void Movie(void)
 /* ------------------------------------------------------------------ */
 /* DS 0x80032450 (Movie_init)                                          */
 /* ------------------------------------------------------------------ */
+/* DS stack frame: 0x38 bytes. s0..s3 are saved at sp+0x20..sp+0x2c and ra at sp+0x30. Rect occupies sp+0x10..0x17
+ * and Rect2 sp+0x18..0x1f: DS fills them with lwl/lwr + swl/swr copies of the two 8-byte templates at DS 0x80010ae0
+ * and 0x80010ae8, and StoreImage receives their addresses. The word at sp+0x14 (Rect.w and Rect.h) is written again
+ * in the Attribute & 4 path. */
 static void Movie_init(void)
 {
+	VM_DISP *pDisp = &Vm_disp;
+	VM_WORK *pWork = &Vm_work;
 	RECT    Rect  = { 0x140, 0x000, 0x0a0, 0x1e0 };    /* DS 0x80010ae0 */
 	RECT    Rect2 = { 0x1c0, 0x0f0, 0x020, 0x0f0 };    /* DS 0x80010ae8 */
 
-	if (Vm_disp.Attribute & 8)
+	/* Attribute bit 8 draws the movie over the game screen. The VRAM under it is saved first, in two
+	 * pieces when bit 4 is set on an RGB24 movie, so it can be restored afterwards. */
+	if (pDisp->Attribute & 8)
 	{
 		/* movie drawn over the game screen: save the VRAM it will overwrite */
-		Set_movie_volume2(Vm_work.Movie_volume);
+		Set_movie_volume2(pWork->Movie_volume);
 		SsSetSerialAttr(SS_SERIAL_A, SS_MIX, SS_SON);
-		if (Vm_disp.Isrgb24 == 1)
+		if (pDisp->Isrgb24 == 1)
 		{
-			if (Vm_disp.Attribute & 4)
+			if (pDisp->Attribute & 4)
 			{
-				Rect.w = 0xa0;
-				Rect.h = 0xf0;
+				/* w = 0xa0 and h = 0xf0 in one word store (DS writes the pair with a single sw at sp+0x14) */
+				*(ULONG *)&Rect.w = 0xf000a0;
 				StoreImage(&Rect, (ULONG *)(((ULONG)G.pFree_work + 15) & ~15));
 				G.pFree_work += 0x12c10;
 				StoreImage(&Rect2, (ULONG *)(((ULONG)G.pFree_work + 15) & ~15));
@@ -248,41 +231,41 @@ static void Movie_init(void)
 		if (Open_movie(G.Movie_id))
 		{
 			Movie_end();
-			Vm_work.Status = 1;
-			Vm_work.Rno += 2;
+			pWork->Status = 1;
+			pWork->Rno += 2;
 		}
 		else
 		{
-			Vm_work.Status = 0;
-			Vm_work.Frame  = 0;
-			Vm_work.Rno++;
+			pWork->Status = 0;
+			pWork->Frame  = 0;
+			pWork->Rno++;
 		}
 	}
-	else if (Vm_work.Eom)
+	else if (pWork->Eom)
 	{
 		Movie_end();
-		Vm_work.Rno += 2;
+		pWork->Rno += 2;
 	}
 	else
 	{
-		Set_movie_volume2(Vm_work.Movie_volume);
+		Set_movie_volume2(pWork->Movie_volume);
 		SsSetSerialAttr(SS_SERIAL_A, SS_MIX, SS_SON);
 		if (Open_movie(G.Movie_id))
 		{
 			Movie_end();
-			Vm_work.Status = 1;
-			Vm_work.Rno += 2;
+			pWork->Status = 1;
+			pWork->Rno += 2;
 		}
 		else
 		{
-			Vm_work.Status = 0;
-			if (Vm_disp.Attribute & 1)
+			pWork->Status = 0;
+			if (pDisp->Attribute & 1)
 			{
 				Fade_off(0);
 				Bg_set_mode(1, 0);
 			}
-			Vm_work.Frame = 0;
-			Vm_work.Rno++;
+			pWork->Frame = 0;
+			pWork->Rno++;
 		}
 	}
 }
@@ -290,8 +273,13 @@ static void Movie_init(void)
 /* ------------------------------------------------------------------ */
 /* DS 0x80032700 (Movie_main)                                          */
 /* ------------------------------------------------------------------ */
+/* DS stack frame: 0x28 bytes. s0..s2 are saved at sp+0x18..sp+0x20 and ra at sp+0x24. Rect occupies sp+0x10..0x17:
+ * DS writes x and y with one word store at sp+0x10 and w and h with one word store at sp+0x14, then passes sp+0x10
+ * to ClearImage. */
 static void Movie_main(void)
 {
+	VM_DISP *pDisp = &Vm_disp;
+	VM_WORK *pWork = &Vm_work;
 	SHORT   Eom;
 	RECT    Rect;
 
@@ -300,7 +288,7 @@ static void Movie_main(void)
 	PutDrawEnv(&Main.Db[G.Cbuf_id].Draw);
 	PutDispEnv(&Main.Db[G.Cbuf_id].Disp);
 
-	if (Vm_work.Frame < 2)
+	if (pWork->Frame < 2)
 	{
 		/* clear the half of VRAM the next frame will be decoded into */
 		Rect.x = 0;
@@ -308,7 +296,7 @@ static void Movie_main(void)
 			Rect.y = (G.Cbuf_id != 0) ? 0xf0 : 0;
 		else
 			Rect.y = (G.Cbuf_id == 0) ? 0xf0 : 0;
-		if (Vm_disp.Isrgb24 == 1)
+		if (pDisp->Isrgb24 == 1)
 		{
 			Rect.w = 0x1e0;
 			Rect.h = 0xf0;
@@ -320,7 +308,7 @@ static void Movie_main(void)
 		}
 		ClearImage(&Rect, 0, 0, 0);
 
-		if (Vm_work.Frame == 0)
+		if (pWork->Frame == 0)
 		{
 			G.System_flg |= SYS_XA_MOVIE;
 			if (G.Movie_id != 0x11)
@@ -328,36 +316,33 @@ static void Movie_main(void)
 		}
 	}
 
-	Vm_work.Frame++;
+	pWork->Frame++;
 	Eom = (SHORT)Play_movie();
 
 	/* Retail: if neither the stream status nor the MDEC sync flag is set yet,
 	   the code is a branch-to-self and never re-reads the flags. */
-	if (Vm_work.Status == 0 && Vm_work.Movie_sync == 0)
+	if (pWork->Status == 0 && pWork->Movie_sync == 0)
 	{
 		for (;;);
 	}
 
 	if (Eom == 1)
 	{
-		Vm_work.Eom = 1;
+		pWork->Eom = 1;
 		Main.Padoff_stop_flg[1][1] = 0;
 	}
-	else if (Eom != 0
-		  || (((Vm_disp.Attribute & 2) || Vm_work.Frame >= 61)
-			  && Vm_work.Movie_cancel
-			  && (Pad_set(), G.Padd & 0x800)))
+	else if (Eom != 0 || (((pDisp->Attribute & 2) || pWork->Frame >= 61) && pWork->Movie_cancel && (Pad_set(), G.Padd & 0x800)))
 	{
 		/* error, or cancelled with the START/skip button */
-		Vm_work.Eom = 2;
+		pWork->Eom = 2;
 		Main.Padoff_stop_flg[1][1] = 2;
-		Vm_disp.Attribute = (Vm_disp.Attribute & ~0x80) | 0x40;
+		pDisp->Attribute = (pDisp->Attribute & ~0x80) | 0x40;
 	}
 
-	if (Vm_work.Eom && (Vm_work.Frame & 1))
+	if (pWork->Eom && (pWork->Frame & 1))
 	{
-		Vm_work.Frame = 0;
-		Vm_work.Rno++;
+		pWork->Frame = 0;
+		pWork->Rno++;
 		Movie_end();
 	}
 }
@@ -365,6 +350,8 @@ static void Movie_main(void)
 /* ------------------------------------------------------------------ */
 /* DS 0x80032984 (Movie_end)                                           */
 /* ------------------------------------------------------------------ */
+/* DS stack frame: 0x20 bytes, ra saved at sp+0x18. unused_rect occupies sp+0x10..0x17: DS copies 8 bytes from
+ * DS 0x80010af0 into it with lwl/lwr + swl/swr before the call to Close_movie and never reads them back. */
 static void Movie_end(void)
 {
 	RECT    unused_rect = {0x140, 0, 0xa0, 0x200};
@@ -399,49 +386,55 @@ static void Movie_end(void)
 /* ------------------------------------------------------------------ */
 /* DS 0x80032ab8 (Movie_exit)                                          */
 /* ------------------------------------------------------------------ */
+/* DS stack frame: 0x38 bytes. s0..s3 are saved at sp+0x20..sp+0x2c and ra at sp+0x30. Rect occupies sp+0x10..0x17
+ * and Rect2 sp+0x18..0x1f, filled by lwl/lwr + swl/swr copies of the templates at DS 0x80010ae0 and 0x80010ae8 as
+ * in Movie_init; the word at sp+0x14 (Rect.w and Rect.h) is written again before the second LoadImage. */
 static void Movie_exit(void)
 {
+	VM_DISP *pDisp = &Vm_disp;
+	VM_WORK *pWork = &Vm_work;
 	RECT    Rect  = { 0x140, 0x000, 0x0a0, 0x1e0 };    /* DS 0x80010ae0 */
 	RECT    Rect2 = { 0x1c0, 0x0f0, 0x020, 0x0f0 };    /* DS 0x80010ae8 */
+	tagGLOBAL *pG = &G;				/* one pointer to G keeps its address in a register */
 
-	if (Vm_disp.Attribute & 8)
+	if (pDisp->Attribute & 8)
 	{
-		if (Vm_disp.Isrgb24 && Vm_work.Free0 == 0)
+		if (pDisp->Isrgb24 && pWork->Free0 == 0)
 		{
 			/* restore the VRAM saved by Movie_init */
-			if (Vm_disp.Attribute & 4)
+			if (pDisp->Attribute & 4)
 			{
-				G.pFree_work -= 0x3c10;
-				LoadImage(&Rect2, (ULONG *)(((ULONG)G.pFree_work + 15) & ~15));
-				Rect.w = 0xa0;
-				Rect.h = 0xf0;
-				G.pFree_work -= 0x12c10;
-				LoadImage(&Rect, (ULONG *)(((ULONG)G.pFree_work + 15) & ~15));
+				pG->pFree_work -= 0x3c10;
+				LoadImage(&Rect2, (ULONG *)(((ULONG)pG->pFree_work + 15) & ~15));
+				pG->pFree_work -= 0x12c10;
+				/* w and h are one word store in retail (sw at Rect+4) */
+				*(ULONG *)&Rect.w = 0x00f000a0;
+				LoadImage(&Rect, (ULONG *)(((ULONG)pG->pFree_work + 15) & ~15));
 				DrawSync(0);
 				Bg_set_mode(0, 0);
 				Main.Bg_chg_flg = 1;
 			}
 			else
 			{
-				G.pFree_work -= 0x25810;
-				LoadImage(&Rect, (ULONG *)(((ULONG)G.pFree_work + 15) & ~15));
+				pG->pFree_work -= 0x25810;
+				LoadImage(&Rect, (ULONG *)(((ULONG)pG->pFree_work + 15) & ~15));
 				DrawSync(0);
 				Bg_set_mode(0, 0);
 				Main.Bg_chg_flg = 2;
 			}
 		}
-		else if (Vm_disp.Isrgb24 == 0 || Vm_work.Free0 == 1)
+		else if (pDisp->Isrgb24 == 0 || pWork->Free0 == 1)
 		{
 			Main.Bg_chg_flg = 0;
-			G.System_flg   &= ~SYS_STR_MOVIE;
+			pG->System_flg   &= ~SYS_STR_MOVIE;
 		}
 	}
-	else if (Vm_work.Free0 == 1)
+	else if (pWork->Free0 == 1)
 	{
-		G.System_flg &= ~(SYS_XA_MOVIE | 0x200);
+		G.System_flg &= ~(SYS_XA_MOVIE | SYS_STR_MOVIE);
 	}
 
-	Vm_work.Free0++;
+	pWork->Free0++;
 }
 
 /* ------------------------------------------------------------------ */
@@ -449,8 +442,13 @@ static void Movie_exit(void)
 /* Returns 0 when the first frame was received, 1 on time-out.          */
 /* ------------------------------------------------------------------ */
 /* DS 0x80032ce8 (Open_movie) */
+/* DS stack frame: 0x40 bytes. s0..s3 are saved at sp+0x28..sp+0x34 and ra at sp+0x38. sp+0x10 carries the fifth
+ * argument of StSetStream (the null second callback). Param is at sp+0x18: DS writes only Param[0] (0xa8) as a byte
+ * and passes sp+0x18 to DsCommand. pBs_buff (sp+0x20) and pRead_header (sp+0x24) are the two output words of
+ * StGetNext, read back with lw after the call. */
 ULONG Open_movie(ULONG Movie_id)
 {
+	VM_DISP *pDisp = &Vm_disp;
 	StHEADER    *pRead_header;
 	ULONG       *pBs_buff;
 	ULONG       Time_out;
@@ -461,7 +459,7 @@ ULONG Open_movie(ULONG Movie_id)
 	Vm_work.End_frame  = Movie_tbl[Movie_id].N_frame;
 	Vm_work.Cbuf_id    = 0;
 	Vm_work.Rl_buff[0] = (ULONG *)&pAtv[1] + (MOVIE_RING_SIZE * 0x800) / 4;
-	if (Vm_disp.Attribute & 0x100)
+	if (pDisp->Attribute & 0x100)
 		Vm_work.Rl_buff[1] = (ULONG *)((UCHAR *)Vm_work.Rl_buff[0] + Movie_tbl[Movie_id].Rl_size);
 	else
 		Vm_work.Rl_buff[1] = Vm_work.Rl_buff[0];
@@ -496,14 +494,14 @@ ULONG Open_movie(ULONG Movie_id)
 			DecDCToutCallback(Mdec_callback);
 			DecDCTvlc((ULONG *)pBs_buff, (ULONG *)Vm_work.Rl_buff[Vm_work.Cbuf_id]);
 
-			Vm_disp.Rect.h = pVm_frm->Pic_h = (pRead_header->height + 8) & 0xfff0;
+			pDisp->Rect.h = pVm_frm->Pic_h = (pRead_header->height + 8) & 0xfff0;
 			if (G.Movie_Isrgb24 == 1)
-				Vm_disp.Size = pVm_frm->Pic_h * 12;
+				pDisp->Size = pVm_frm->Pic_h * 12;
 			else
-				Vm_disp.Size = pVm_frm->Pic_h * 8;
-			Vm_disp.Pos_x = (pRead_header->width != 320) ? 0x30 : 0;
-			Vm_disp.Loop  = (pRead_header->width + 8) >> 4;
-			pVm_frm->Old_no = pVm_frm->No = (USHORT)pRead_header->frameCount;
+				pDisp->Size = pVm_frm->Pic_h * 8;
+			pDisp->Pos_x = (pRead_header->width != 320) ? 0x30 : 0;
+			pDisp->Loop  = ((UINT)pRead_header->width + 8) >> 4;
+			pVm_frm->No = pVm_frm->Old_no = (USHORT)pRead_header->frameCount;
 			StFreeRing((ULONG *)pBs_buff);
 			return 0;
 		}
@@ -517,8 +515,11 @@ ULONG Open_movie(ULONG Movie_id)
 /* Returns 0 while playing, 1 at end of movie, 2 on stream time-out.    */
 /* ------------------------------------------------------------------ */
 /* DS 0x80032fcc (Play_movie) */
+/* DS stack frame: 0x30 bytes. s0..s3 are saved at sp+0x18..sp+0x24 and ra at sp+0x28. pBs_buff (sp+0x10) and
+ * pRead_header (sp+0x14) are the two output words of StGetNext, read back with lw after the call. */
 ULONG Play_movie(void)
 {
+	VM_DISP *pDisp = &Vm_disp;
 	ULONG       *pBs_buff;
 	StHEADER    *pRead_header;
 	ULONG       Ret;
@@ -542,8 +543,8 @@ ULONG Play_movie(void)
 
 	RuntoImage();
 	Vm_work.Cbuf_id ^= 1;
-	Vm_disp.Pos_x = (pRead_header->width != 320) ? 0x30 : 0;
-	Vm_disp.Loop  = (pRead_header->width + 8) >> 4;
+	pDisp->Pos_x = (pRead_header->width != 320) ? 0x30 : 0;
+	pDisp->Loop  = ((UINT)pRead_header->width + 8) >> 4;
 	DecDCTvlc((ULONG *)pBs_buff, (ULONG *)Vm_work.Rl_buff[Vm_work.Cbuf_id]);
 	StFreeRing((ULONG *)pBs_buff);
 	return Ret;
@@ -568,15 +569,18 @@ void Close_movie(void)
 /* ------------------------------------------------------------------ */
 static void RuntoImage(void)
 {
-	Vm_disp.Cur_pos_x = Vm_disp.Pos_x;
+	VM_WORK *pWork = &Vm_work;
+	VM_DISP *pDisp = &Vm_disp;
+
+	pDisp->Cur_pos_x = pDisp->Pos_x;
 	if (Main.Db[0].Draw.ofs[1] == 0)
-		Vm_disp.Rect.y = (G.Cbuf_id != 0) ? 0xf0 : 0;
+		pDisp->Rect.y = (G.Cbuf_id != 0) ? 0xf0 : 0;
 	else
-		Vm_disp.Rect.y = (G.Cbuf_id == 0) ? 0xf0 : 0;
-	Vm_disp.Count   = 0;
-	Vm_disp.Rect.y += Vm_disp.Pos_y;
-	DecDCTin((ULONG *)Vm_work.Rl_buff[Vm_work.Cbuf_id], G.Movie_Isrgb24);
-	DecDCTout((ULONG *)Vm_work.pImage_buff, Vm_disp.Size);
+		pDisp->Rect.y = (G.Cbuf_id == 0) ? 0xf0 : 0;
+	pDisp->Count   = 0;
+	pDisp->Rect.y += pDisp->Pos_y;
+	DecDCTin((ULONG *)pWork->Rl_buff[pWork->Cbuf_id], G.Movie_Isrgb24);
+	DecDCTout((ULONG *)pWork->pImage_buff, pDisp->Size);
 	DecDCTinSync(0);
 }
 
@@ -652,6 +656,8 @@ static void Set_movie_volume2(ULONG Volume)
 /* Set the CD mode and seek back to the first file. 1 = ok, 0 = fail.   */
 /* ------------------------------------------------------------------ */
 /* DS 0x80033440 (CdReset2) */
+/* DS stack frame: 0x20 bytes. s0 is saved at sp+0x18 and ra at sp+0x1c. Param is the single byte at sp+0x10 (0x90 or
+ * 0xa8 by Mode); its address goes to DsControlB for the DslSetmode command. */
 static LONG CdReset2(LONG Mode)
 {
 	UCHAR   Param;
@@ -659,8 +665,10 @@ static LONG CdReset2(LONG Mode)
 	ULONG   Time_out;
 
 	Time_out = 0;
-	Param = Mode ? 0xa8     /* double speed | XA real-time | filter */
-				 : 0x90;    /* double speed | size0 */
+	if (Mode == 0)
+		Param = 0x90;  /* double speed | size0 */
+	else
+		Param = 0xa8;  /* double speed | XA real-time | filter */
 	while (1)
 	{
 		DsControlB(DslSetmode, &Param, pMovie_result);
@@ -695,8 +703,7 @@ static LONG CdReset2(LONG Mode)
 	DsIntToPos((floc[0].sec_high << 16) | floc[0].sector, &Loc);
 	do {
 		while (DsSync(1, NULL) != DslComplete);
-	} while (DsControlB(DslSeekL, (UCHAR *)&Loc, NULL) == 0
-		  || DsControlB(DslPause, NULL, NULL) == 0);
+	} while (DsControlB(DslSeekL, (UCHAR *)&Loc, NULL) == 0 || DsControlB(DslPause, NULL, NULL) == 0);
 	return 1;
 }
 

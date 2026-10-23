@@ -16,7 +16,6 @@
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBSND.H>
 #include <STDLIB.H>
 #include <STRINGS.H>
@@ -36,6 +35,12 @@
 #include "SCE2.H"
 #include "FILECODE.H"
 #include "flag.h"
+
+/* DS 0x801c3ce8 (Cnf_eclt) */
+unsigned short *Cnf_eclt = (unsigned short *)0x801c3ce8;
+
+/* DS 0x801c40f8 (Cnf_Oprim) */
+POLY_FT4 (*Cnf_Oprim)[120] = (POLY_FT4 (*)[120])0x801c40f8;
 
 /* ---------------------------------------------------------------------------
  * Macros
@@ -340,8 +345,6 @@ unsigned char  Cnf_cdf;
 unsigned char  Cnf_scrl_bak;
 /* DS 0x801c3ce1 (Cnf_ce1) */
 unsigned char  Cnf_ce1;
-/* DS 0x801c3ce8 (Cnf_eclt) */
-unsigned short Cnf_eclt[512] RAM_SECTION(".buf_cnf_eclt");
 /* DS 0x801c40e8 (Cnf_status) */
 unsigned char  Cnf_status;
 /* DS 0x801c40e9 (Cnf_pad_mode) */
@@ -354,30 +357,10 @@ unsigned long  B_rgb;
 void          *pBak_light;
 /* DS 0x801c40f4 (Cnf_err) - load error bits; retail reads and writes it with lbu / sb */
 unsigned char  Cnf_err;
-/* DS 0x801c40f8 (Cnf_Oprim) */
-POLY_FT4       Cnf_Oprim[2][120] RAM_SECTION(".buf_cnf_oprim");
 /* DS 0x801c6678 (Suuji) */
 unsigned char  Suuji[6];
 /* DS 0x801c6680 (pOprim) */
 void          *pOprim;
-
-/* Shared with the sound / pad subsystems (declared in their headers or GLOBAL.H). */
-
-/* DS 0x800dbb70 (pEdt_adr) */
-tagEDT_TABLE_WORK pEdt_adr[6] = {
-	{ 0x00, 0x00, 0x00, 0x00 },	/* slot 0 */
-	{ 0x00, 0x00, 0x00, 0x00 },	/* slot 1 */
-	{ 0x00, 0x00, 0x00, 0x00 },	/* slot 2 */
-	{ 0x00, 0x00, 0x00, 0x00 },	/* slot 3 */
-	{ 0x00, 0x00, 0x00, 0x00 },	/* slot 4 */
-	{ 0x00, 0x00, 0x00, 0x00 }	/* slot 5 */
-};
-
-/* DS 0x800dfae0 (Main) */
-tagMAIN Main = { { { { { 0 } } } } };	/* 644 bytes, all zero in retail */
-
-/* DS 0x800e8984 (Pad_type1) */
-unsigned char  Pad_type1 = 0x00;
 
 /* ===========================================================================
  * Config  (DS 801bfa84)
@@ -413,11 +396,11 @@ void Config_main(void)
 /* DS 0x801bfb48 (Config_fade_in_wait) */
 void Config_fade_in_wait(void)
 {
+	/* retail reserves 8 more bytes of locals (Config_fade_in_wait frame 32); never read */
+	volatile int Rsv[2];
 	unsigned long fade_st;
 	/* retail reserves sp+0x10..0x17, never read */
-	ULONG         unused_slot[2];
 
-	(void)unused_slot;
 	fade_st = Fade_status(0);
 	if (fade_st != 0) {
 		Fade_set(0x200, 0, 7, 1);
@@ -441,8 +424,7 @@ void Config_fade_out_set(void)
 		pRect = NULL;
 	} else {
 		Fade_set(0x200, 0xc00, 7, 1);
-		if (Cnf_mode_next != 4 && Cnf_r_no != 4 &&
-			Cnf_mode_next != 1 && Cnf_r_no != 1) {
+		if (Cnf_mode_next != 4 && Cnf_r_no != 4 && Cnf_mode_next != 1 && Cnf_r_no != 1) {
 			rect.x = 0;
 			rect.y = 0x30;
 			rect.w = 0x140;
@@ -634,10 +616,9 @@ void Config_exit(void)
 {
 	unsigned long ret;
 	RECT          rect0;
+	volatile UCHAR Rsv[24];
 	/* retail reserves sp+0x18..0x2f, never read (rect0 at sp+0x10) */
-	ULONG         unused_slot[6];
 
-	(void)unused_slot;
 	ret = Cd_read(CORE01_TIM, Bg_img_buf, 1, (unsigned char *)"CORE01_TIM_LD");
 	Bg_set_mode(2, 0);
 
@@ -684,7 +665,7 @@ void Config_exit(void)
 		G.Next_cut_no          = Bak_cut;
 		Main.Vloop             = 2;
 		SetGeomOffset(0xa0, 0x78);
-		SetGeomScreen((unsigned int)(G.pRoom->pRcut[G.SaveData.Cut_no].ViewR >> 7));
+		SetGeomScreen((unsigned int)(G.pRoom->pRcut[Bak_cut].ViewR >> 7));
 		Main.Bg_chg_flg        = 2;
 		Bg_set_mode(0, 0);
 	}
@@ -832,13 +813,13 @@ void Config_padd_con(void)
 			if (Cnf_cdf < 10) {
 				return;
 			}
-			if ((Cnf_mode_naw & 0x20) == 0) {
+			if ((Cnf_mode_naw & 0x20) != 0) {
+				Cnf_mode_naw &= 0xdf;
+				G.SaveData.Weapon_mugen &= 0x20ff;
+			} else {
 				Cnf_mode_naw |= 0x20;
 				G.SaveData.Weapon_mugen |= 0xffffdf00;
 				CNF_SE(SOUND_CORE_CONFIRM);
-			} else {
-				Cnf_mode_naw &= 0xdf;
-				G.SaveData.Weapon_mugen &= 0x20ff;
 			}
 			Cnf_cdf = 0;
 			return;
@@ -850,18 +831,19 @@ void Config_padd_con(void)
 
 	/* Pad type changed underneath us (controller plugged / unplugged): reopen the key-config screen.
 	   An unchanged, connected pad type is stored back (retail 801c0bc8). */
-	if (Pad_type1 != 0) {
-		if (Cnf_pad_mode != Pad_type1) {
-			Cnf_status    = 2;
-			Cnf_mode_naw |= 8;
-			CNF_SE(SOUND_CORE_CONFIRM);
-			Cnf_ce1       = 0;
-			Cnf_pad_mode  = Pad_type1;
-			Cnf_mode_next = 1;
-			B_rgb         = 0x2c808080;
-			return;
+	if (Cnf_pad_mode == Pad_type1) {
+		if (Pad_type1 != 0) {
+			Cnf_pad_mode = Pad_type1;
 		}
-		Cnf_pad_mode = Pad_type1;
+	} else if (Pad_type1 != 0) {
+		Cnf_status    = 2;
+		Cnf_mode_naw |= 8;
+		CNF_SE(SOUND_CORE_CONFIRM);
+		B_rgb         = 0x2c808080;
+		Cnf_ce1       = 0;
+		Cnf_mode_next = 1;
+		Cnf_pad_mode  = Pad_type1;
+		return;
 	}
 
 	if ((G.Key_trg & 0x2000) != 0) {
@@ -972,6 +954,8 @@ void Config_padd_con(void)
 /* DS 0x801c14e4 (Config_padd_vib) */
 void Config_padd_vib(void)
 {
+	unsigned char was;
+
 	if ((G.Key_trg & 0x2000) != 0) {
 		Cnf_status    = 2;
 		Cnf_ce1       = 0;
@@ -1022,21 +1006,23 @@ void Config_padd_vib(void)
 		Cnf_ce1 = 0;
 		B_rgb   = 0x2c808080;
 		CNF_SPR(Cnf_r_no, Cnf_cur[Cnf_r_no]).flags = 5;
-		if (Cnf_cur[Cnf_r_no] != 2) {
+		was = Cnf_cur[Cnf_r_no];
+		Cnf_cur[Cnf_r_no] = 2;
+		if (was != 2) {
 			CNF_SE(SOUND_CORE_CURSOR);
 		}
-		Cnf_cur[Cnf_r_no] = 2;
 	}
 	if (Cnf_cur[Cnf_r_no] != 2) {
 		if ((G.Padd1 & 0x2000) != 0) {
 			B_rgb   = 0x2c808080;
 			Cnf_ce1 = 0;
 			CNF_SPR(Cnf_r_no, Cnf_cur[Cnf_r_no]).flags = 5;
-			if (Cnf_cur[Cnf_r_no] != 1) {
+			was = Cnf_cur[Cnf_r_no];
+			Cnf_cur[Cnf_r_no] = 1;
+			if (was != 1) {
 				Cnf_mode_naw |= 0x80;
 				CNF_SE(SOUND_CORE_CURSOR);
 			}
-			Cnf_cur[Cnf_r_no] = 1;
 		}
 		if ((G.Padd1 & 0x8000) != 0) {
 			Cnf_ce1 = 0;
@@ -1060,167 +1046,187 @@ void Config_padd_vib(void)
 void Config_padd_snd(void)
 {
 	unsigned char cur_now;
-	int           i;
 
 	Config_suuji(0, Volume_Bgm, Cnf_r_no);
 	Config_suuji(3, Volume_Se,  Cnf_r_no);
 
-	if ((G.Key_trg & 0x3000) == 0) {
-		if ((G.Padd1 & 0xa000) == 0) {
-			Cnf_cd3 = 1;
-			Cnf_cd4 = 0;
-		} else if (Cnf_cd4 > 9) {
-			Cnf_cd3 = 10;
-			Cnf_cd4--;
-		}
-
-		if ((G.System_flg & SYS_PAD_REPEAT) != 0) {
-			if ((G.Padd1 & 0x1000) != 0) {
-				Cnf_ce1 = 0;
-				B_rgb   = 0x2c808080;
-				CNF_SPR(Cnf_r_no, Cnf_cur[Cnf_r_no]).flags = 5;
-				if (Cnf_cur[Cnf_r_no] < 4) {
-					Cnf_cur[Cnf_r_no]--;
-					if (Cnf_cur[Cnf_r_no] == 0xff) {
-						Cnf_cur[Cnf_r_no] = 0;
-					} else {
-						CNF_SE(SOUND_CORE_CURSOR);
-					}
-				}
-			}
-
-			if ((G.Padd1 & 0x4000) != 0) {
-				Cnf_ce1 = 0;
-				B_rgb   = 0x2c808080;
-				cur_now = Cnf_cur[Cnf_r_no];
-				CNF_SPR(Cnf_r_no, cur_now).flags = (cur_now == 0 || cur_now == 4) ? 1 : 5;
-				if (Cnf_cur[Cnf_r_no] < 4) {
-					Cnf_cur[Cnf_r_no]++;
-					if (Cnf_cur[Cnf_r_no] == 4) {
-						Cnf_cur[Cnf_r_no] = 3;   /* exit entry: no sound */
-					} else {
-						CNF_SE(SOUND_CORE_CURSOR);
-					}
-				} else {
-					Cnf_cur[Cnf_r_no] = 1;
-					CNF_SE(SOUND_CORE_CURSOR);
-				}
-			}
-
-			if ((G.Padd1 & 0x8000) != 0) {
-				Cnf_ce1 = 0;
-				B_rgb   = 0x2c808080;
-				cur_now = Cnf_cur[Cnf_r_no];
-				if (cur_now == 1) {
-					Cnf_cd4++;
-					Volume_Bgm -= Cnf_cd3;
-					if (Volume_Bgm < 0x65) {
-						CNF_SE(SOUND_CORE_CURSOR);
-					} else {
-						Volume_Bgm = 0;
-					}
-					Config_suuji(0, Volume_Bgm, Cnf_r_no);
-					CNF_SPR(Cnf_r_no, 7).flags = 1;
-					for (i = 0; i < 3; i++) {
-						SsSeqSetVol((short)Seq_ctr[i].Seq_no,
-									(short)(((unsigned int)Seq_ctr[i].Vol.left  * (unsigned int)Volume_Bgm) / 100),
-									(short)(((unsigned int)Seq_ctr[i].Vol.right * (unsigned int)Volume_Bgm) / 100));
-					}
-				} else if (cur_now == 2) {
-					Cnf_cd4++;
-					Volume_Se -= Cnf_cd3;
-					if (Volume_Se < 0x65) {
-						CNF_SE(SOUND_CORE_CURSOR);
-					} else {
-						Volume_Se = 0;
-					}
-					Config_suuji(3, Volume_Se, Cnf_r_no);
-					CNF_SPR(Cnf_r_no, 0xb).flags = 1;
-				} else if (cur_now == 0 || cur_now == 4) {
-					CNF_SPR(Cnf_r_no, (cur_now == 4) ? 4 : 0).flags = 5;
-					Cnf_cur[Cnf_r_no] = 0;
-					G.Sound_mode &= 0xfe;
-					Snd_sys_stereo(G.Sound_mode);
-					CNF_SE(SOUND_CORE_CURSOR);
-				}
-			}
-
-			if ((G.Padd1 & 0x2000) != 0) {
-				Cnf_ce1 = 0;
-				B_rgb   = 0x2c808080;
-				cur_now = Cnf_cur[Cnf_r_no];
-				if (cur_now == 1) {
-					Cnf_cd4++;
-					Volume_Bgm += Cnf_cd3;
-					if (Volume_Bgm < 0x65) {
-						CNF_SE(SOUND_CORE_CURSOR);
-					} else {
-						Volume_Bgm = 100;
-					}
-					Config_suuji(0, Volume_Bgm, Cnf_r_no);
-					CNF_SPR(Cnf_r_no, 9).flags = 1;
-					for (i = 0; i < 3; i++) {
-						SsSeqSetVol((short)Seq_ctr[i].Seq_no,
-									(short)(((unsigned int)Seq_ctr[i].Vol.left  * (unsigned int)Volume_Bgm) / 100),
-									(short)(((unsigned int)Seq_ctr[i].Vol.right * (unsigned int)Volume_Bgm) / 100));
-					}
-				} else if (cur_now == 2) {
-					Cnf_cd4++;
-					Volume_Se += Cnf_cd3;
-					if (Volume_Se < 0x65) {
-						CNF_SE(SOUND_CORE_CURSOR);
-					} else {
-						Volume_Se = 100;
-					}
-					Config_suuji(3, Volume_Se, Cnf_r_no);
-					CNF_SPR(Cnf_r_no, 0xd).flags = 1;
-				} else if (cur_now == 0 || cur_now == 4) {
-					CNF_SPR(Cnf_r_no, (cur_now == 4) ? 4 : 0).flags = 5;
-					Cnf_cur[Cnf_r_no] = (cur_now == 0) ? 4 : 0;
-					G.Sound_mode |= 1;
-					Snd_sys_stereo(G.Sound_mode);
-					CNF_SE(SOUND_CORE_CURSOR);
-				}
-			}
-		}
-
-		/* Arrow sprite updates. */
-		CNF_SPR(Cnf_r_no, 7).flags = 0;
-		CNF_SPR(Cnf_r_no, 8).flags = 1;
-		CNF_SPR(Cnf_r_no, 9).flags = 0;
-		CNF_SPR(Cnf_r_no, 0xa).flags = 1;
-		CNF_SPR(Cnf_r_no, 0xb).flags = 0;
-		CNF_SPR(Cnf_r_no, 0xc).flags = 1;
-		CNF_SPR(Cnf_r_no, 0xd).flags = 0;
-		CNF_SPR(Cnf_r_no, 0xe).flags = 1;
-		if ((G.Padd1 & 0x8000) != 0) {
-			if (Cnf_cur[Cnf_r_no] == 1) {
-				CNF_SPR(Cnf_r_no, 7).flags = 1;
-				CNF_SPR(Cnf_r_no, 8).flags = 0;
-			}
-			if (Cnf_cur[Cnf_r_no] == 2) {
-				CNF_SPR(Cnf_r_no, 0xb).flags = 1;
-				CNF_SPR(Cnf_r_no, 0xc).flags = 0;
-			}
-		}
-		if ((G.Padd1 & 0x2000) != 0) {
-			if (Cnf_cur[Cnf_r_no] == 1) {
-				CNF_SPR(Cnf_r_no, 9).flags = 1;
-				CNF_SPR(Cnf_r_no, 0xa).flags = 0;
-			}
-			if (Cnf_cur[Cnf_r_no] == 2) {
-				CNF_SPR(Cnf_r_no, 0xd).flags = 1;
-				CNF_SPR(Cnf_r_no, 0xe).flags = 0;
-			}
-		}
-	} else if ((G.Key_trg & 0x2000) != 0 || Cnf_cur[Cnf_r_no] == 3) {
-		/* Cancel (Triangle), or Circle on the exit entry. */
+	/* Cancel (Triangle), or Circle on the exit entry. */
+	if ((G.Key_trg & 0x2000) != 0 || ((G.Key_trg & 0x1000) != 0 && Cnf_cur[Cnf_r_no] == 3)) {
 		Cnf_status    = 2;
 		Cnf_ce1       = 0;
 		B_rgb         = 0x2c808080;
 		Cnf_mode_next = 0;
 		Cnf_mode_naw |= 8;
 		CNF_SE(SOUND_CORE_CANCEL);
+		return;
+	}
+	if ((G.Key_trg & 0x1000) != 0) {
+		return;
+	}
+
+	if ((G.Padd1 & 0xa000) != 0) {
+		if (Cnf_cd4 > 9) {
+			Cnf_cd4--;
+			Cnf_cd3 = 10;
+		}
+	} else {
+		Cnf_cd3 = 1;
+		Cnf_cd4 = 0;
+	}
+
+	if ((G.System_flg & SYS_PAD_REPEAT) != 0) {
+		if ((G.Padd1 & 0x1000) != 0) {
+			Cnf_ce1 = 0;
+			B_rgb   = 0x2c808080;
+			CNF_SPR(Cnf_r_no, Cnf_cur[Cnf_r_no]).flags = 5;
+			if (Cnf_cur[Cnf_r_no] < 4) {
+				Cnf_cur[Cnf_r_no]--;
+				if (Cnf_cur[Cnf_r_no] == 0xff) {
+					Cnf_cur[Cnf_r_no] = 0;
+				} else {
+					CNF_SE(SOUND_CORE_CURSOR);
+				}
+			}
+		}
+
+		if ((G.Padd1 & 0x4000) != 0) {
+			Cnf_ce1 = 0;
+			B_rgb   = 0x2c808080;
+			cur_now = Cnf_cur[Cnf_r_no];
+			CNF_SPR(Cnf_r_no, cur_now).flags = (cur_now == 0 || cur_now == 4) ? 1 : 5;
+			if (Cnf_cur[Cnf_r_no] < 4) {
+				Cnf_cur[Cnf_r_no]++;
+				if (Cnf_cur[Cnf_r_no] == 4) {
+					Cnf_cur[Cnf_r_no] = 3;   /* exit entry: no sound */
+				} else {
+					CNF_SE(SOUND_CORE_CURSOR);
+				}
+			} else {
+				Cnf_cur[Cnf_r_no] = 1;
+				CNF_SE(SOUND_CORE_CURSOR);
+			}
+		}
+
+		if ((G.Padd1 & 0x8000) != 0) {
+			Cnf_ce1 = 0;
+			B_rgb   = 0x2c808080;
+			cur_now = Cnf_cur[Cnf_r_no];
+			switch (cur_now) {
+			case 1:
+				Cnf_cd4++;
+				Volume_Bgm -= Cnf_cd3;
+				if (Volume_Bgm >= 0x65) {
+					Volume_Bgm = 0;
+				} else {
+					CNF_SE(SOUND_CORE_CURSOR);
+				}
+				Config_suuji(0, Volume_Bgm, Cnf_r_no);
+				CNF_SPR(Cnf_r_no, 7).flags = 1;
+				/* Seq_no is sign-extended (retail lb), so a closed slot passes -1;
+				   the volume is a signed int division by 100 (mult/sra). */
+				SsSeqSetVol((short)(signed char)Seq_ctr[0].Seq_no, (short)((Seq_ctr[0].Vol.left  * Volume_Bgm) / 100), (short)((Seq_ctr[0].Vol.right * Volume_Bgm) / 100));
+				SsSeqSetVol((short)(signed char)Seq_ctr[1].Seq_no, (short)((Seq_ctr[1].Vol.left  * Volume_Bgm) / 100), (short)((Seq_ctr[1].Vol.right * Volume_Bgm) / 100));
+				SsSeqSetVol((short)(signed char)Seq_ctr[2].Seq_no, (short)((Seq_ctr[2].Vol.left  * Volume_Bgm) / 100), (short)((Seq_ctr[2].Vol.right * Volume_Bgm) / 100));
+				break;
+			case 2:
+				Cnf_cd4++;
+				Volume_Se -= Cnf_cd3;
+				if (Volume_Se >= 0x65) {
+					Volume_Se = 0;
+				} else {
+					CNF_SE(SOUND_CORE_CURSOR);
+				}
+				Config_suuji(3, Volume_Se, Cnf_r_no);
+				CNF_SPR(Cnf_r_no, 0xb).flags = 1;
+				break;
+			case 0:
+				CNF_SPR(Cnf_r_no, 0).flags = 5;
+				goto stereo_off;
+			case 4:
+				CNF_SPR(Cnf_r_no, 4).flags = 5;
+			stereo_off:
+				Cnf_cur[Cnf_r_no] = 0;
+				G.Sound_mode &= 0xfe;
+				Snd_sys_stereo(G.Sound_mode);
+				CNF_SE(SOUND_CORE_CURSOR);
+				break;
+			}
+		}
+
+		if ((G.Padd1 & 0x2000) != 0) {
+			Cnf_ce1 = 0;
+			B_rgb   = 0x2c808080;
+			cur_now = Cnf_cur[Cnf_r_no];
+			switch (cur_now) {
+			case 1:
+				Cnf_cd4++;
+				Volume_Bgm += Cnf_cd3;
+				if (Volume_Bgm >= 0x65) {
+					Volume_Bgm = 100;
+				} else {
+					CNF_SE(SOUND_CORE_CURSOR);
+				}
+				Config_suuji(0, Volume_Bgm, Cnf_r_no);
+				CNF_SPR(Cnf_r_no, 9).flags = 1;
+				SsSeqSetVol((short)(signed char)Seq_ctr[0].Seq_no, (short)((Seq_ctr[0].Vol.left  * Volume_Bgm) / 100), (short)((Seq_ctr[0].Vol.right * Volume_Bgm) / 100));
+				SsSeqSetVol((short)(signed char)Seq_ctr[1].Seq_no, (short)((Seq_ctr[1].Vol.left  * Volume_Bgm) / 100), (short)((Seq_ctr[1].Vol.right * Volume_Bgm) / 100));
+				SsSeqSetVol((short)(signed char)Seq_ctr[2].Seq_no, (short)((Seq_ctr[2].Vol.left  * Volume_Bgm) / 100), (short)((Seq_ctr[2].Vol.right * Volume_Bgm) / 100));
+				break;
+			case 2:
+				Cnf_cd4++;
+				Volume_Se += Cnf_cd3;
+				if (Volume_Se >= 0x65) {
+					Volume_Se = 100;
+				} else {
+					CNF_SE(SOUND_CORE_CURSOR);
+				}
+				Config_suuji(3, Volume_Se, Cnf_r_no);
+				CNF_SPR(Cnf_r_no, 0xd).flags = 1;
+				break;
+			case 0:
+				CNF_SPR(Cnf_r_no, 0).flags = 5;
+				Cnf_cur[Cnf_r_no] = 4;
+				goto stereo_on;
+			case 4:
+				CNF_SPR(Cnf_r_no, 4).flags = 5;
+				Cnf_cur[Cnf_r_no] = 0;
+			stereo_on:
+				G.Sound_mode |= 1;
+				Snd_sys_stereo(G.Sound_mode);
+				CNF_SE(SOUND_CORE_CURSOR);
+				break;
+			}
+		}
+	}
+
+	/* Arrow sprite updates. */
+	CNF_SPR(Cnf_r_no, 7).flags = 0;
+	CNF_SPR(Cnf_r_no, 8).flags = 1;
+	CNF_SPR(Cnf_r_no, 9).flags = 0;
+	CNF_SPR(Cnf_r_no, 0xa).flags = 1;
+	CNF_SPR(Cnf_r_no, 0xb).flags = 0;
+	CNF_SPR(Cnf_r_no, 0xc).flags = 1;
+	CNF_SPR(Cnf_r_no, 0xd).flags = 0;
+	CNF_SPR(Cnf_r_no, 0xe).flags = 1;
+	if ((G.Padd1 & 0x8000) != 0) {
+		if (Cnf_cur[Cnf_r_no] == 1) {
+			CNF_SPR(Cnf_r_no, 7).flags = 1;
+			CNF_SPR(Cnf_r_no, 8).flags = 0;
+		}
+		if (Cnf_cur[Cnf_r_no] == 2) {
+			CNF_SPR(Cnf_r_no, 0xb).flags = 1;
+			CNF_SPR(Cnf_r_no, 0xc).flags = 0;
+		}
+	}
+	if ((G.Padd1 & 0x2000) != 0) {
+		if (Cnf_cur[Cnf_r_no] == 1) {
+			CNF_SPR(Cnf_r_no, 9).flags = 1;
+			CNF_SPR(Cnf_r_no, 0xa).flags = 0;
+		}
+		if (Cnf_cur[Cnf_r_no] == 2) {
+			CNF_SPR(Cnf_r_no, 0xd).flags = 1;
+			CNF_SPR(Cnf_r_no, 0xe).flags = 0;
+		}
 	}
 }
 
@@ -1255,6 +1261,8 @@ void Config_padd_clr(void)
 /* DS 0x801c28d8 (Config_padd_res) */
 void Config_padd_res(void)
 {
+	unsigned char was;
+
 	if ((G.Key_trg & 0x2000) != 0) {
 		Cnf_status    = 2;
 		Cnf_ce1       = 0;
@@ -1289,39 +1297,43 @@ void Config_padd_res(void)
 		B_rgb   = 0x2c808080;
 		if (Cnf_cur[Cnf_r_no] == 2) {
 			CNF_SPR(Cnf_r_no, 2).flags = 5;
-			if (Cnf_cur[Cnf_r_no] != 0) {
+			was = Cnf_cur[Cnf_r_no];
+			Cnf_cur[Cnf_r_no] = 0;
+			if (was != 0) {
 				CNF_SE(SOUND_CORE_CURSOR);
 			}
-			Cnf_cur[Cnf_r_no] = 0;
 		}
 	}
 	if ((G.Padd1 & 0x4000) != 0) {
 		Cnf_ce1 = 0;
 		B_rgb   = 0x2c808080;
 		CNF_SPR(Cnf_r_no, Cnf_cur[Cnf_r_no]).flags = 5;
-		if (Cnf_cur[Cnf_r_no] != 2) {
+		was = Cnf_cur[Cnf_r_no];
+		Cnf_cur[Cnf_r_no] = 2;
+		if (was != 2) {
 			CNF_SE(SOUND_CORE_CURSOR);
 		}
-		Cnf_cur[Cnf_r_no] = 2;
 	}
 	if (Cnf_cur[Cnf_r_no] != 2) {
 		if ((G.Padd1 & 0x8000) != 0) {
 			B_rgb   = 0x2c808080;
 			Cnf_ce1 = 0;
 			CNF_SPR(Cnf_r_no, Cnf_cur[Cnf_r_no]).flags = 5;
-			if (Cnf_cur[Cnf_r_no] != 1) {
+			was = Cnf_cur[Cnf_r_no];
+			Cnf_cur[Cnf_r_no] = 1;
+			if (was != 1) {
 				CNF_SE(SOUND_CORE_CURSOR);
 			}
-			Cnf_cur[Cnf_r_no] = 1;
 		}
 		if ((G.Padd1 & 0x2000) != 0) {
 			Cnf_ce1 = 0;
 			B_rgb   = 0x2c808080;
 			CNF_SPR(Cnf_r_no, Cnf_cur[Cnf_r_no]).flags = 5;
-			if (Cnf_cur[Cnf_r_no] != 0) {
+			was = Cnf_cur[Cnf_r_no];
+			Cnf_cur[Cnf_r_no] = 0;
+			if (was != 0) {
 				CNF_SE(SOUND_CORE_CURSOR);
 			}
-			Cnf_cur[Cnf_r_no] = 0;
 		}
 	}
 }
@@ -1390,6 +1402,8 @@ void Config_move(void)
 /* DS 0x801c2f44 (Config_main_trans) */
 void Config_main_trans(void)
 {
+	/* retail reserves 16 more bytes of locals (Config_main_trans frame 88); never read */
+	volatile int Rsv[4];
 	unsigned int   i;
 	unsigned int   row;
 	unsigned int   cnt;
@@ -1595,8 +1609,7 @@ void Config_lrgb(void)
 	unsigned short lrgb_file[3] = { PADDU_TIM, COLOR_TIM, PADDDSU_TIM };
 	unsigned long  ret;
 
-	ret = Cd_read((unsigned int)lrgb_file[Cnf_cd5],
-				  Bg_img_buf, 0, (unsigned char *)"COLOR_TIM_LD");
+	ret = Cd_read((unsigned int)lrgb_file[Cnf_cd5], Bg_img_buf, 0, (unsigned char *)"COLOR_TIM_LD");
 	if (ret == 0xffffffff) {
 		Cnf_err |= 1;
 	}

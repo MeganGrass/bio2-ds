@@ -52,10 +52,10 @@ struct tagCOM_WORK {
 	LINE_F2 Line_work[2][4];
 };
 
-/* Init_work_tbl: SP_WORK template table (DS address not yet confirmed) */
+/* Init_work_tbl: SP_WORK template table  */
 extern SP_WORK Init_work_tbl[];
-/* DS 0x80010ba4: message string passed to Cprint from Keyboard_Input (not yet identified) */
-extern UCHAR s_Pc_sys_msg_80010ba4[];
+/* DS 0x80010ba4: message string passed to Cprint from Keyboard_Input  */
+extern UCHAR s_Pc_sys_msg_80010ba4[8];
 
 void    Windows(void);
 ULONG   Keyboard_Input(ULONG Length, ULONG Flg);
@@ -72,7 +72,7 @@ void    Console_clr(void);
 void    Console_trans(ULONG Be_flg);
 void    Sprite_Trans(ULONG nPacket);
 void    Set_sp_work(SP_WORK *pSp, SP_WORK *pSw);
-ULONG   Dr_mode_set(void);
+VOID    Dr_mode_set(void);
 
 
 

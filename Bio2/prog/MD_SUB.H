@@ -97,13 +97,13 @@ ULONG  Init_mirror_weapon(ENEMY_WORK *pEm, ULONG Mem);								/* 8002e4f8 */
 void   Mirror_weapon_cp(ENEMY_WORK *pEm);											/* 8002e548 */
 void   Parts_work_cp(ENEMY_WORK *pEm);												/* 8002e788 */
 void   Mirror_view(RCUT *pV0, RCUT *pV1, UCHAR flg, short mxz);						/* 8002e93c */
-UCHAR  Mirror_in_view(RCUT *pV0, UCHAR flg, VECTOR *pos);							/* 8002ea40 */
+ULONG  Mirror_in_view(RCUT *pV0, UCHAR flg, VECTOR *pos);							/* 8002ea40 */
 void   Mirror_trans(ENEMY_WORK *pEm);												/* 8002eaf8 */
 void   Mirror_parts_view_ck(ENEMY_WORK *pEm);										/* 8002ec70 retail only */
 void   Mirror_matrix_set(void);														/* 8002ed30 */
 void   Late_set(MODEL_WORK *pMw, USHORT Late);										/* 8002eeb4 */
 
-/* Defined in JOINT.C (0x80027160); call site in Mirror_trans verified in asm (4 args). Move to JOINT.H when created. */
+/* Defined in JOINT.C (0x80027160); the call site in Mirror_trans passes 4 arguments. */
 void Joint_trans2(ENEMY_WORK *pEm, PARTS_W *pP_ptr, ULONG Be_flg, VECTOR *pPos);
 
 

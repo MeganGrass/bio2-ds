@@ -10,6 +10,7 @@
 #include "DOOR.H"
 
 
+/* Stage 3 BS stream sizes: 14 rows of 16 words, one row per BS load group. Unused slots hold 0x0008. */
 /* DS 0x8011a054 (Bs_size3) */
 USHORT Bs_size3[14][16] = {
 	{ 0x7868, 0xa8f0, 0x866c, 0x609c, 0x6354, 0x64e8, 0x4e68, 0x6394,
@@ -42,6 +43,7 @@ USHORT Bs_size3[14][16] = {
 	  0x0008, 0x0008, 0x0008, 0x0008, 0x0008, 0x0008, 0x0008, 0x0008 }
 };
 
+/* Checksum bytes for the BS loads in Bs_size3 (same 14 x 16 layout). Unused slots are zero. */
 /* DS 0x8011a214 (Bs_check_sum3) */
 UCHAR Bs_check_sum3[14][16] = {
 	{ 0xf7, 0xc6, 0x48, 0x32, 0xef, 0x3a, 0x86, 0x28,
@@ -74,8 +76,9 @@ UCHAR Bs_check_sum3[14][16] = {
 	  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
 };
 
+/* Stage 3 XA sector table: one {channel, start offset, length} entry per XA segment. */
 /* DS 0x8011a2f4 (Xa_sector03) */
-USHORT Xa_sector03[70][3] = {
+USHORT Xa_sector03[72][3] = {
 	{ 0x0006, 0x0038, 0x0035 },
 	{ 0x0004, 0x008c, 0x001c },
 	{ 0x000f, 0x0000, 0x0012 },
@@ -145,9 +148,12 @@ USHORT Xa_sector03[70][3] = {
 	{ 0x000c, 0x009f, 0x000a },
 	{ 0x000e, 0x0058, 0x0015 },
 	{ 0x0004, 0x004f, 0x003d },
-	{ 0x000d, 0x001e, 0x001e }
+	{ 0x000d, 0x001e, 0x001e },
+	{ 0x0006, 0x0000, 0x0038 },
+	{ 0x000D, 0x00A3, 0x0006 }
 };
 
+/* Stage 3 setup: points the BS size, checksum and XA tables at this stage's data, then ends the task. */
 /* DS 0x8011a004 (Stage3) */
 VOID Stage3(VOID)
 {

@@ -1,58 +1,62 @@
 	org	0x80010000
 	regs	pc=__SN_ENTRY_POINT
+; Linked with PSYLINK 2.52, the PSY-Q 4.0 linker (the Makefile puts PSY-Q_4_0\PSYQ first on PATH).
+; PSYLINK gives every symbol its group's object address (obj), and 2.52 gives a group without obj() the
+; object address 0. So the text group names obj(0x80010000), the address the org above already gives;
+; .sbss and .bss sit in the text group, so their object addresses follow .data with no address written
+; here; and every org() group repeats its address in obj(). Each overlay group names its own obj().
 
-text	group
-bss	group	bss
+text	group	obj(0x80010000)
 	section .rdata,text
 	section .text,text
 	section .ctors,text
 	section .dtors,text
 	section .data,text
 	section .sdata,text
-	section .sbss,bss
-	section .bss,bss
+	section .sbss,text
+	section .bss,text
 
 	include	"OBJ\PSX\BUILD\SLD.OBJ"
-	include	"OBJ\PSX\BUILD\MONITOR.OBJ"
 	include	"OBJ\PSX\BUILD\CD.OBJ"
 	include	"OBJ\PSX\BUILD\DOOR.OBJ"
-	include	"OBJ\PSX\BUILD\EM_SUB2.OBJ"
-	include	"OBJ\PSX\BUILD\ESP_R.OBJ"
-	include	"OBJ\PSX\BUILD\MAIN.OBJ"
-	include	"OBJ\PSX\BUILD\MOJIDISP.OBJ"
-	include	"OBJ\PSX\BUILD\MOVIE.OBJ"
-	include	"OBJ\PSX\BUILD\PC_SYS.OBJ"
-	include	"OBJ\PSX\BUILD\PC_EVENT.OBJ"
-	include	"OBJ\PSX\BUILD\PLAYER.OBJ"
-	include	"OBJ\PSX\BUILD\PL_WEP.OBJ"
-	include	"OBJ\PSX\BUILD\PL_WEP2.OBJ"
-	include	"OBJ\PSX\BUILD\SCA.OBJ"
-	include	"OBJ\PSX\BUILD\SCE2.OBJ"
-	include	"OBJ\PSX\BUILD\SPL.OBJ"
-	include	"OBJ\PSX\BUILD\SPL_AUTO.OBJ"
-	include	"OBJ\PSX\BUILD\SPL_SCE.OBJ"
-	include	"OBJ\PSX\BUILD\SPL_SP.OBJ"
 	include	"OBJ\PSX\BUILD\EM_SUB.OBJ"
+	include	"OBJ\PSX\BUILD\EM_SUB2.OBJ"
 	include	"OBJ\PSX\BUILD\EM_SET.OBJ"
 	include	"OBJ\PSX\BUILD\ESP.OBJ"
+	include	"OBJ\PSX\BUILD\ESP_R.OBJ"
 	include	"OBJ\PSX\BUILD\GAME.OBJ"
 	include	"OBJ\PSX\BUILD\JOINT.OBJ"
 	include	"OBJ\PSX\BUILD\LINE_SCR.OBJ"
+	include	"OBJ\PSX\BUILD\MAIN.OBJ"
 	include	"OBJ\PSX\BUILD\MD_SUB.OBJ"
 	include	"OBJ\PSX\BUILD\MIZU_SYS.OBJ"
+	include	"OBJ\PSX\BUILD\MOJIDISP.OBJ"
+	include	"OBJ\PSX\BUILD\MONITOR.OBJ"
+	include	"OBJ\PSX\BUILD\MOVIE.OBJ"
+	include	"OBJ\PSX\BUILD\DOOR_EX.OBJ"
 	include	"OBJ\PSX\BUILD\OBA.OBJ"
 	include	"OBJ\PSX\BUILD\OM.OBJ"
 	include	"OBJ\PSX\BUILD\OMA.OBJ"
 	include	"OBJ\PSX\BUILD\PAD.OBJ"
+	include	"OBJ\PSX\BUILD\PC_SYS.OBJ"
+	include	"OBJ\PSX\BUILD\PC_EVENT.OBJ"
+	include	"OBJ\PSX\BUILD\PLAYER.OBJ"
+	include	"OBJ\PSX\BUILD\PL_WEP.OBJ"
 	include	"OBJ\PSX\BUILD\POLY_SUB.OBJ"
 	include	"OBJ\PSX\BUILD\PSP.OBJ"
 	include	"OBJ\PSX\BUILD\ROOM.OBJ"
 	include	"OBJ\PSX\BUILD\ROOT_CK.OBJ"
 	include	"OBJ\PSX\BUILD\SABUN.OBJ"
+	include	"OBJ\PSX\BUILD\SCA.OBJ"
 	include	"OBJ\PSX\BUILD\SCE_AT.OBJ"
 	include	"OBJ\PSX\BUILD\SCE0.OBJ"
 	include	"OBJ\PSX\BUILD\SCE1.OBJ"
+	include	"OBJ\PSX\BUILD\SCE2.OBJ"
 	include	"OBJ\PSX\BUILD\SND.OBJ"
+	include	"OBJ\PSX\BUILD\SPL.OBJ"
+	include	"OBJ\PSX\BUILD\SPL_AUTO.OBJ"
+	include	"OBJ\PSX\BUILD\SPL_SCE.OBJ"
+	include	"OBJ\PSX\BUILD\SPL_SP.OBJ"
 	include	"OBJ\PSX\BUILD\STATUS.OBJ"
 	include	"OBJ\PSX\BUILD\ST_SUB00.OBJ"
 	include	"OBJ\PSX\BUILD\ST_SUB01.OBJ"
@@ -61,83 +65,37 @@ bss	group	bss
 	include	"OBJ\PSX\BUILD\SUB.OBJ"
 	include	"OBJ\PSX\BUILD\TRANS.OBJ"
 
-	include	"C:/Framework/sdk/psx/LIB/2MBYTE.OBJ"
-	inclib	"LIBC.LIB"
-	inclib	"LIBC2.LIB"
-	inclib	"LIBCD.LIB"
-	inclib	"LIBCOMB.LIB"
-	inclib	"LIBDS.LIB"
-	inclib	"LIBSND.LIB"
-	inclib	"LIBSPU.LIB"
-	inclib	"LIBPAD.LIB"
-	inclib	"LIBHMD.LIB"
-	inclib	"LIBMATH.LIB"
-	inclib	"LIBCARD.LIB"
-	inclib	"LIBMCRD.LIB"
-	inclib	"LIBMCX.LIB"
-	inclib	"LIBSIO.LIB"
-	inclib	"LIBTAP.LIB"
-	inclib	"LIBGUN.LIB"
-	inclib	"LIBPRESS.LIB"
-	inclib	"LIBGS.LIB"
-	inclib	"LIBGTE.LIB"
-	inclib	"LIBGPU.LIB"
-	inclib	"LIBETC.LIB"
-	inclib	"LIBAPI.LIB"
-	inclib	"Libsn.lib"
+	include	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/2MBYTE.OBJ"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBC.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBC2.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBCD.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBCOMB.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBDS.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBSND.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBSPU.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_2/LIB/LIBPAD.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBMATH.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBCARD.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBMCRD.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBSIO.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBTAP.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBGUN.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBPRESS.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBGS.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBGTE.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBGPU.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBETC.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/LIBAPI.LIB"
+	inclib	"C:/Framework/sdk/psx/PSY-Q_4_0/PSX/LIB/Libsn.lib"
 
-fixbuf_em_ov_bank	group	bss,org(0x80100000)
-	section .buf_em_ov_bank,fixbuf_em_ov_bank
-fixbuf_tex_tim_buf	group	bss,org(0x8011A000)
-	section .buf_tex_tim_buf,fixbuf_tex_tim_buf
-fixbuf_title_bg_work_buf	group	bss,org(0x80132420)
-	section .buf_title_bg_work_buf,fixbuf_title_bg_work_buf
-fixbuf_opening_scene_tim_buf	group	bss,org(0x8013F814)
-	section .buf_opening_scene_tim_buf,fixbuf_opening_scene_tim_buf
-fixbuf_result_prim	group	bss,org(0x80159A48)
-	section .buf_result_prim,fixbuf_result_prim
-fixbuf_opening_tim_load_buf	group	bss,org(0x80165028)
-	section .buf_opening_tim_load_buf,fixbuf_opening_tim_load_buf
-fixbuf_ex_room_snd_buf	group	bss,org(0x80168000)
-	section .buf_ex_room_snd_buf,fixbuf_ex_room_snd_buf
-fixbuf_init_tbl_buf	group	bss,org(0x8018D270)
-	section .buf_init_tbl_buf,fixbuf_init_tbl_buf
-fixbuf_prim_work_buf	group	bss,org(0x8018F040)
-	section .buf_prim_work_buf,fixbuf_prim_work_buf
-fixbuf_bs_buf	group	bss,org(0x80190000)
-	section .buf_bs_buf,fixbuf_bs_buf
-fixbuf_door_ex_data	group	bss,org(0x80190000)
-	section .buf_door_ex_data,fixbuf_door_ex_data
-fixbuf_bg_img_buf	group	bss,org(0x80198000)
-	section .buf_bg_img_buf,fixbuf_bg_img_buf
-fixbuf_die_vh_src	group	bss,org(0x801A4220)
-	section .buf_die_vh_src,fixbuf_die_vh_src
-fixbuf_die_vb_buf	group	bss,org(0x801A4E88)
-	section .buf_die_vb_buf,fixbuf_die_vb_buf
-fixbuf_bg_tim_buf	group	bss,org(0x801A5800)
-	section .buf_bg_tim_buf,fixbuf_bg_tim_buf
-fixbuf_die_spr_work	group	bss,org(0x801AD000)
-	section .buf_die_spr_work,fixbuf_die_spr_work
-fixbuf_font_tim_buf	group	bss,org(0x801BFA14)
-	section .buf_font_tim_buf,fixbuf_font_tim_buf
-fixbuf_opening_prim	group	bss,org(0x801C24D8)
-	section .buf_opening_prim,fixbuf_opening_prim
-fixbuf_cnf_eclt	group	bss,org(0x801C3CE8)
-	section .buf_cnf_eclt,fixbuf_cnf_eclt
-fixbuf_cnf_oprim	group	bss,org(0x801C40F8)
-	section .buf_cnf_oprim,fixbuf_cnf_oprim
-fixbuf_bgm_sub_vh_buf	group	bss,org(0x801ECE00)
-	section .buf_bgm_sub_vh_buf,fixbuf_bgm_sub_vh_buf
-fixbuf_bgm_main_vh_buf	group	bss,org(0x801F2E00)
-	section .buf_bgm_main_vh_buf,fixbuf_bgm_main_vh_buf
-fixbuf_core_edt_buf	group	bss,org(0x801F9D10)
-	section .buf_core_edt_buf,fixbuf_core_edt_buf
-fixbuf_arms_edt_buf	group	bss,org(0x801FAA00)
-	section .buf_arms_edt_buf,fixbuf_arms_edt_buf
-fixbuf_esp_core_buf	group	bss,org(0x801FC400)
-	section .buf_esp_core_buf,fixbuf_esp_core_buf
+
+em_bin_0	group	org(0x80100000),obj(0x80100000)
+	section .id_EM_BIN_0,em_bin_0
+	include	"OBJ\PSX\BUILD\EM_BIN_0_id.OBJ"
 
 ENDING	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\ENDING.BIN")
+	section .id_ENDING,ENDING
+	include	"OBJ\PSX\BUILD\ENDING_id.OBJ"
 	section ENDING.rdata,ENDING
 	section ENDING.text,ENDING
 	section ENDING.ctors,ENDING
@@ -149,6 +107,8 @@ ENDING	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\ENDING.BIN")
 	include	"OBJ\\PSX\\BUILD\\ENDING.OBJ"
 
 STAGE1	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE1.BIN")
+	section .id_STAGE1,STAGE1
+	include	"OBJ\PSX\BUILD\STAGE1_id.OBJ"
 	section STAGE1.rdata,STAGE1
 	section STAGE1.text,STAGE1
 	section STAGE1.ctors,STAGE1
@@ -160,6 +120,8 @@ STAGE1	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE1.BIN")
 	include	"OBJ\\PSX\\BUILD\\STAGE1.OBJ"
 
 STAGE2	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE2.BIN")
+	section .id_STAGE2,STAGE2
+	include	"OBJ\PSX\BUILD\STAGE2_id.OBJ"
 	section STAGE2.rdata,STAGE2
 	section STAGE2.text,STAGE2
 	section STAGE2.ctors,STAGE2
@@ -171,6 +133,8 @@ STAGE2	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE2.BIN")
 	include	"OBJ\\PSX\\BUILD\\STAGE2.OBJ"
 
 STAGE3	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE3.BIN")
+	section .id_STAGE3,STAGE3
+	include	"OBJ\PSX\BUILD\STAGE3_id.OBJ"
 	section STAGE3.rdata,STAGE3
 	section STAGE3.text,STAGE3
 	section STAGE3.ctors,STAGE3
@@ -182,6 +146,8 @@ STAGE3	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE3.BIN")
 	include	"OBJ\\PSX\\BUILD\\STAGE3.OBJ"
 
 STAGE4	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE4.BIN")
+	section .id_STAGE4,STAGE4
+	include	"OBJ\PSX\BUILD\STAGE4_id.OBJ"
 	section STAGE4.rdata,STAGE4
 	section STAGE4.text,STAGE4
 	section STAGE4.ctors,STAGE4
@@ -193,6 +159,8 @@ STAGE4	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE4.BIN")
 	include	"OBJ\\PSX\\BUILD\\STAGE4.OBJ"
 
 STAGE5	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE5.BIN")
+	section .id_STAGE5,STAGE5
+	include	"OBJ\PSX\BUILD\STAGE5_id.OBJ"
 	section STAGE5.rdata,STAGE5
 	section STAGE5.text,STAGE5
 	section STAGE5.ctors,STAGE5
@@ -204,6 +172,8 @@ STAGE5	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE5.BIN")
 	include	"OBJ\\PSX\\BUILD\\STAGE5.OBJ"
 
 STAGE6	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE6.BIN")
+	section .id_STAGE6,STAGE6
+	include	"OBJ\PSX\BUILD\STAGE6_id.OBJ"
 	section STAGE6.rdata,STAGE6
 	section STAGE6.text,STAGE6
 	section STAGE6.ctors,STAGE6
@@ -215,6 +185,8 @@ STAGE6	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE6.BIN")
 	include	"OBJ\\PSX\\BUILD\\STAGE6.OBJ"
 
 STAGE7	group	obj(0x8011A000),file("OBJ\\PSX\\BUILD\\STAGE7.BIN")
+	section .id_STAGE7,STAGE7
+	include	"OBJ\PSX\BUILD\STAGE7_id.OBJ"
 	section STAGE7.rdata,STAGE7
 	section STAGE7.text,STAGE7
 	section STAGE7.ctors,STAGE7
@@ -237,6 +209,8 @@ RESULT	group	obj(0x80158000),file("OBJ\\PSX\\BUILD\\RESULT.BIN")
 	include	"OBJ\\PSX\\BUILD\\RESULT.OBJ"
 
 TITLE	group	obj(0x80190000),file("OBJ\\PSX\\BUILD\\TITLE.BIN")
+	section .id_TITLE,TITLE
+	include	"OBJ\PSX\BUILD\TITLE_id.OBJ"
 	section TITLE.rdata,TITLE
 	section TITLE.text,TITLE
 	section TITLE.ctors,TITLE
@@ -248,6 +222,8 @@ TITLE	group	obj(0x80190000),file("OBJ\\PSX\\BUILD\\TITLE.BIN")
 	include	"OBJ\\PSX\\BUILD\\TITLE.OBJ"
 
 DIEDEMO	group	obj(0x80190000),file("OBJ\\PSX\\BUILD\\DIEDEMO.BIN")
+	section .id_DIEDEMO,DIEDEMO
+	include	"OBJ\PSX\BUILD\DIEDEMO_id.OBJ"
 	section DIEDEMO.rdata,DIEDEMO
 	section DIEDEMO.text,DIEDEMO
 	section DIEDEMO.ctors,DIEDEMO
@@ -257,9 +233,10 @@ DIEDEMO	group	obj(0x80190000),file("OBJ\\PSX\\BUILD\\DIEDEMO.BIN")
 	section DIEDEMO.sbss,DIEDEMO
 	section DIEDEMO.bss,DIEDEMO
 	include	"OBJ\\PSX\\BUILD\\DIEDEMO.OBJ"
-	include	"OBJ\\PSX\\BUILD\\DIESPR.OBJ"
 
 OPENING	group	obj(0x801BFA18),file("OBJ\\PSX\\BUILD\\OPENING.BIN")
+	section .id_OPENING,OPENING
+	include	"OBJ\PSX\BUILD\OPENING_id.OBJ"
 	section OPENING.rdata,OPENING
 	section OPENING.text,OPENING
 	section OPENING.ctors,OPENING
@@ -271,6 +248,8 @@ OPENING	group	obj(0x801BFA18),file("OBJ\\PSX\\BUILD\\OPENING.BIN")
 	include	"OBJ\\PSX\\BUILD\\OPENING.OBJ"
 
 SELECT	group	obj(0x801BFA18),file("OBJ\\PSX\\BUILD\\SELECT.BIN")
+	section .id_SELECT,SELECT
+	include	"OBJ\PSX\BUILD\SELECT_id.OBJ"
 	section SELECT.rdata,SELECT
 	section SELECT.text,SELECT
 	section SELECT.ctors,SELECT
@@ -282,6 +261,8 @@ SELECT	group	obj(0x801BFA18),file("OBJ\\PSX\\BUILD\\SELECT.BIN")
 	include	"OBJ\\PSX\\BUILD\\SELECT.OBJ"
 
 CONFIG	group	obj(0x801BFA18),file("OBJ\\PSX\\BUILD\\CONFIG.BIN")
+	section .id_CONFIG,CONFIG
+	include	"OBJ\PSX\BUILD\CONFIG_id.OBJ"
 	section CONFIG.rdata,CONFIG
 	section CONFIG.text,CONFIG
 	section CONFIG.ctors,CONFIG
@@ -293,6 +274,8 @@ CONFIG	group	obj(0x801BFA18),file("OBJ\\PSX\\BUILD\\CONFIG.BIN")
 	include	"OBJ\\PSX\\BUILD\\CONFIG.OBJ"
 
 MEM_CARD	group	obj(0x801BFA18),file("OBJ\\PSX\\BUILD\\MEM_CARD.BIN")
+	section .id_MEM_CARD,MEM_CARD
+	include	"OBJ\PSX\BUILD\MEM_CARD_id.OBJ"
 	section MEM_CARD.rdata,MEM_CARD
 	section MEM_CARD.text,MEM_CARD
 	section MEM_CARD.ctors,MEM_CARD
@@ -302,3 +285,705 @@ MEM_CARD	group	obj(0x801BFA18),file("OBJ\\PSX\\BUILD\\MEM_CARD.BIN")
 	section MEM_CARD.sbss,MEM_CARD
 	section MEM_CARD.bss,MEM_CARD
 	include	"OBJ\\PSX\\BUILD\\MEM_CARD.OBJ"
+
+EM1001	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM1001.BIN")
+	section .id_EM1001,EM1001
+	include	"OBJ\PSX\BUILD\EM1001_id.OBJ"
+	section EM1001.rdata,EM1001
+	section EM1001.text,EM1001
+	section EM1001.ctors,EM1001
+	section EM1001.dtors,EM1001
+	section EM1001.data,EM1001
+	section EM1001.sdata,EM1001
+	section EM1001.sbss,EM1001
+	section EM1001.bss,EM1001
+	include	"OBJ\\PSX\\BUILD\\EM1001.OBJ"
+
+EM1000	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM1000.BIN")
+	section .id_EM1000,EM1000
+	include	"OBJ\PSX\BUILD\EM1000_id.OBJ"
+	section EM1000.rdata,EM1000
+	section EM1000.text,EM1000
+	section EM1000.ctors,EM1000
+	section EM1000.dtors,EM1000
+	section EM1000.data,EM1000
+	section EM1000.sdata,EM1000
+	section EM1000.sbss,EM1000
+	section EM1000.bss,EM1000
+	include	"OBJ\\PSX\\BUILD\\EM1000.OBJ"
+
+EM2001	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2001.BIN")
+	section .id_EM2001,EM2001
+	include	"OBJ\PSX\BUILD\EM2001_id.OBJ"
+	section EM2001.rdata,EM2001
+	section EM2001.text,EM2001
+	section EM2001.ctors,EM2001
+	section EM2001.dtors,EM2001
+	section EM2001.data,EM2001
+	section EM2001.sdata,EM2001
+	section EM2001.sbss,EM2001
+	section EM2001.bss,EM2001
+	include	"OBJ\\PSX\\BUILD\\EM2001.OBJ"
+
+EM2000	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2000.BIN")
+	section .id_EM2000,EM2000
+	include	"OBJ\PSX\BUILD\EM2000_id.OBJ"
+	section EM2000.rdata,EM2000
+	section EM2000.text,EM2000
+	section EM2000.ctors,EM2000
+	section EM2000.dtors,EM2000
+	section EM2000.data,EM2000
+	section EM2000.sdata,EM2000
+	section EM2000.sbss,EM2000
+	section EM2000.bss,EM2000
+	include	"OBJ\\PSX\\BUILD\\EM2000.OBJ"
+
+EM2101	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2101.BIN")
+	section .id_EM2101,EM2101
+	include	"OBJ\PSX\BUILD\EM2101_id.OBJ"
+	section EM2101.rdata,EM2101
+	section EM2101.text,EM2101
+	section EM2101.ctors,EM2101
+	section EM2101.dtors,EM2101
+	section EM2101.data,EM2101
+	section EM2101.sdata,EM2101
+	section EM2101.sbss,EM2101
+	section EM2101.bss,EM2101
+	include	"OBJ\\PSX\\BUILD\\EM2101.OBJ"
+
+EM2100	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2100.BIN")
+	section .id_EM2100,EM2100
+	include	"OBJ\PSX\BUILD\EM2100_id.OBJ"
+	section EM2100.rdata,EM2100
+	section EM2100.text,EM2100
+	section EM2100.ctors,EM2100
+	section EM2100.dtors,EM2100
+	section EM2100.data,EM2100
+	section EM2100.sdata,EM2100
+	section EM2100.sbss,EM2100
+	section EM2100.bss,EM2100
+	include	"OBJ\\PSX\\BUILD\\EM2100.OBJ"
+
+EM2201	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2201.BIN")
+	section .id_EM2201,EM2201
+	include	"OBJ\PSX\BUILD\EM2201_id.OBJ"
+	section EM2201.rdata,EM2201
+	section EM2201.text,EM2201
+	section EM2201.ctors,EM2201
+	section EM2201.dtors,EM2201
+	section EM2201.data,EM2201
+	section EM2201.sdata,EM2201
+	section EM2201.sbss,EM2201
+	section EM2201.bss,EM2201
+	include	"OBJ\\PSX\\BUILD\\EM2201.OBJ"
+
+EM2200	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2200.BIN")
+	section .id_EM2200,EM2200
+	include	"OBJ\PSX\BUILD\EM2200_id.OBJ"
+	section EM2200.rdata,EM2200
+	section EM2200.text,EM2200
+	section EM2200.ctors,EM2200
+	section EM2200.dtors,EM2200
+	section EM2200.data,EM2200
+	section EM2200.sdata,EM2200
+	section EM2200.sbss,EM2200
+	section EM2200.bss,EM2200
+	include	"OBJ\\PSX\\BUILD\\EM2200.OBJ"
+
+EM2301	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2301.BIN")
+	section .id_EM2301,EM2301
+	include	"OBJ\PSX\BUILD\EM2301_id.OBJ"
+	section EM2301.rdata,EM2301
+	section EM2301.text,EM2301
+	section EM2301.ctors,EM2301
+	section EM2301.dtors,EM2301
+	section EM2301.data,EM2301
+	section EM2301.sdata,EM2301
+	section EM2301.sbss,EM2301
+	section EM2301.bss,EM2301
+	include	"OBJ\\PSX\\BUILD\\EM2301.OBJ"
+
+EM2300	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2300.BIN")
+	section .id_EM2300,EM2300
+	include	"OBJ\PSX\BUILD\EM2300_id.OBJ"
+	section EM2300.rdata,EM2300
+	section EM2300.text,EM2300
+	section EM2300.ctors,EM2300
+	section EM2300.dtors,EM2300
+	section EM2300.data,EM2300
+	section EM2300.sdata,EM2300
+	section EM2300.sbss,EM2300
+	section EM2300.bss,EM2300
+	include	"OBJ\\PSX\\BUILD\\EM2300.OBJ"
+
+EM2401	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2401.BIN")
+	section .id_EM2401,EM2401
+	include	"OBJ\PSX\BUILD\EM2401_id.OBJ"
+	section EM2401.rdata,EM2401
+	section EM2401.text,EM2401
+	section EM2401.ctors,EM2401
+	section EM2401.dtors,EM2401
+	section EM2401.data,EM2401
+	section EM2401.sdata,EM2401
+	section EM2401.sbss,EM2401
+	section EM2401.bss,EM2401
+	include	"OBJ\\PSX\\BUILD\\EM2401.OBJ"
+
+EM2400	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2400.BIN")
+	section .id_EM2400,EM2400
+	include	"OBJ\PSX\BUILD\EM2400_id.OBJ"
+	section EM2400.rdata,EM2400
+	section EM2400.text,EM2400
+	section EM2400.ctors,EM2400
+	section EM2400.dtors,EM2400
+	section EM2400.data,EM2400
+	section EM2400.sdata,EM2400
+	section EM2400.sbss,EM2400
+	section EM2400.bss,EM2400
+	include	"OBJ\\PSX\\BUILD\\EM2400.OBJ"
+
+EM2501	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2501.BIN")
+	section .id_EM2501,EM2501
+	include	"OBJ\PSX\BUILD\EM2501_id.OBJ"
+	section EM2501.rdata,EM2501
+	section EM2501.text,EM2501
+	section EM2501.ctors,EM2501
+	section EM2501.dtors,EM2501
+	section EM2501.data,EM2501
+	section EM2501.sdata,EM2501
+	section EM2501.sbss,EM2501
+	section EM2501.bss,EM2501
+	include	"OBJ\\PSX\\BUILD\\EM2501.OBJ"
+
+EM2500	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2500.BIN")
+	section .id_EM2500,EM2500
+	include	"OBJ\PSX\BUILD\EM2500_id.OBJ"
+	section EM2500.rdata,EM2500
+	section EM2500.text,EM2500
+	section EM2500.ctors,EM2500
+	section EM2500.dtors,EM2500
+	section EM2500.data,EM2500
+	section EM2500.sdata,EM2500
+	section EM2500.sbss,EM2500
+	section EM2500.bss,EM2500
+	include	"OBJ\\PSX\\BUILD\\EM2500.OBJ"
+
+EM2601	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2601.BIN")
+	section .id_EM2601,EM2601
+	include	"OBJ\PSX\BUILD\EM2601_id.OBJ"
+	section EM2601.rdata,EM2601
+	section EM2601.text,EM2601
+	section EM2601.ctors,EM2601
+	section EM2601.dtors,EM2601
+	section EM2601.data,EM2601
+	section EM2601.sdata,EM2601
+	section EM2601.sbss,EM2601
+	section EM2601.bss,EM2601
+	include	"OBJ\\PSX\\BUILD\\EM2601.OBJ"
+
+EM2600	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2600.BIN")
+	section .id_EM2600,EM2600
+	include	"OBJ\PSX\BUILD\EM2600_id.OBJ"
+	section EM2600.rdata,EM2600
+	section EM2600.text,EM2600
+	section EM2600.ctors,EM2600
+	section EM2600.dtors,EM2600
+	section EM2600.data,EM2600
+	section EM2600.sdata,EM2600
+	section EM2600.sbss,EM2600
+	section EM2600.bss,EM2600
+	include	"OBJ\\PSX\\BUILD\\EM2600.OBJ"
+
+EM2701	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2701.BIN")
+	section .id_EM2701,EM2701
+	include	"OBJ\PSX\BUILD\EM2701_id.OBJ"
+	section EM2701.rdata,EM2701
+	section EM2701.text,EM2701
+	section EM2701.ctors,EM2701
+	section EM2701.dtors,EM2701
+	section EM2701.data,EM2701
+	section EM2701.sdata,EM2701
+	section EM2701.sbss,EM2701
+	section EM2701.bss,EM2701
+	include	"OBJ\\PSX\\BUILD\\EM2701.OBJ"
+
+EM2700	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2700.BIN")
+	section .id_EM2700,EM2700
+	include	"OBJ\PSX\BUILD\EM2700_id.OBJ"
+	section EM2700.rdata,EM2700
+	section EM2700.text,EM2700
+	section EM2700.ctors,EM2700
+	section EM2700.dtors,EM2700
+	section EM2700.data,EM2700
+	section EM2700.sdata,EM2700
+	section EM2700.sbss,EM2700
+	section EM2700.bss,EM2700
+	include	"OBJ\\PSX\\BUILD\\EM2700.OBJ"
+
+EM2801	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2801.BIN")
+	section .id_EM2801,EM2801
+	include	"OBJ\PSX\BUILD\EM2801_id.OBJ"
+	section EM2801.rdata,EM2801
+	section EM2801.text,EM2801
+	section EM2801.ctors,EM2801
+	section EM2801.dtors,EM2801
+	section EM2801.data,EM2801
+	section EM2801.sdata,EM2801
+	section EM2801.sbss,EM2801
+	section EM2801.bss,EM2801
+	include	"OBJ\\PSX\\BUILD\\EM2801.OBJ"
+
+EM2800	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2800.BIN")
+	section .id_EM2800,EM2800
+	include	"OBJ\PSX\BUILD\EM2800_id.OBJ"
+	section EM2800.rdata,EM2800
+	section EM2800.text,EM2800
+	section EM2800.ctors,EM2800
+	section EM2800.dtors,EM2800
+	section EM2800.data,EM2800
+	section EM2800.sdata,EM2800
+	section EM2800.sbss,EM2800
+	section EM2800.bss,EM2800
+	include	"OBJ\\PSX\\BUILD\\EM2800.OBJ"
+
+EM2901	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2901.BIN")
+	section .id_EM2901,EM2901
+	include	"OBJ\PSX\BUILD\EM2901_id.OBJ"
+	section EM2901.rdata,EM2901
+	section EM2901.text,EM2901
+	section EM2901.ctors,EM2901
+	section EM2901.dtors,EM2901
+	section EM2901.data,EM2901
+	section EM2901.sdata,EM2901
+	section EM2901.sbss,EM2901
+	section EM2901.bss,EM2901
+	include	"OBJ\\PSX\\BUILD\\EM2901.OBJ"
+
+EM2900	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2900.BIN")
+	section .id_EM2900,EM2900
+	include	"OBJ\PSX\BUILD\EM2900_id.OBJ"
+	section EM2900.rdata,EM2900
+	section EM2900.text,EM2900
+	section EM2900.ctors,EM2900
+	section EM2900.dtors,EM2900
+	section EM2900.data,EM2900
+	section EM2900.sdata,EM2900
+	section EM2900.sbss,EM2900
+	section EM2900.bss,EM2900
+	include	"OBJ\\PSX\\BUILD\\EM2900.OBJ"
+
+EM2A01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2A01.BIN")
+	section .id_EM2A01,EM2A01
+	include	"OBJ\PSX\BUILD\EM2A01_id.OBJ"
+	section EM2A01.rdata,EM2A01
+	section EM2A01.text,EM2A01
+	section EM2A01.ctors,EM2A01
+	section EM2A01.dtors,EM2A01
+	section EM2A01.data,EM2A01
+	section EM2A01.sdata,EM2A01
+	section EM2A01.sbss,EM2A01
+	section EM2A01.bss,EM2A01
+	include	"OBJ\\PSX\\BUILD\\EM2A01.OBJ"
+
+EM2A00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2A00.BIN")
+	section .id_EM2A00,EM2A00
+	include	"OBJ\PSX\BUILD\EM2A00_id.OBJ"
+	section EM2A00.rdata,EM2A00
+	section EM2A00.text,EM2A00
+	section EM2A00.ctors,EM2A00
+	section EM2A00.dtors,EM2A00
+	section EM2A00.data,EM2A00
+	section EM2A00.sdata,EM2A00
+	section EM2A00.sbss,EM2A00
+	section EM2A00.bss,EM2A00
+	include	"OBJ\\PSX\\BUILD\\EM2A00.OBJ"
+
+EM2B01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2B01.BIN")
+	section .id_EM2B01,EM2B01
+	include	"OBJ\PSX\BUILD\EM2B01_id.OBJ"
+	section EM2B01.rdata,EM2B01
+	section EM2B01.text,EM2B01
+	section EM2B01.ctors,EM2B01
+	section EM2B01.dtors,EM2B01
+	section EM2B01.data,EM2B01
+	section EM2B01.sdata,EM2B01
+	section EM2B01.sbss,EM2B01
+	section EM2B01.bss,EM2B01
+	include	"OBJ\\PSX\\BUILD\\EM2B01.OBJ"
+
+EM2B00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2B00.BIN")
+	section .id_EM2B00,EM2B00
+	include	"OBJ\PSX\BUILD\EM2B00_id.OBJ"
+	section EM2B00.rdata,EM2B00
+	section EM2B00.text,EM2B00
+	section EM2B00.ctors,EM2B00
+	section EM2B00.dtors,EM2B00
+	section EM2B00.data,EM2B00
+	section EM2B00.sdata,EM2B00
+	section EM2B00.sbss,EM2B00
+	section EM2B00.bss,EM2B00
+	include	"OBJ\\PSX\\BUILD\\EM2B00.OBJ"
+
+EM2C01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2C01.BIN")
+	section .id_EM2C01,EM2C01
+	include	"OBJ\PSX\BUILD\EM2C01_id.OBJ"
+	section EM2C01.rdata,EM2C01
+	section EM2C01.text,EM2C01
+	section EM2C01.ctors,EM2C01
+	section EM2C01.dtors,EM2C01
+	section EM2C01.data,EM2C01
+	section EM2C01.sdata,EM2C01
+	section EM2C01.sbss,EM2C01
+	section EM2C01.bss,EM2C01
+	include	"OBJ\\PSX\\BUILD\\EM2C01.OBJ"
+
+EM2C00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2C00.BIN")
+	section .id_EM2C00,EM2C00
+	include	"OBJ\PSX\BUILD\EM2C00_id.OBJ"
+	section EM2C00.rdata,EM2C00
+	section EM2C00.text,EM2C00
+	section EM2C00.ctors,EM2C00
+	section EM2C00.dtors,EM2C00
+	section EM2C00.data,EM2C00
+	section EM2C00.sdata,EM2C00
+	section EM2C00.sbss,EM2C00
+	section EM2C00.bss,EM2C00
+	include	"OBJ\\PSX\\BUILD\\EM2C00.OBJ"
+
+EM2D01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2D01.BIN")
+	section .id_EM2D01,EM2D01
+	include	"OBJ\PSX\BUILD\EM2D01_id.OBJ"
+	section EM2D01.rdata,EM2D01
+	section EM2D01.text,EM2D01
+	section EM2D01.ctors,EM2D01
+	section EM2D01.dtors,EM2D01
+	section EM2D01.data,EM2D01
+	section EM2D01.sdata,EM2D01
+	section EM2D01.sbss,EM2D01
+	section EM2D01.bss,EM2D01
+	include	"OBJ\\PSX\\BUILD\\EM2D01.OBJ"
+
+EM2D00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2D00.BIN")
+	section .id_EM2D00,EM2D00
+	include	"OBJ\PSX\BUILD\EM2D00_id.OBJ"
+	section EM2D00.rdata,EM2D00
+	section EM2D00.text,EM2D00
+	section EM2D00.ctors,EM2D00
+	section EM2D00.dtors,EM2D00
+	section EM2D00.data,EM2D00
+	section EM2D00.sdata,EM2D00
+	section EM2D00.sbss,EM2D00
+	section EM2D00.bss,EM2D00
+	include	"OBJ\\PSX\\BUILD\\EM2D00.OBJ"
+
+EM2E01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2E01.BIN")
+	section .id_EM2E01,EM2E01
+	include	"OBJ\PSX\BUILD\EM2E01_id.OBJ"
+	section EM2E01.rdata,EM2E01
+	section EM2E01.text,EM2E01
+	section EM2E01.ctors,EM2E01
+	section EM2E01.dtors,EM2E01
+	section EM2E01.data,EM2E01
+	section EM2E01.sdata,EM2E01
+	section EM2E01.sbss,EM2E01
+	section EM2E01.bss,EM2E01
+	include	"OBJ\\PSX\\BUILD\\EM2E01.OBJ"
+
+EM2E00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2E00.BIN")
+	section .id_EM2E00,EM2E00
+	include	"OBJ\PSX\BUILD\EM2E00_id.OBJ"
+	section EM2E00.rdata,EM2E00
+	section EM2E00.text,EM2E00
+	section EM2E00.ctors,EM2E00
+	section EM2E00.dtors,EM2E00
+	section EM2E00.data,EM2E00
+	section EM2E00.sdata,EM2E00
+	section EM2E00.sbss,EM2E00
+	section EM2E00.bss,EM2E00
+	include	"OBJ\\PSX\\BUILD\\EM2E00.OBJ"
+
+EM2F01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM2F01.BIN")
+	section .id_EM2F01,EM2F01
+	include	"OBJ\PSX\BUILD\EM2F01_id.OBJ"
+	section EM2F01.rdata,EM2F01
+	section EM2F01.text,EM2F01
+	section EM2F01.ctors,EM2F01
+	section EM2F01.dtors,EM2F01
+	section EM2F01.data,EM2F01
+	section EM2F01.sdata,EM2F01
+	section EM2F01.sbss,EM2F01
+	section EM2F01.bss,EM2F01
+	include	"OBJ\\PSX\\BUILD\\EM2F01.OBJ"
+
+EM2F00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM2F00.BIN")
+	section .id_EM2F00,EM2F00
+	include	"OBJ\PSX\BUILD\EM2F00_id.OBJ"
+	section EM2F00.rdata,EM2F00
+	section EM2F00.text,EM2F00
+	section EM2F00.ctors,EM2F00
+	section EM2F00.dtors,EM2F00
+	section EM2F00.data,EM2F00
+	section EM2F00.sdata,EM2F00
+	section EM2F00.sbss,EM2F00
+	section EM2F00.bss,EM2F00
+	include	"OBJ\\PSX\\BUILD\\EM2F00.OBJ"
+
+EM3001	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3001.BIN")
+	section .id_EM3001,EM3001
+	include	"OBJ\PSX\BUILD\EM3001_id.OBJ"
+	section EM3001.rdata,EM3001
+	section EM3001.text,EM3001
+	section EM3001.ctors,EM3001
+	section EM3001.dtors,EM3001
+	section EM3001.data,EM3001
+	section EM3001.sdata,EM3001
+	section EM3001.sbss,EM3001
+	section EM3001.bss,EM3001
+	include	"OBJ\\PSX\\BUILD\\EM3001.OBJ"
+
+EM3000	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3000.BIN")
+	section .id_EM3000,EM3000
+	include	"OBJ\PSX\BUILD\EM3000_id.OBJ"
+	section EM3000.rdata,EM3000
+	section EM3000.text,EM3000
+	section EM3000.ctors,EM3000
+	section EM3000.dtors,EM3000
+	section EM3000.data,EM3000
+	section EM3000.sdata,EM3000
+	section EM3000.sbss,EM3000
+	section EM3000.bss,EM3000
+	include	"OBJ\\PSX\\BUILD\\EM3000.OBJ"
+
+EM3101	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3101.BIN")
+	section .id_EM3101,EM3101
+	include	"OBJ\PSX\BUILD\EM3101_id.OBJ"
+	section EM3101.rdata,EM3101
+	section EM3101.text,EM3101
+	section EM3101.ctors,EM3101
+	section EM3101.dtors,EM3101
+	section EM3101.data,EM3101
+	section EM3101.sdata,EM3101
+	section EM3101.sbss,EM3101
+	section EM3101.bss,EM3101
+	include	"OBJ\\PSX\\BUILD\\EM3101.OBJ"
+
+EM3100	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3100.BIN")
+	section .id_EM3100,EM3100
+	include	"OBJ\PSX\BUILD\EM3100_id.OBJ"
+	section EM3100.rdata,EM3100
+	section EM3100.text,EM3100
+	section EM3100.ctors,EM3100
+	section EM3100.dtors,EM3100
+	section EM3100.data,EM3100
+	section EM3100.sdata,EM3100
+	section EM3100.sbss,EM3100
+	section EM3100.bss,EM3100
+	include	"OBJ\\PSX\\BUILD\\EM3100.OBJ"
+
+EM3301	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3301.BIN")
+	section .id_EM3301,EM3301
+	include	"OBJ\PSX\BUILD\EM3301_id.OBJ"
+	section EM3301.rdata,EM3301
+	section EM3301.text,EM3301
+	section EM3301.ctors,EM3301
+	section EM3301.dtors,EM3301
+	section EM3301.data,EM3301
+	section EM3301.sdata,EM3301
+	section EM3301.sbss,EM3301
+	section EM3301.bss,EM3301
+	include	"OBJ\\PSX\\BUILD\\EM3301.OBJ"
+
+EM3300	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3300.BIN")
+	section .id_EM3300,EM3300
+	include	"OBJ\PSX\BUILD\EM3300_id.OBJ"
+	section EM3300.rdata,EM3300
+	section EM3300.text,EM3300
+	section EM3300.ctors,EM3300
+	section EM3300.dtors,EM3300
+	section EM3300.data,EM3300
+	section EM3300.sdata,EM3300
+	section EM3300.sbss,EM3300
+	section EM3300.bss,EM3300
+	include	"OBJ\\PSX\\BUILD\\EM3300.OBJ"
+
+EM3401	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3401.BIN")
+	section .id_EM3401,EM3401
+	include	"OBJ\PSX\BUILD\EM3401_id.OBJ"
+	section EM3401.rdata,EM3401
+	section EM3401.text,EM3401
+	section EM3401.ctors,EM3401
+	section EM3401.dtors,EM3401
+	section EM3401.data,EM3401
+	section EM3401.sdata,EM3401
+	section EM3401.sbss,EM3401
+	section EM3401.bss,EM3401
+	include	"OBJ\\PSX\\BUILD\\EM3401.OBJ"
+
+EM3400	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3400.BIN")
+	section .id_EM3400,EM3400
+	include	"OBJ\PSX\BUILD\EM3400_id.OBJ"
+	section EM3400.rdata,EM3400
+	section EM3400.text,EM3400
+	section EM3400.ctors,EM3400
+	section EM3400.dtors,EM3400
+	section EM3400.data,EM3400
+	section EM3400.sdata,EM3400
+	section EM3400.sbss,EM3400
+	section EM3400.bss,EM3400
+	include	"OBJ\\PSX\\BUILD\\EM3400.OBJ"
+
+EM3601	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3601.BIN")
+	section .id_EM3601,EM3601
+	include	"OBJ\PSX\BUILD\EM3601_id.OBJ"
+	section EM3601.rdata,EM3601
+	section EM3601.text,EM3601
+	section EM3601.ctors,EM3601
+	section EM3601.dtors,EM3601
+	section EM3601.data,EM3601
+	section EM3601.sdata,EM3601
+	section EM3601.sbss,EM3601
+	section EM3601.bss,EM3601
+	include	"OBJ\\PSX\\BUILD\\EM3601.OBJ"
+
+EM3600	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3600.BIN")
+	section .id_EM3600,EM3600
+	include	"OBJ\PSX\BUILD\EM3600_id.OBJ"
+	section EM3600.rdata,EM3600
+	section EM3600.text,EM3600
+	section EM3600.ctors,EM3600
+	section EM3600.dtors,EM3600
+	section EM3600.data,EM3600
+	section EM3600.sdata,EM3600
+	section EM3600.sbss,EM3600
+	section EM3600.bss,EM3600
+	include	"OBJ\\PSX\\BUILD\\EM3600.OBJ"
+
+EM3701	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3701.BIN")
+	section .id_EM3701,EM3701
+	include	"OBJ\PSX\BUILD\EM3701_id.OBJ"
+	section EM3701.rdata,EM3701
+	section EM3701.text,EM3701
+	section EM3701.ctors,EM3701
+	section EM3701.dtors,EM3701
+	section EM3701.data,EM3701
+	section EM3701.sdata,EM3701
+	section EM3701.sbss,EM3701
+	section EM3701.bss,EM3701
+	include	"OBJ\\PSX\\BUILD\\EM3701.OBJ"
+
+EM3700	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3700.BIN")
+	section .id_EM3700,EM3700
+	include	"OBJ\PSX\BUILD\EM3700_id.OBJ"
+	section EM3700.rdata,EM3700
+	section EM3700.text,EM3700
+	section EM3700.ctors,EM3700
+	section EM3700.dtors,EM3700
+	section EM3700.data,EM3700
+	section EM3700.sdata,EM3700
+	section EM3700.sbss,EM3700
+	section EM3700.bss,EM3700
+	include	"OBJ\\PSX\\BUILD\\EM3700.OBJ"
+
+EM3A01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3A01.BIN")
+	section .id_EM3A01,EM3A01
+	include	"OBJ\PSX\BUILD\EM3A01_id.OBJ"
+	section EM3A01.rdata,EM3A01
+	section EM3A01.text,EM3A01
+	section EM3A01.ctors,EM3A01
+	section EM3A01.dtors,EM3A01
+	section EM3A01.data,EM3A01
+	section EM3A01.sdata,EM3A01
+	section EM3A01.sbss,EM3A01
+	section EM3A01.bss,EM3A01
+	include	"OBJ\\PSX\\BUILD\\EM3A01.OBJ"
+
+EM3A00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3A00.BIN")
+	section .id_EM3A00,EM3A00
+	include	"OBJ\PSX\BUILD\EM3A00_id.OBJ"
+	section EM3A00.rdata,EM3A00
+	section EM3A00.text,EM3A00
+	section EM3A00.ctors,EM3A00
+	section EM3A00.dtors,EM3A00
+	section EM3A00.data,EM3A00
+	section EM3A00.sdata,EM3A00
+	section EM3A00.sbss,EM3A00
+	section EM3A00.bss,EM3A00
+	include	"OBJ\\PSX\\BUILD\\EM3A00.OBJ"
+
+EM3B01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3B01.BIN")
+	section .id_EM3B01,EM3B01
+	include	"OBJ\PSX\BUILD\EM3B01_id.OBJ"
+	section EM3B01.rdata,EM3B01
+	section EM3B01.text,EM3B01
+	section EM3B01.ctors,EM3B01
+	section EM3B01.dtors,EM3B01
+	section EM3B01.data,EM3B01
+	section EM3B01.sdata,EM3B01
+	section EM3B01.sbss,EM3B01
+	section EM3B01.bss,EM3B01
+	include	"OBJ\\PSX\\BUILD\\EM3B01.OBJ"
+
+EM3B00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3B00.BIN")
+	section .id_EM3B00,EM3B00
+	include	"OBJ\PSX\BUILD\EM3B00_id.OBJ"
+	section EM3B00.rdata,EM3B00
+	section EM3B00.text,EM3B00
+	section EM3B00.ctors,EM3B00
+	section EM3B00.dtors,EM3B00
+	section EM3B00.data,EM3B00
+	section EM3B00.sdata,EM3B00
+	section EM3B00.sbss,EM3B00
+	section EM3B00.bss,EM3B00
+	include	"OBJ\\PSX\\BUILD\\EM3B00.OBJ"
+
+EM3E01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3E01.BIN")
+	section .id_EM3E01,EM3E01
+	include	"OBJ\PSX\BUILD\EM3E01_id.OBJ"
+	section EM3E01.rdata,EM3E01
+	section EM3E01.text,EM3E01
+	section EM3E01.ctors,EM3E01
+	section EM3E01.dtors,EM3E01
+	section EM3E01.data,EM3E01
+	section EM3E01.sdata,EM3E01
+	section EM3E01.sbss,EM3E01
+	section EM3E01.bss,EM3E01
+	include	"OBJ\\PSX\\BUILD\\EM3E01.OBJ"
+
+EM3E00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3E00.BIN")
+	section .id_EM3E00,EM3E00
+	include	"OBJ\PSX\BUILD\EM3E00_id.OBJ"
+	section EM3E00.rdata,EM3E00
+	section EM3E00.text,EM3E00
+	section EM3E00.ctors,EM3E00
+	section EM3E00.dtors,EM3E00
+	section EM3E00.data,EM3E00
+	section EM3E00.sdata,EM3E00
+	section EM3E00.sbss,EM3E00
+	section EM3E00.bss,EM3E00
+	include	"OBJ\\PSX\\BUILD\\EM3E00.OBJ"
+
+EM3F01	group	obj(0x80100000),file("OBJ\\PSX\\BUILD\\EM3F01.BIN")
+	section .id_EM3F01,EM3F01
+	include	"OBJ\PSX\BUILD\EM3F01_id.OBJ"
+	section EM3F01.rdata,EM3F01
+	section EM3F01.text,EM3F01
+	section EM3F01.ctors,EM3F01
+	section EM3F01.dtors,EM3F01
+	section EM3F01.data,EM3F01
+	section EM3F01.sdata,EM3F01
+	section EM3F01.sbss,EM3F01
+	section EM3F01.bss,EM3F01
+	include	"OBJ\\PSX\\BUILD\\EM3F01.OBJ"
+
+EM3F00	group	obj(0x8010D000),file("OBJ\\PSX\\BUILD\\EM3F00.BIN")
+	section .id_EM3F00,EM3F00
+	include	"OBJ\PSX\BUILD\EM3F00_id.OBJ"
+	section EM3F00.rdata,EM3F00
+	section EM3F00.text,EM3F00
+	section EM3F00.ctors,EM3F00
+	section EM3F00.dtors,EM3F00
+	section EM3F00.data,EM3F00
+	section EM3F00.sdata,EM3F00
+	section EM3F00.sbss,EM3F00
+	section EM3F00.bss,EM3F00
+	include	"OBJ\\PSX\\BUILD\\EM3F00.OBJ"

@@ -20,10 +20,9 @@ extern VOID St_get_file(VOID);
 /* Jump table (St_main02), move_tbl (St_get_item) and add (St_get_file) are
    function-local statics in ST_SUB02.C; the header copies were shadowed and removed. */
 
-extern DR_MODE Map_end_tag[4];		/* DS 0x800D6C08: end-of-list primitive, one 0xc-byte entry per OT buffer */
 /* DS 0x800A7AB8: per-file check sum table (St_init02 indexes up to 0x67) */
 extern UCHAR Itp_check_sum[];
-/* DS 0x800D783E: item/cursor animation Y coordinate (xx is the X counterpart in the old global.h) */
+/* DS 0x800D783E: item/cursor animation Y coordinate (xx is the X counterpart) */
 extern SHORT yy;
 /* DS 0x800D6C20: second end-of-list primitive table */
 /* DS 0x800CBC28: frame counter for the item/cursor animation */
@@ -33,12 +32,11 @@ extern UCHAR St_anim_cnt;		/* animation counter, DS 0x800CBC28 */
 #define St_load_buf2		((UCHAR *)0x801a8220)
 /* DS 0x801A21A0: item table buffer passed to Set_item */
 #define St_item_tbl		((UCHAR *)0x801a21a0)
-/* DS 0x8019C100: SPRT pool (one SPRT = 0x14 bytes) */
-extern SPRT St_sprt_c[4];		/* Sprites for the file-select header: 2 per buffer (elements 0,2 / 1,3) */
+/* DS 0x8019C100: the file-select header sprites are St_pool_c100 (declared in ST_SUB04.H, defined in BUFFERS.C) */
 
 
 
-/* Globals defined in ST_SUB02.C */
+/* Item mix and map tables, defined in ST_SUB04.C */
 	extern ITEM_MIX_DATA Mix_nodata;					// 0x800a9ce8
 	extern ITEM_MIX_DATA Mix_beretta[2];				// 0x800a9cec
 	extern ITEM_MIX_DATA Mix_magnam[2];					// 0x800a9cf4
@@ -92,8 +90,10 @@ extern SPRT St_sprt_c[4];		/* Sprites for the file-select header: 2 per buffer (
 	extern MAP_DATA Map_stage6_2[1];					// 0x800aa868
 	extern MAP_DATA Map_stage6_3[13];					// 0x800aa878
 	extern MAP_DATA Map_stage6_4[4];					// 0x800aa948
+	extern MAP_DATA Map_stage6_5[3];					// 0x800aa988
 	extern MAP_DATA Map_stage7_0[6];					// 0x800aa9b8
 	extern MAP_DATA Map_stage7_1[2];					// 0x800aaa18
+/* Globals defined in ST_SUB02.C */
 	extern LONG add_y;									// 0x800c4408
 	extern SHORT xx;									// 0x800d7834
 	extern SHORT f_x;									// 0x800dcba4

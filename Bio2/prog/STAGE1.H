@@ -12,10 +12,11 @@
 #endif
 
 
+/* Stage 1 setup routine and its data tables (defined in STAGE1.C). Sizes in the trailing comments are bytes. */
 extern VOID Stage1(VOID);
 extern USHORT Bs_size1[30][16];		// 8011A054		// 960 bytes
 extern UCHAR Bs_check_sum1[30][16];		// 8011A414		// 480 bytes
-extern USHORT Xa_sector01[29][3];		// 8011A5F4		// 174 bytes
+extern USHORT Xa_sector01[30][3];		// 8011A5F4		// 180 bytes
 
 #if defined(_MSC_VER)
 #pragma pack(pop)

@@ -9,13 +9,11 @@
 #include "ROOM.H"
 #include <ASM.H>
 #include <INLINE_C.H>
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBETC.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <MALLOC.H>
 #include <STDIO.H>
 #include <STRINGS.H>
@@ -48,6 +46,9 @@ typedef struct tagKAN_BONE_REC {
 #define PKT_GET8(p)		(*(char *)(p))
 #define PKT_SET8(p, v)	(*(char *)(p) = (char)(v))
 
+/* copy one SVECTOR as two 32-bit words (DS uses lw/sw pairs, not lwl/lwr) */
+#define COPY_SV8(d, s)	(((ULONG *)(d))[0] = ((ULONG *)(s))[0], ((ULONG *)(d))[1] = ((ULONG *)(s))[1])
+
 /* VECTOR.pad packs two 16-bit words: low = x, high = y */
 #define PAD_XY(x, y)		((LONG)((ULONG)(USHORT)(x) | ((ULONG)(USHORT)(y) << 16)))
 
@@ -61,15 +62,16 @@ typedef struct tagKAN_BONE_REC {
 /* DS 0x80015280 (Hani_ck) */
 ULONG Hani_ck(VECTOR *pV, short *pPxzhw)
 {
-	ULONG Hani;
-
-	Hani = 0;
-	if (((UINT)(pV->vx - (int)*pPxzhw) <= (UINT)(int)pPxzhw[2]) &&
-		(Hani = 0, (UINT)(pV->vz - (int)pPxzhw[1]) <= (UINT)(int)pPxzhw[3]))
+	/* pPxzhw is four SHORTs: x origin, z origin, x extent, z extent. Each axis is one unsigned compare:
+	   (ULONG)(pos - origin) > (ULONG)extent is true when pos lies below the origin (the difference wraps to a
+	   large unsigned value) or beyond origin + extent. DS tests both axes in one || condition and keeps no
+	   result local: each out-of-range test branches to the shared return with v0 cleared in its delay slot
+	   (bne / clear v0), and only the in-range fall-through loads 1. */
+	if ((ULONG)(pV->vx - pPxzhw[0]) > (ULONG)pPxzhw[2] || (ULONG)(pV->vz - pPxzhw[1]) > (ULONG)pPxzhw[3])
 	{
-		Hani = 1;
+		return 0;
 	}
-	return Hani;
+	return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -83,8 +85,8 @@ void Add_speedXZ(ENEMY_WORK *pEm, long muki)
 	MATRIX M;
 
 	Sv.vx = 0;
-	Sv.vz = 0;
 	Sv.vy = pEm->Cdir_y + (short)muki;
+	Sv.vz = 0;
 	RotMatrix(&Sv, &M);
 	ApplyMatrixSV(&M, (SVECTOR *)&pEm->Spd_x, &Sv);
 	pEm->Pos_x = pEm->Pos_x + (int)Sv.vx;
@@ -138,20 +140,24 @@ void Add_speedXYZsuper(ENEMY_WORK *pEm, long muki_y, long muki_z)
 /* Return direction angle from (Hontai_x,Hontai_z) to (Target_x,Target_z) */
 /* ------------------------------------------------------------------ */
 /* DS 0x800154ac (Direction_ck) */
-short Direction_ck(short Hontai_x, short Hontai_z, short Target_x, short Target_z)
+/* Returns long: DS callers that keep the result in a long use v0 directly (no sll/sra); callers that store it in a short narrow it themselves. */
+long Direction_ck(long Hontai_x, long Hontai_z, long Target_x, long Target_z)
 {
 	short Kakudo;
 	short Dir;
 	int ZZ;
 	int XX;
+	int Dz;
 
+	/* DS: each argument is narrowed to 16 bits where it is used (sll/sra 16); callers pass full values */
 	Dir = 0x400;
-	XX = (int)Target_x - (int)Hontai_x;
-	if (0 < (int)Target_z - (int)Hontai_z)
+	XX = (int)(short)Target_x - (int)(short)Hontai_x;
+	Dz = (int)(short)Target_z - (int)(short)Hontai_z;
+	if (0 < Dz)
 	{
 		Dir = 0xc00;
 	}
-	ZZ = ((int)Target_z - (int)Hontai_z) * 0x1000;
+	ZZ = Dz * 0x1000;
 	if (XX != 0)
 	{
 		/* DS: signed divide with the zero and overflow checks */
@@ -179,15 +185,13 @@ void Goto00(ENEMY_WORK *pEm, long Vec_x, long Vec_z, short Add_dir)
 	UINT Tgt_dir;
 	UINT Ang_err;
 	UINT Turn_spd;
-	UINT Frame_pad[2];
 
-	(void)Frame_pad;
 	Turn_spd = (UINT)(USHORT)Add_dir;
 	Dir = Direction_ck((short)pEm->Pos_x, (short)pEm->Pos_z, (short)Vec_x, (short)Vec_z);
-	Tgt_dir = (UINT)(USHORT)Dir;
+	Tgt_dir = Dir;
 	if ((int)((UINT)Add_dir << 0x10) < 0)
 	{
-		Turn_spd = -((int)(Turn_spd << 0x10) >> 0x10);
+		Turn_spd = -Add_dir;
 		Tgt_dir = (Tgt_dir + 0x800) & 0xfff;
 	}
 	Ang_err = (Turn_spd + (Tgt_dir - (USHORT)pEm->Cdir_y)) & 0xfff;
@@ -213,20 +217,24 @@ void Goto00(ENEMY_WORK *pEm, long Vec_x, long Vec_z, short Add_dir)
 /* DS 0x80015614 (Goto00_ck) */
 long Goto00_ck(ENEMY_WORK *pEm, long Vec_x, long Vec_z, short Add_dir)
 {
-	USHORT Tgt_dir;
-	int Ret;
-	UINT Ang_err;
-	int Add_sgn;
+	short Tgt_dir;
+	ULONG Ang_err;
 
 	Tgt_dir = Direction_ck((short)pEm->Pos_x, (short)pEm->Pos_z, (short)Vec_x, (short)Vec_z);
-	Ang_err = ((UINT)(USHORT)Add_dir + ((UINT)Tgt_dir - (UINT)(USHORT)pEm->Cdir_y)) & 0xfff;
-	Add_sgn = (int)Add_dir;
-	Ret = 0;
-	if ((Add_sgn << 1 <= (int)Ang_err) && (Ret = Add_sgn, 0x800 < Ang_err))
+	/* Angle from the current heading to the target, biased by Add_dir and wrapped to 0..0xfff.
+	 * DS adds the incoming Add_dir register before narrowing it and reads Cdir_y with lhu. */
+	Ang_err = (USHORT)(Add_dir + (Tgt_dir - pEm->Cdir_y)) & 0xfff;
+	/* Within twice the turn step of the target: no turn needed. */
+	if ((long)Ang_err < Add_dir * 2)
 	{
-		Ret = -Add_sgn;
+		return 0;
 	}
-	return Ret;
+	/* Past half a circle the target is on the other side: turn the other way. */
+	if (Ang_err > 0x800)
+	{
+		return -Add_dir;
+	}
+	return Add_dir;
 }
 
 /* ------------------------------------------------------------------ */
@@ -236,13 +244,13 @@ long Goto00_ck(ENEMY_WORK *pEm, long Vec_x, long Vec_z, short Add_dir)
 /* DS 0x8001569c (Goto01) */
 void Goto01(ENEMY_WORK *pEm, short Dir, short Add_dir)
 {
+	/* retail reserves 8 more bytes of locals (Goto01 frame 8); never read */
+	volatile int Rsv[2];
 	short Cdir_sub;
 	UINT Ang_err;
 	UINT Turn_spd;
 	UINT Tgt_dir;
-	UINT Frame_pad[2];
 
-	(void)Frame_pad;
 	Turn_spd = (UINT)(USHORT)Add_dir;
 	Tgt_dir = (UINT)(USHORT)Dir;
 	if ((int)(Turn_spd << 0x10) < 0)
@@ -271,20 +279,24 @@ void Goto01(ENEMY_WORK *pEm, short Dir, short Add_dir)
 /* Return remaining angular error for Goto01 target                   */
 /* ------------------------------------------------------------------ */
 /* DS 0x80015714 (Goto01_ck) */
-long Goto01_ck(ENEMY_WORK *pEm, short Dir, short Add_dir)
+long Goto01_ck(ENEMY_WORK *pEm, long Dir, long Add_dir)
 {
-	int Ret;
-	UINT Ang_err;
-	int Add_sgn;
+	ULONG Rot;
 
-	Ang_err = ((UINT)(USHORT)Add_dir + ((UINT)(USHORT)Dir - (UINT)(USHORT)pEm->Cdir_y)) & 0xfff;
-	Add_sgn = (int)Add_dir;
-	Ret = 0;
-	if ((Add_sgn << 1 <= (int)Ang_err) && (Ret = Add_sgn, 0x800 < Ang_err))
+	/* Angle from the current heading to Dir, offset by Add_dir and wrapped to 0..0xfff.
+	   DS reads Cdir_y unsigned (lhu); only the low 12 bits of the sum are kept. */
+	Rot = (Add_dir + (Dir - (USHORT)pEm->Cdir_y)) & 0xfff;
+	/* Within Add_dir of Dir on the positive side: no turn needed. */
+	if ((LONG)Rot < (short)Add_dir * 2)
 	{
-		Ret = -Add_sgn;
+		return 0;
 	}
-	return Ret;
+	/* Past the half turn: turn the other way. */
+	if (Rot > 0x800)
+	{
+		return -(short)Add_dir;
+	}
+	return (short)Add_dir;
 }
 
 /* ------------------------------------------------------------------ */
@@ -330,16 +342,16 @@ long L_pos_ckXZM(MATRIX *pM, VECTOR *pP, ULONG Ll, SVECTOR *pSv)
 	SVECTOR Sv;
 	VECTOR V;
 
+	/* DS copies vx and vy as one word (sw at +0x10, lw from pSv+0) and vz as a
+	   halfword (sh at +0x14); vx and vy are written through one ULONG here. */
 	if (pSv == (SVECTOR *)0x0)
 	{
-		Sv.vx = 0;
-		Sv.vy = 0;
+		*(ULONG *)&Sv.vx = 0;
 		Sv.vz = 0;
 	}
 	else
 	{
-		Sv.vx = pSv->vx;
-		Sv.vy = pSv->vy;
+		*(ULONG *)&Sv.vx = *(ULONG *)&pSv->vx;
 		Sv.vz = pSv->vz;
 	}
 	ApplyMatrix((MATRIX *)pM, &Sv, &V);
@@ -359,7 +371,7 @@ long L_pos_ckXZM(MATRIX *pM, VECTOR *pP, ULONG Ll, SVECTOR *pSv)
 /* DS 0x80015910 (Cdir_ck) */
 UCHAR Cdir_ck(ENEMY_WORK *pEm, ENEMY_WORK *pT)
 {
-	return ((((int)pT->Cdir_y - (int)pEm->Cdir_y) + 0x400U) & 0xfff) < 0x800;
+	return ((((int)pT->Cdir_y - (int)pEm->Cdir_y) + 0x400) & 0xfff) < 0x800;
 }
 
 /* ------------------------------------------------------------------ */
@@ -372,7 +384,7 @@ UCHAR Cdir_ck2(ENEMY_WORK *pEm, ENEMY_WORK *pT)
 	short Dir;
 
 	Dir = Direction_ck((short)pEm->Pos_x, (short)pEm->Pos_z, (short)pT->Pos_x, (short)pT->Pos_z);
-	return ((((int)pT->Cdir_y - (int)Dir) + 0x400U) & 0xfff) < 0x800;
+	return ((((int)pT->Cdir_y - (int)Dir) + 0x400) & 0xfff) < 0x800;
 }
 
 /* ------------------------------------------------------------------ */
@@ -392,63 +404,60 @@ ULONG Gacha_ch(void)
 /* DS 0x800159a4 (Sikai_ck) */
 ULONG Sikai_ck(ENEMY_WORK *pEm, VECTOR *pTa, long Han, VECTOR *pAi)
 {
-	short Dir;
-	long Dist;
-	int XX;
-	int ZZ;
-	ULONG Ret;
+	LONG Dir;
+	ULONG x;
+	ULONG z;
+	ULONG L;
 	SVECTOR Sv;
 	MATRIX M;
 	MATRIX M1;
 	SVECTOR Sck0;
 	SVECTOR Sck1;
-	ULONG   Frame_pad[10];		/* retail reserves 0x80-0x8f and 0x28-0x37 and never reads them */
+	SVECTOR Tp0;
+	SVECTOR Tp1;
+	SVECTOR Tp2;
 
-	(void)Frame_pad;
-	Dir = Direction_ck((short)pEm->Pos_x, (short)pEm->Pos_z, (short)pAi->vx, (short)pAi->vz);
-	XX = pEm->Pos_x - pAi->vx;
-	ZZ = pEm->Pos_z - pAi->vz;
-	Dist = SquareRoot0(XX * XX + ZZ * ZZ);
+	Dir = (short)Direction_ck((short)pEm->Pos_x, (short)pEm->Pos_z, (short)pAi->vx, (short)pAi->vz);
+	x = pEm->Pos_x - pAi->vx;
+	z = pEm->Pos_z - pAi->vz;
+	L = SquareRoot0(x * x + z * z);
 
-	/* rotation for the sight direction; Sck0 = (Dist,0,0) rotated, Sck1 = (0,0,Han) rotated */
-	Sv.vx = 0;
-	Sv.vy = Dir;
+	/* rotation for the sight direction; Sck0 = (L,0,0) rotated, Sck1 = (0,0,Han) rotated */
+	*(LONG *)&Sv = Dir << 16;
 	Sv.vz = 0;
 	RotMatrix(&Sv, &M);
-	Sv.vx = (short)Dist;
-	Sv.vy = (short)(Dist >> 16);
+	*(LONG *)&Sv = L;
 	ApplyMatrixSV(&M, &Sv, &Sck0);
-	Sv.vx = 0;
-	Sv.vy = 0;
-	Sv.vz = (short)Han;
+	*(LONG *)&Sv = 0;
+	Sv.vz = Han;
 	ApplyMatrixSV(&M, &Sv, &Sck1);
 
-	/* M = {row0: Sck0.vx, sign, Sck0.vz ; row1: Sck1.vx, 0, Sck1.vz ; ...} */
-	M.m[0][0] = Sck0.vx;
-	M.m[0][1] = (short)(Sck0.vx >> 15);
+	*(LONG *)&Tp0 = pTa->vx - (pEm->Pos_x + Sck1.vx);
+	Tp0.vz = pTa->vz - (Sck1.vz + pEm->Pos_z);
+	*(LONG *)&Tp1 = pTa->vx - (pEm->Pos_x - Sck1.vx);
+	Tp1.vz = pTa->vz - (pEm->Pos_z - Sck1.vz);
+	*(LONG *)&Tp2 = pTa->vx - (Tp0.vx + Sck0.vx);
+	Tp2.vz = pTa->vz - (Tp0.vz + Sck0.vz);
+
+	*(LONG *)&M.m[0][0] = Sck0.vx;
 	M.m[0][2] = Sck0.vz;
 	M.m[1][0] = Sck1.vx;
-	M.m[1][1] = 0;
-	M.m[1][2] = Sck1.vz;
+	*(LONG *)&M.m[1][1] = (USHORT)Sck1.vz << 16;
 
-	/* M1 = point offsets of the target relative to the two corners */
-	M1.m[0][0] = (short)(pTa->vx - (pEm->Pos_x + Sck1.vx));
-	M1.m[0][2] = (short)(pTa->vx - (pEm->Pos_x - Sck1.vx));
-	M1.m[1][0] = (short)(M1.m[0][2] >> 15);
-	M1.m[1][1] = 0;
-	M1.m[1][2] = 0;
-	M1.m[0][1] = (short)(pTa->vx - (M1.m[0][0] + Sck0.vx));
-	M1.m[2][0] = (short)pTa->vz - (Sck1.vz + (short)pEm->Pos_z);
-	M1.m[2][2] = (short)pTa->vz - ((short)pEm->Pos_z - Sck1.vz);
-	M1.m[2][1] = (short)(pTa->vz - (M1.m[2][0] + Sck0.vz));
+	*(LONG *)&M1.m[1][1] = 0;
+	M1.m[0][0] = Tp0.vx;
+	M1.m[0][1] = Tp2.vx;
+	*(LONG *)&M1.m[0][2] = Tp1.vx;
+	M1.m[2][0] = Tp0.vz;
+	M1.m[2][1] = Tp2.vz;
+	M1.m[2][2] = Tp1.vz;
 
 	MulMatrix0(&M, &M1, &M);
-	Ret = 0;
-	if (((int)M.m[0][0] & 0x8000U) != ((int)M.m[0][1] & 0x8000U))
+	if ((M.m[0][0] & 0x8000) != (M.m[0][1] & 0x8000))
 	{
-		Ret = (ULONG)(((int)M.m[1][0] & 0x8000U) != ((int)M.m[1][2] & 0x8000U));
+		return (M.m[1][0] & 0x8000) != (M.m[1][2] & 0x8000);
 	}
-	return Ret;
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -509,28 +518,34 @@ void Null_pos_set(ENEMY_WORK *pEm, ULONG Kan, ULONG Seq, ULONG R_flg)
 /* DS 0x80015db0 (get_null_pos) */
 void get_null_pos(SVECTOR *pSv, ULONG R_flg, ULONG Kan, ULONG Seq)
 {
-	UINT Seq_w;
-	UINT Fr_no;
+	ENEMY_WORK *pEm;
+	UINT no;
+	UINT f_num;
+	UINT Rec_hi;
 	int Bone_adr;
 	UINT *pSeq_ptr;
 
-	Seq_w = *(UINT *)(Seq + (UINT)(G.pEm)->Move_no * 4);
-	if (R_flg == 0)
+	pEm = G.pEm;
+	pSeq_ptr = (UINT *)(Seq + (UINT)pEm->Move_no * 4);
+	no = *pSeq_ptr;
+	if (R_flg != 0)
 	{
-		Fr_no = (UINT)(G.pEm)->Move_cnt;
+		f_num = ((no & 0xffff) - (UINT)pEm->Move_cnt) - 1;
 	}
 	else
 	{
-		Fr_no = ((Seq_w & 0xffff) - (UINT)(G.pEm)->Move_cnt) - 1;
+		f_num = (UINT)pEm->Move_cnt;
 	}
-	pSeq_ptr = (UINT *)(Seq + (Seq_w >> 0x10) + Fr_no * 4);
-	Seq_w = *pSeq_ptr;
-	while ((Seq_w & 0x8000) != 0)
+	pSeq_ptr = (UINT *)(Seq + (no >> 0x10) + f_num * 4);
+	Bone_adr = Kan + ((KAN_HEAD *)Kan)->Bone_ofs;
+	Rec_hi = ((KAN_HEAD *)Kan)->Rec_hi;
+	no = *pSeq_ptr;
+	while ((no & 0x8000) != 0)
 	{
 		pSeq_ptr++;
-		Seq_w = *pSeq_ptr;
+		no = *pSeq_ptr;
 	}
-	Bone_adr = Kan + ((KAN_HEAD *)Kan)->Bone_ofs + (UINT)(((KAN_HEAD *)Kan)->Rec_hi >> 2) * (*pSeq_ptr & 0xfff) * 4;
+	Bone_adr += (Rec_hi >> 2) * (*pSeq_ptr & 0xfff) * 4;
 	pSv->vx = ((KAN_BONE_REC *)Bone_adr)->Null_pos.vx;
 	pSv->vy = (short)*(int *)&((KAN_BONE_REC *)Bone_adr)->Null_pos.vy;
 	pSv->vz = ((KAN_BONE_REC *)Bone_adr)->Null_pos.vz;
@@ -598,15 +613,15 @@ void Spd_get(ENEMY_WORK *pEm, ULONG Kan, ULONG Seq, ULONG R_flg)
 /* DS 0x80015fe8 (Rnd) */
 UCHAR Rnd(void)
 {
+	/* retail reserves 8 more bytes of locals (Rnd frame 8); never read */
+	volatile int Rsv[2];
 	UINT Rnd_sum;
 	UINT Seed_sh;
-	UINT Frame_pad[2];
 
-	(void)Frame_pad;
 	Seed_sh = G.Random >> 7 & 0xff;
-	Rnd_sum = Seed_sh + G.Random;
-	G.Random = (Rnd_sum & 0xff) | Seed_sh << 8;
-	return (UCHAR)Rnd_sum;
+	Rnd_sum = ((Seed_sh + G.Random) & 0xff) + (Seed_sh << 8);
+	G.Random = (USHORT)Rnd_sum;
+	return Rnd_sum;
 }
 
 /* ------------------------------------------------------------------ */
@@ -627,7 +642,7 @@ void Em_seq_sound(ENEMY_WORK *pEm)
 /* move_kuchi                                                          */
 /* Mouth/expression texture animation helper                          */
 /* ------------------------------------------------------------------ */
-#if 0	/* move_kuchi: beta-only, not in the DS dump; the old global.h declares a conflicting INT move_kuchi(VOID) */
+#if 0	/* move_kuchi: beta-only, not in the DS dump; an older header declared a conflicting INT move_kuchi(VOID) */
 void move_kuchi(ENEMY_WORK *pEm)
 {
 	/* function body not recovered in retail binary (may be inlined) */
@@ -639,8 +654,7 @@ void move_kuchi(ENEMY_WORK *pEm)
 /* Advance texture animation state machine                            */
 /* ------------------------------------------------------------------ */
 /* DS 0x80016068 (Tex_Ani_move) */
-void Tex_Ani_move(TEX_MOVE_DATA *T_data, TEX_MOVE_SEQ *T_seq, DR_MOVE *Prim,
-				  UCHAR *Set_timer, UCHAR *Set_seq_no)
+void Tex_Ani_move(TEX_MOVE_DATA *T_data, TEX_MOVE_SEQ *T_seq, DR_MOVE *Prim, UCHAR *Set_timer, UCHAR *Set_seq_no)
 {
 	UCHAR Timer_val;
 	TEX_MOVE_DATA *Td;
@@ -670,9 +684,7 @@ void Tex_Ani_move(TEX_MOVE_DATA *T_data, TEX_MOVE_SEQ *T_seq, DR_MOVE *Prim,
 		Rect.y = (USHORT)Td->Mo_v + (short)Off_v;
 		Rect.w = (short)Td->Mo_w;
 		Rect.h = (short)Td->Mo_h;
-		SetDrawMove((DR_MOVE *)Prim, &Rect,
-					Tpage * 0x40 + (UINT)Td->Saki_tpage * 0x40 + (UINT)Td->Sa_u,
-					Td->Sa_v | Off_v);
+		SetDrawMove((DR_MOVE *)Prim, &Rect, Tpage * 0x40 + (UINT)Td->Saki_tpage * 0x40 + (UINT)Td->Sa_u, Td->Sa_v | Off_v);
 		Prim->tag = (Prim->tag & 0xff000000) | (G.Ot2[G.Cbuf_id][0] & 0xffffff);
 		G.Ot2[G.Cbuf_id][0] = (G.Ot2[G.Cbuf_id][0] & 0xff000000) | ((UINT)Prim & 0xffffff);
 		Timer_val = *Set_timer;
@@ -720,29 +732,36 @@ void Foot_set_pl(ENEMY_WORK *pEm, ULONG Mode, ULONG Foot_no)
 void Kage_work_init(void)
 {
 	KAGE_WORK	*pK;
+	UCHAR		*pTpage;
 	ULONG		i;
 	POLY_FT4	*p;
 	USHORT		Vram_id;
 
 	/* One KAGE_WORK per shadow: Prim[0] is the template, Prim[1] gets a copy */
 	pK = G.Kage;
-	for (i = 0; i < 0x32; i++, pK++)
+	i = 0x32;
+	/* DS keeps the address of Player.Tpage in one register: Tpage at [0], Clut at [1] */
+	pTpage = &G.Player.Tpage;
+	do
 	{
 		p = &pK->Prim[0];
 		pK->Be_flg = 0;
 		*(ULONG *)&p->r0 = 0x808080;		/* r0,g0,b0 */
 		SetPolyFT4(p);
 		SetSemiTrans(p, 1);
-		Vram_id = GetTPage(1, 2, (G.Player.Tpage - 0xe) * 0x40, 0x100);
+		Vram_id = GetTPage(1, 2, (pTpage[0] - 0xe) * 0x40, 0x100);
 		p->tpage = Vram_id;
-		Vram_id = GetClut(0, G.Player.Clut + 0x1e2);
+		Vram_id = GetClut(0, pTpage[1] + 0x1e2);
 		p->clut = Vram_id;
 		p->u0 = 0x62;  p->v0 = 0xe1;			/* u0,v0 */
 		p->u1 = 0x7e;  p->v1 = 0xe1;			/* u1,v1 */
 		p->u2 = 0x62;  p->v2 = 0xff;			/* u2,v2 */
 		p->u3 = 0x7e;  p->v3 = 0xff;			/* u3,v3 */
+		/* DS addresses Prim[1] from pK, not from a second running pointer */
 		Memcpy(&pK->Prim[1], p, 0x28);
-	}
+		pK++;
+		i--;
+	} while (i != 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -756,10 +775,13 @@ void Kage_work9_init(void)
 	ULONG		i;
 
 	pK = G.Kage9;
-	for (i = 0; i < 5; i++, pK++)
+	i = 5;
+	do
 	{
 		pK->Be_flg = 0;
-	}
+		i--;
+		pK++;
+	} while (i != 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -770,32 +792,22 @@ void Kage_work9_init(void)
 void Kage_work_set(ULONG *pK, ULONG Off, ULONG Half, ULONG Color, VECTOR *pPos)
 {
 	KAGE_WORK *pKw;
-	KAGE_WORK *pKw_nx;
-	int Left_nxt;
-	UINT Col0;
 	int Left_cnt;
-	UINT Col1;
-	KAGE_WORK *pKw_it;
 
+	/* first free slot: scan up to 50 entries, Left_cnt reaches 0 when all are in use */
 	pKw = G.Kage;
 	Left_cnt = 0x32;
-	if (G.Kage[0].Be_flg != 0)
+	while (pKw->Be_flg != 0)
 	{
-		Left_nxt = 0x31;
-		pKw_it = pKw;
-		do
+		Left_cnt--;
+		if (Left_cnt == 0)
 		{
-			Left_cnt = Left_nxt;
-			pKw = pKw_it + 1;
-			if (Left_cnt == 0) goto Kage_work_set_full;
-			pKw_nx = pKw_it + 1;
-			Left_nxt = Left_cnt + -1;
-			pKw_it = pKw;
-		} while (pKw_nx->Be_flg != 0);
+			break;
+		}
+		pKw++;
 	}
 	if (Left_cnt == 0)
 	{
-Kage_work_set_full:
 		*pK = 0;
 	}
 	else
@@ -803,22 +815,19 @@ Kage_work_set_full:
 		*pK = (ULONG)pKw;
 		pKw->Be_flg = 5;
 		pKw->pPos = pPos;
-		if (Color == 0)
+		if (Color != 0)
 		{
-			Col0 = (*(UINT *)&pKw->Prim[0].r0 & 0xff000000) | 0x808080;
-			Col1 = (*(UINT *)&pKw->Prim[1].r0 & 0xff000000) | 0x808080;
+			*(UINT *)&pKw->Prim[0].r0 = (*(UINT *)&pKw->Prim[0].r0 & 0xff000000) | Color;
+			*(UINT *)&pKw->Prim[1].r0 = (*(UINT *)&pKw->Prim[1].r0 & 0xff000000) | Color;
 		}
 		else
 		{
-			Col0 = (*(UINT *)&pKw->Prim[0].r0 & 0xff000000) | Color;
-			Col1 = (*(UINT *)&pKw->Prim[1].r0 & 0xff000000) | Color;
+			*(UINT *)&pKw->Prim[0].r0 = (*(UINT *)&pKw->Prim[0].r0 & 0xff000000) | 0x808080;
+			*(UINT *)&pKw->Prim[1].r0 = (*(UINT *)&pKw->Prim[1].r0 & 0xff000000) | 0x808080;
 		}
-		*(UINT *)&pKw->Prim[0].r0 = Col0;
-		*(UINT *)&pKw->Prim[1].r0 = Col1;
-		pKw->Off_x  = (short)Off;
-		pKw->Off_z  = (short)(Off  >> 0x10);
-		pKw->Half_x = (short)Half;
-		pKw->Half_z = (short)(Half >> 0x10);
+		/* Off_x and Off_z, Half_x and Half_z are each written as one 32-bit word */
+		*(ULONG *)&pKw->Off_x = Off;
+		*(ULONG *)&pKw->Half_x = Half;
 	}
 }
 
@@ -923,37 +932,31 @@ void Kage_work9_set(ULONG *pK, ULONG Off, ULONG Half, ULONG Color, VECTOR *pPos)
 /* DS 0x800168b4 (MulKage) */
 void MulKage(KAGE_WORK *pKw, short Grand, short Dir_y, ULONG Flg)
 {
-	UCHAR Be_save;
-	VECTOR *pPos;
 	MATRIX Rot_m;
 	SVECTOR Off_sv;
 	SVECTOR Rot_sv;
 
 	if ((pKw != (KAGE_WORK *)0x0) && (pKw->Be_flg != 0))
 	{
-		Rot_m.m[0][0] = 0x1000;
-		Rot_m.m[0][1] = 0;
-		Rot_m.m[0][2] = 0;
-		Rot_m.m[1][0] = 0;
-		Rot_m.m[1][1] = 0x1000;
-		Rot_m.m[1][2] = 0;
-		Rot_m.m[2][0] = 0;
-		Rot_m.m[2][1] = 0;
-		Rot_m.m[2][2] = 0x1000;
+		/* identity matrix: DS stores it as five 32-bit words (m[0][0..1], m[0][2]..m[1][0], ...) */
+		*(int *)&Rot_m.m[0][0] = 0x1000;
+		*(int *)&Rot_m.m[0][2] = 0;
+		*(int *)&Rot_m.m[1][1] = 0x1000;
+		*(int *)&Rot_m.m[2][0] = 0;
+		*(int *)&Rot_m.m[2][2] = 0x1000;
 		RotMatrixY((int)Dir_y, &Rot_m);
-		SVEC_XY32(Off_sv, pKw->Off_x);
+		/* DS stores Off_x as a 32-bit word (vx = Off_x, vy = its sign) */
+		*(int *)&Off_sv = pKw->Off_x;
 		Off_sv.vz = pKw->Off_z;
 		ApplyMatrixSV(&Rot_m, &Off_sv, &Rot_sv);
-		pPos = pKw->pPos;
 		pKw->Dir_y = Dir_y;
 		pKw->Pos_y = Grand;
-		pKw->Pos_x = Rot_sv.vx + (short)pPos->vx;
-		Be_save = pKw->Be_flg;
-		pKw->Be_flg = Be_save | 4;
-		pKw->Pos_z = Rot_sv.vz + (short)pPos->vz;
+		pKw->Pos_x = Rot_sv.vx + (short)pKw->pPos->vx;
+		pKw->Pos_z = Rot_sv.vz + (short)pKw->pPos->vz;
+		pKw->Be_flg |= 4;
 		if (Flg != 0)
 		{
-			pKw->Be_flg = Be_save & 0xfb;
+			pKw->Be_flg &= 0xfb;
 		}
 	}
 }
@@ -968,80 +971,78 @@ void Kage_work_sort(void)
 	KAGE_WORK *pKw;
 	UINT *pTag;
 	UINT *pOt;
+	UINT *Ot_base;
+	UINT Adr_mask;
+	LONG Unit;
 	MATRIX Mx;
 	MATRIX M2;
 	SVECTOR Sv[4];
 	VECTOR Pos;
 	ULONG Otz;
 	int i;
-	short Hx;
-	short Hz;
+	LONG Hx;
 
-	for (i = 0; i < 50; i++)
+	pKw = G.Kage;
+	Unit = 0x1000;
+	Adr_mask = 0xffffff;
+	Ot_base = (UINT *)G.Ot1[G.Cbuf_id];
+	for (i = 50; i != 0; i--, pKw++)
 	{
-		pKw = &G.Kage[i];
-		if (((pKw->Be_flg & 4) == 0) || ((pKw->Be_flg & 8) != 0))
+		if ((pKw->Be_flg & 4) == 0)
 		{
 			continue;
 		}
-
-		/* local matrix: RotY(Dir_y) with the shadow position as translation */
-		Hx = pKw->Half_x;
-		Hz = pKw->Half_z;
-		Mx.m[0][0] = 0x1000;
-		Mx.m[0][1] = 0;
-		Mx.m[0][2] = 0;
-		Mx.m[1][0] = 0;
-		Mx.m[1][1] = 0x1000;
-		Mx.m[1][2] = 0;
-		Mx.m[2][0] = 0;
-		Mx.m[2][1] = 0;
-		Mx.m[2][2] = 0x1000;
-		RotMatrixY((int)pKw->Dir_y, &Mx);
-		Mx.t[0] = pKw->Pos_x;
-		Mx.t[1] = pKw->Pos_y;
-		Mx.t[2] = pKw->Pos_z;
-		CompM(&GsWSMATRIX, &Mx, &M2);
-		SetRotMatrix(&M2);
-		SetTransMatrix(&M2);
-
-		/* quad corners; DS stores the x corners as 32-bit words (vy = sign of vx) */
-		*(long *)&Sv[0] = ~(long)Hx - 1;
-		Sv[0].vz = Hz;
-		*(long *)&Sv[1] = (long)Hx;
-		Sv[1].vz = Hz;
-		*(long *)&Sv[2] = ~(long)Hx - 1;
-		Sv[2].vz = ~Hz - 1;
-		*(long *)&Sv[3] = (long)Hx;
-		Sv[3].vz = ~Hz - 1;
-
-		Pos.vx = Mx.t[0];
-		Pos.vy = Mx.t[1];
-		Pos.vz = Mx.t[2];
-		if (Hit_ck_point4(&Pos, G.Cccut) == 0)
+		if ((pKw->Be_flg & 8) == 0)
 		{
-			continue;
-		}
+			/* local matrix: RotY(Dir_y) with the shadow position as translation */
+			*(int *)&Mx.m[0][0] = Unit;
+			*(int *)&Mx.m[0][2] = 0;
+			*(int *)&Mx.m[1][1] = Unit;
+			*(int *)&Mx.m[2][0] = 0;
+			*(int *)&Mx.m[2][2] = Unit;
+			RotMatrixY((int)pKw->Dir_y, &Mx);
+			Mx.t[0] = pKw->Pos_x;
+			Mx.t[1] = pKw->Pos_y;
+			Mx.t[2] = pKw->Pos_z;
+			CompM(&GsWSMATRIX, &Mx, &M2);
+			SetRotMatrix(&M2);
+			SetTransMatrix(&M2);
 
-		/* project the 4 corners into this shadow's primitive */
-		pTag = (UINT *)&pKw->Prim[G.Cbuf_id];
-		gte_ldv3(&Sv[0], &Sv[1], &Sv[2]);
-		gte_rtpt_b();
-		gte_stsxy3((long *)&((POLY_FT4 *)pTag)->x0, (long *)&((POLY_FT4 *)pTag)->x1, (long *)&((POLY_FT4 *)pTag)->x2);
-		gte_ldv0(&Sv[3]);
-		gte_rtps();
-		gte_stsxy((long *)&((POLY_FT4 *)pTag)->x3);
-		gte_avsz4();
-		gte_stotz((long *)&Otz);
-		if (Otz > 0x1fff)
-		{
-			Otz = 0x1fff;
-		}
+			/* quad corners; DS stores the x corners as 32-bit words (vy = sign of vx) */
+			Hx = pKw->Half_x;
+			Sv[0].vz = pKw->Half_z;
+			Sv[1].vz = pKw->Half_z;
+			*(long *)&Sv[0] = ~Hx - 1;
+			*(long *)&Sv[1] = Hx;
+			*(long *)&Sv[2] = ~Hx - 1;
+			*(long *)&Sv[3] = Hx;
+			Sv[2].vz = ~pKw->Half_z - 1;
+			Sv[3].vz = ~pKw->Half_z - 1;
 
-		/* link the primitive into ordering table of the current buffer (OT DS 0x800cc22c, G.Ot1[Cbuf_id]) */
-		pOt = (UINT *)G.Ot1[G.Cbuf_id] + (Otz >> 3);
-		*pTag = (*pTag & 0xff000000) | (*pOt & 0xffffff);
-		*pOt  = (*pOt & 0xff000000) | ((UINT)pTag & 0xffffff);
+			Pos = *(VECTOR *)Mx.t;
+			pTag = (UINT *)&pKw->Prim[G.Cbuf_id];
+			if (Hit_ck_point4(&Pos, G.Cccut) != 0)
+			{
+				/* project the 4 corners into this shadow's primitive */
+				gte_ldv3(&Sv[0], &Sv[1], &Sv[2]);
+				gte_rtpt_b();
+				gte_stsxy3((long *)&((POLY_FT4 *)pTag)->x0, (long *)&((POLY_FT4 *)pTag)->x1, (long *)&((POLY_FT4 *)pTag)->x2);
+				gte_ldv0(&Sv[3]);
+				gte_rtps();
+				gte_stsxy((long *)&((POLY_FT4 *)pTag)->x3);
+				gte_avsz4();
+				gte_stotz((long *)&Otz);
+				if (Otz > 0x1fff)
+				{
+					Otz = 0x1fff;
+				}
+
+				/* link the primitive into ordering table of the current buffer (G.Ot1[Cbuf_id]) */
+				pOt = Ot_base + (Otz >> 3);
+				*pTag = (*pTag & 0xff000000) | (*pOt & Adr_mask);
+				*pOt  = (*pOt & 0xff000000) | ((UINT)pTag & Adr_mask);
+			}
+		}
 	}
 }
 
@@ -1057,7 +1058,6 @@ void Kage_work9_sort(void)
 	UINT Otz_p;
 	UINT Ot_idx;
 	UINT *pOt;
-	UINT *pTag;
 	short Gx2;
 	short Gx1;
 	int *pK9_top;
@@ -1076,7 +1076,7 @@ void Kage_work9_sort(void)
 	int Kg9_cnt;
 	UINT Adr_mask;
 	int Kw_cur;
-	int Hz;
+	short Hz;
 
 	Kg9_cnt = 5;
 	pK9_top = (int *)&G.Kage9[0].pKw_top;
@@ -1087,15 +1087,11 @@ void Kage_work9_sort(void)
 		/* KAGE_WORK9 Be_flg (element +0x0e = pK9_top - 0x0a bytes), bit 2 = active */
 		if ((((UCHAR *)pK9_top)[-0xa] & 0x4) != 0)
 		{
-			Cell_lm.m[0][0] = 0x1000;
-			Cell_lm.m[0][1] = 0;
-			Cell_lm.m[0][2] = 0;
-			Cell_lm.m[1][0] = 0;
-			Cell_lm.m[1][1] = 0x1000;
-			Cell_lm.m[1][2] = 0;
-			Cell_lm.m[2][0] = 0;
-			Cell_lm.m[2][1] = 0;
-			Cell_lm.m[2][2] = 0x1000;
+			*(int *)&Cell_lm.m[0][0] = 0x1000;
+			*(int *)&Cell_lm.m[0][2] = 0;
+			*(int *)&Cell_lm.m[1][1] = 0x1000;
+			*(int *)&Cell_lm.m[2][0] = 0;
+			*(int *)&Cell_lm.m[2][2] = 0x1000;
 			RotMatrixY((int)(short)pK9_top[-2], (MATRIX *)&Cell_lm);
 			Cell_lm.t[0] = *(short *)(pK9_top + -4);
 			Cell_lm.t[1] = *(short *)((int)pK9_top + -0xe);
@@ -1163,19 +1159,18 @@ void Kage_work9_sort(void)
 						Qv_lt.vz = (short)Hz; Qv_rt.vz = (short)Hz;
 						Qv_lb.vz = Gz1; Qv_rb.vz = Gz1;
 					}
-					pTag = (UINT *)(Kw_cur + (UINT)G.Cbuf_id * 0x28 + 0x18);
-					Otz_p = RotAverage4(&Qv_lt, &Qv_rt, &Qv_lb, &Qv_rb,
-										(long *)&((POLY_FT4 *)pTag)->x0, (long *)&((POLY_FT4 *)pTag)->x1,
-										(long *)&((POLY_FT4 *)pTag)->x2, (long *)&((POLY_FT4 *)pTag)->x3,
-										Avg_out, Avg_out);
+					/* Tag address is recomputed from Kw_cur instead of being held in a local.
+					   Kw_cur is only advanced at the end of the body, so every use below
+					   sees the same address the old pTag local held. */
+					Otz_p = RotAverage4(&Qv_lt, &Qv_rt, &Qv_lb, &Qv_rb, (long *)&((POLY_FT4 *)(Kw_cur + (UINT)G.Cbuf_id * 0x28 + 0x18))->x0, (long *)&((POLY_FT4 *)(Kw_cur + (UINT)G.Cbuf_id * 0x28 + 0x18))->x1, (long *)&((POLY_FT4 *)(Kw_cur + (UINT)G.Cbuf_id * 0x28 + 0x18))->x2, (long *)&((POLY_FT4 *)(Kw_cur + (UINT)G.Cbuf_id * 0x28 + 0x18))->x3, Avg_out, Avg_out);
 					if (0x1f < Otz_p) Otz_p = Otz_p - 0x20;
 					Ot_idx = Otz_p >> 3;
 					if (0x1fff < Otz_p) Ot_idx = 0x3ff;
 					pOt = Ot_base + Ot_idx;
-					Kw_cur += 0x68;
-					*pTag = (*pTag & 0xff000000) | (*pOt & Adr_mask);
+					*(UINT *)(Kw_cur + (UINT)G.Cbuf_id * 0x28 + 0x18) = (*(UINT *)(Kw_cur + (UINT)G.Cbuf_id * 0x28 + 0x18) & 0xff000000) | (*pOt & Adr_mask);
 					Cell_cnt = Cell_cnt + -1;
-					*pOt = (*pOt & 0xff000000) | ((UINT)pTag & Adr_mask);
+					*pOt = (*pOt & 0xff000000) | ((UINT)(Kw_cur + (UINT)G.Cbuf_id * 0x28 + 0x18) & Adr_mask);
+					Kw_cur += 0x68;
 				} while (Cell_cnt != 0);
 			}
 		}
@@ -1197,22 +1192,22 @@ void Kage_work_color_set(ULONG *pK, ULONG Color)
 
 /* ------------------------------------------------------------------ */
 /* Kage_work9_color_set                                                */
-/* Set color in all 9 POLY_FT4 primitives of a KAGE_WORK9             */
+/* Set color in both POLY_FT4 primitives of each of the 9 KAGE_WORK    */
 /* ------------------------------------------------------------------ */
 /* DS 0x8001700c (Kage_work9_color_set) */
 void Kage_work9_color_set(ULONG *pK, ULONG Color)
 {
-	UINT *pPrim;
+	KAGE_WORK *pPrim;
 	char cnt;
 
 	cnt = 9;
-	pPrim = (UINT *)&((KAGE_WORK *)pK[6])->Prim[1].r0;
+	pPrim = (KAGE_WORK *)pK[6];
 	do
 	{
 		cnt = cnt + -1;
-		pPrim[-10] = (pPrim[-10] & 0xff000000) | Color;
-		*pPrim = (*pPrim & 0xff000000) | Color;
-		pPrim += 0x1a;
+		*(UINT *)&pPrim->Prim[0].r0 = (*(UINT *)&pPrim->Prim[0].r0 & 0xff000000) | Color;
+		*(UINT *)&pPrim->Prim[1].r0 = (*(UINT *)&pPrim->Prim[1].r0 & 0xff000000) | Color;
+		pPrim++;
 	} while (cnt != 0);
 }
 
@@ -1223,53 +1218,55 @@ void Kage_work9_color_set(ULONG *pK, ULONG Color)
 /* DS 0x80017054 (Texture_Move) */
 void Texture_Move(MODEL_WORK *pMw, USHORT tex_page, ULONG mvmu, short clut_plus)
 {
-	char Du;
-	char Dv;
 	POLY_GT3 *pGt3;
 	POLY_GT4 *pGt4;
-	int cnt;
-	ULONG *pPkt2;
+	UINT Poly_cnt;
+	UINT Prev_cnt;
+	UINT Poly_n;
 
-	pPkt2 = pMw->pPacket2;
-	cnt = pMw->pTmd[5] * 2;
-	Du = (char)mvmu;
-	Dv = (char)(mvmu >> 0x10);
-	if (cnt != 0)
+	pGt3 = (POLY_GT3 *)pMw->pPacket;
+	pGt4 = (POLY_GT4 *)pMw->pPacket2;
+	Poly_cnt = pMw->pTmd[5] * 2;
+	Poly_n = Poly_cnt;
+	Poly_cnt--;
+	if (Poly_n != 0)
 	{
-		pGt3 = (POLY_GT3 *)pMw->pPacket;
 		do
 		{
-			cnt = cnt + -1;
-			PKT_SET8(&pGt3->u0, (char)pGt3->u0 + Du);
-			PKT_SET8(&pGt3->u1, (char)pGt3->u1 + Du);
-			PKT_SET8(&pGt3->v0, PKT_GET8(&pGt3->v0) + Dv);
-			PKT_SET8(&pGt3->u2, (char)pGt3->u2 + Du);
-			PKT_SET8(&pGt3->v1, PKT_GET8(&pGt3->v1) + Dv);
-			PKT_SET8(&pGt3->v2, PKT_GET8(&pGt3->v2) + Dv);
+			pGt3->u0 += mvmu;
+			pGt3->v0 += mvmu >> 16;
+			pGt3->u1 += mvmu;
+			pGt3->v1 += mvmu >> 16;
+			pGt3->u2 += mvmu;
+			pGt3->v2 += mvmu >> 16;
 			pGt3->tpage = (pGt3->tpage & 0xffe0) | (tex_page & 0x1f);
 			pGt3->clut = (pGt3->clut & 0x803f) | clut_plus << 6;
 			pGt3++;
-		} while (cnt != 0);
+			Prev_cnt = Poly_cnt;
+			Poly_cnt--;
+		} while (Prev_cnt != 0);
 	}
-	cnt = pMw->pTmd2[5] * 2;
-	if (cnt != 0)
+	Poly_cnt = pMw->pTmd2[5] * 2;
+	Poly_n = Poly_cnt;
+	Poly_cnt--;
+	if (Poly_n != 0)
 	{
-		pGt4 = (POLY_GT4 *)pPkt2;
 		do
 		{
-			cnt = cnt + -1;
-			PKT_SET8(&pGt4->u0, (char)pGt4->u0 + Du);
-			PKT_SET8(&pGt4->u1, (char)pGt4->u1 + Du);
-			PKT_SET8(&pGt4->v0, PKT_GET8(&pGt4->v0) + Dv);
-			PKT_SET8(&pGt4->u2, (char)pGt4->u2 + Du);
-			PKT_SET8(&pGt4->v1, PKT_GET8(&pGt4->v1) + Dv);
-			PKT_SET8(&pGt4->u3, (char)pGt4->u3 + Du);
-			PKT_SET8(&pGt4->v2, PKT_GET8(&pGt4->v2) + Dv);
-			PKT_SET8(&pGt4->v3, PKT_GET8(&pGt4->v3) + Dv);
+			pGt4->u0 += mvmu;
+			pGt4->v0 += mvmu >> 16;
+			pGt4->u1 += mvmu;
+			pGt4->v1 += mvmu >> 16;
+			pGt4->u2 += mvmu;
+			pGt4->v2 += mvmu >> 16;
+			pGt4->u3 += mvmu;
+			pGt4->v3 += mvmu >> 16;
 			pGt4->tpage = (pGt4->tpage & 0xffe0) | (tex_page & 0x1f);
 			pGt4->clut = (pGt4->clut & 0x803f) | clut_plus << 6;
 			pGt4++;
-		} while (cnt != 0);
+			Prev_cnt = Poly_cnt;
+			Poly_cnt--;
+		} while (Prev_cnt != 0);
 	}
 }
 
@@ -1280,56 +1277,43 @@ void Texture_Move(MODEL_WORK *pMw, USHORT tex_page, ULONG mvmu, short clut_plus)
 /* DS 0x800171d0 (Texture_Move_GT3) */
 void Texture_Move_GT3(MODEL_WORK *pMw, USHORT tex_page, ULONG mvmu, short clut_plus, UCHAR *pPoly_no)
 {
-	UCHAR Poly_id;
-	char Vb;
-	USHORT Tpage_w;
-	USHORT Clut_w;
-	char Du;
-	char Dv;
-	ULONG Uv_w;
-	UINT Poly_cnt;
+	POLY_GT3 *gt3;
 	ULONG *pPkt;
+	UINT Poly_cnt;
+	UINT Prev_cnt;
+	UINT Poly_n;
 
 	pPkt = pMw->pPacket;
-	Poly_cnt = (UINT)*pPoly_no;
-	if (Poly_cnt != 0)
+	Poly_cnt = *pPoly_no++;
+	Poly_n = Poly_cnt;
+	Poly_cnt--;
+	if (Poly_n != 0)
 	{
 		do
 		{
+			/* two GT3 primitives (0x28 bytes each) per index in the list */
+			gt3 = (POLY_GT3 *)((int)pPkt + (UINT)*pPoly_no * 0x50);
 			pPoly_no++;
+			gt3->u0 += mvmu;
+			gt3->v0 += mvmu >> 16;
+			gt3->u1 += mvmu;
+			gt3->v1 += mvmu >> 16;
+			gt3->u2 += mvmu;
+			gt3->v2 += mvmu >> 16;
+			gt3->tpage = (gt3->tpage & 0xffe0) | (tex_page & 0x1f);
+			gt3->clut = (gt3->clut & 0x803f) | clut_plus << 6;
+			gt3++;
+			gt3->u0 += mvmu;
+			gt3->v0 += mvmu >> 16;
+			gt3->u1 += mvmu;
+			gt3->v1 += mvmu >> 16;
+			gt3->u2 += mvmu;
+			gt3->v2 += mvmu >> 16;
+			gt3->tpage = (gt3->tpage & 0xffe0) | (tex_page & 0x1f);
+			gt3->clut = (gt3->clut & 0x803f) | clut_plus << 6;
+			Prev_cnt = Poly_cnt;
 			Poly_cnt--;
-			Poly_id = *pPoly_no;
-			Uv_w = pPkt[(UINT)Poly_id * 0x14 + 6];
-			Du = (char)mvmu;
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x14 + 3, (char)pPkt[(UINT)Poly_id * 0x14 + 3] + Du);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x50 + 0xd);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x14 + 6, (char)Uv_w + Du);
-			Uv_w = pPkt[(UINT)Poly_id * 0x14 + 9];
-			Dv = (char)(mvmu >> 0x10);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x50 + 0xd, Vb + Dv);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x19);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x14 + 9, (char)Uv_w + Du);
-			Tpage_w = *(USHORT *)((int)pPkt + (UINT)Poly_id * 0x50 + 0x1a);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x19, Vb + Dv);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x25, PKT_GET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x25) + Dv);
-			Clut_w = *(USHORT *)((int)pPkt + (UINT)Poly_id * 0x50 + 0xe);
-			*(USHORT *)((int)pPkt + (UINT)Poly_id * 0x50 + 0x1a) = (Tpage_w & 0xffe0) | (tex_page & 0x1f);
-			*(USHORT *)((int)pPkt + (UINT)Poly_id * 0x50 + 0xe) = (Clut_w & 0x803f) | clut_plus << 6;
-			Uv_w = pPkt[(UINT)Poly_id * 0x14 + 0x10];
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x14 + 0xd, (char)pPkt[(UINT)Poly_id * 0x14 + 0xd] + Du);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x35);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x14 + 0x10, (char)Uv_w + Du);
-			Uv_w = pPkt[(UINT)Poly_id * 0x14 + 0x13];
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x35, Vb + Dv);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x41);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x14 + 0x13, (char)Uv_w + Du);
-			Tpage_w = *(USHORT *)((int)pPkt + (UINT)Poly_id * 0x50 + 0x42);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x41, Vb + Dv);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x4d, PKT_GET8((int)pPkt + (UINT)Poly_id * 0x50 + 0x4d) + Dv);
-			Clut_w = *(USHORT *)((int)pPkt + (UINT)Poly_id * 0x50 + 0x36);
-			*(USHORT *)((int)pPkt + (UINT)Poly_id * 0x50 + 0x42) = (Tpage_w & 0xffe0) | (tex_page & 0x1f);
-			*(USHORT *)((int)pPkt + (UINT)Poly_id * 0x50 + 0x36) = (Clut_w & 0x803f) | clut_plus << 6;
-		} while (Poly_cnt != 0);
+		} while (Prev_cnt != 0);
 	}
 }
 
@@ -1340,63 +1324,113 @@ void Texture_Move_GT3(MODEL_WORK *pMw, USHORT tex_page, ULONG mvmu, short clut_p
 /* DS 0x800172f8 (Texture_Move_GT4) */
 void Texture_Move_GT4(MODEL_WORK *pMw, USHORT tex_page, ULONG mvmu, short clut_plus, UCHAR *pPoly_no)
 {
-	UCHAR Poly_id;
-	char Vb;
-	USHORT Tpage_w;
-	USHORT Clut_w;
 	char Du;
 	char Dv;
-	ULONG Uv_w;
 	UINT Poly_cnt;
+	UINT Prev_cnt;
+	POLY_GT4 *pGt4;
 	ULONG *pPkt;
 
 	Poly_cnt = (UINT)*pPoly_no;
 	pPkt = pMw->pPacket2;
 	if (Poly_cnt != 0)
 	{
+		pPoly_no++;
+		Poly_cnt--;
 		do
 		{
+			/* Each model polygon owns two consecutive GT4 packets (double buffer) */
+			pGt4 = (POLY_GT4 *)((int)pPkt + (UINT)*pPoly_no * 0x68);
 			pPoly_no++;
+			Prev_cnt = Poly_cnt;
 			Poly_cnt--;
-			Poly_id = *pPoly_no;
-			Uv_w = pPkt[(UINT)Poly_id * 0x1a + 6];
 			Du = (char)mvmu;
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x1a + 3, (char)pPkt[(UINT)Poly_id * 0x1a + 3] + Du);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x68 + 0xd);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x1a + 6, (char)Uv_w + Du);
-			Uv_w = pPkt[(UINT)Poly_id * 0x1a + 9];
 			Dv = (char)(mvmu >> 0x10);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x68 + 0xd, Vb + Dv);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x19);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x1a + 9, (char)Uv_w + Du);
-			Uv_w = pPkt[(UINT)Poly_id * 0x1a + 0xc];
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x19, Vb + Dv);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x25);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x1a + 0xc, (char)Uv_w + Du);
-			Tpage_w = *(USHORT *)((int)pPkt + (UINT)Poly_id * 0x68 + 0x1a);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x25, Vb + Dv);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x31, PKT_GET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x31) + Dv);
-			Clut_w = *(USHORT *)((int)pPkt + (UINT)Poly_id * 0x68 + 0xe);
-			*(USHORT *)((int)pPkt + (UINT)Poly_id * 0x68 + 0x1a) = (Tpage_w & 0xffe0) | (tex_page & 0x1f);
-			*(USHORT *)((int)pPkt + (UINT)Poly_id * 0x68 + 0xe) = (Clut_w & 0x803f) | clut_plus << 6;
-			Uv_w = pPkt[(UINT)Poly_id * 0x1a + 0x13];
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x1a + 0x10, (char)pPkt[(UINT)Poly_id * 0x1a + 0x10] + Du);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x41);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x1a + 0x13, (char)Uv_w + Du);
-			Uv_w = pPkt[(UINT)Poly_id * 0x1a + 0x16];
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x41, Vb + Dv);
-			Vb = PKT_GET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x4d);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x1a + 0x16, (char)Uv_w + Du);
-			Uv_w = pPkt[(UINT)Poly_id * 0x1a + 0x19];
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x4d, Vb + Dv);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x59, PKT_GET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x59) + Dv);
-			PKT_SET8(pPkt + (UINT)Poly_id * 0x1a + 0x19, (char)Uv_w + Du);
-			Tpage_w = *(USHORT *)((int)pPkt + (UINT)Poly_id * 0x68 + 0x4e);
-			PKT_SET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x65, PKT_GET8((int)pPkt + (UINT)Poly_id * 0x68 + 0x65) + Dv);
-			Clut_w = *(USHORT *)((int)pPkt + (UINT)Poly_id * 0x68 + 0x42);
-			*(USHORT *)((int)pPkt + (UINT)Poly_id * 0x68 + 0x4e) = (Tpage_w & 0xffe0) | (tex_page & 0x1f);
-			*(USHORT *)((int)pPkt + (UINT)Poly_id * 0x68 + 0x42) = (Clut_w & 0x803f) | clut_plus << 6;
-		} while (Poly_cnt != 0);
+			PKT_SET8(&pGt4->u0, (char)pGt4->u0 + Du);
+			PKT_SET8(&pGt4->v0, PKT_GET8(&pGt4->v0) + Dv);
+			PKT_SET8(&pGt4->u1, (char)pGt4->u1 + Du);
+			PKT_SET8(&pGt4->v1, PKT_GET8(&pGt4->v1) + Dv);
+			PKT_SET8(&pGt4->u2, (char)pGt4->u2 + Du);
+			PKT_SET8(&pGt4->v2, PKT_GET8(&pGt4->v2) + Dv);
+			PKT_SET8(&pGt4->u3, (char)pGt4->u3 + Du);
+			PKT_SET8(&pGt4->v3, PKT_GET8(&pGt4->v3) + Dv);
+			pGt4->tpage = (pGt4->tpage & 0xffe0) | (tex_page & 0x1f);
+			pGt4->clut = (pGt4->clut & 0x803f) | clut_plus << 6;
+			pGt4++;
+			PKT_SET8(&pGt4->u0, (char)pGt4->u0 + Du);
+			PKT_SET8(&pGt4->v0, PKT_GET8(&pGt4->v0) + Dv);
+			PKT_SET8(&pGt4->u1, (char)pGt4->u1 + Du);
+			PKT_SET8(&pGt4->v1, PKT_GET8(&pGt4->v1) + Dv);
+			PKT_SET8(&pGt4->u2, (char)pGt4->u2 + Du);
+			PKT_SET8(&pGt4->v2, PKT_GET8(&pGt4->v2) + Dv);
+			PKT_SET8(&pGt4->u3, (char)pGt4->u3 + Du);
+			PKT_SET8(&pGt4->v3, PKT_GET8(&pGt4->v3) + Dv);
+			pGt4->tpage = (pGt4->tpage & 0xffe0) | (tex_page & 0x1f);
+			pGt4->clut = (pGt4->clut & 0x803f) | clut_plus << 6;
+		} while (Prev_cnt != 0);
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* Texture_Move_GT4_up                                                 */
+/* Scale the UV coords of selected GT4 polys (by index list pPoly_no)  */
+/* by 1/Late around the offset Ouv (u in the low half, v in the high)  */
+/* ------------------------------------------------------------------ */
+/* DS 0x8001745c (Texture_Move_GT4_up) */
+void Texture_Move_GT4_up(MODEL_WORK *pMw, ULONG Late, ULONG Ouv, UCHAR *pPoly_no)
+{
+	ULONG Ov;
+	ULONG Ovm;
+	ULONG Ou;
+	ULONG Oum;
+	ULONG Du;
+	ULONG Dv;
+	UINT Poly_cnt;
+	UINT Poly_n;
+	UINT Prev_cnt;
+	POLY_GT4 *gt4;
+	ULONG *pPkt;
+
+	/* Du/Dv: rounding remainder of the original UV after the 1/Late scale (12-bit fixed point) */
+	Ov = Ouv >> 16;
+	Ovm = (Ov << 12) / Late;
+	Ou = Ouv & 0xffff;
+	Oum = (Ou << 12) / Late;
+	Poly_cnt = *pPoly_no++;
+	pPkt = pMw->pPacket2;
+	Dv = Ovm >> 12;
+	Dv = Ov - Dv;
+	Du = Oum >> 12;
+	Du = Ou - Du;
+	Poly_n = Poly_cnt;
+	Poly_cnt--;
+	if (Poly_n != 0)
+	{
+		do
+		{
+			/* two GT4 primitives (0x34 bytes each) per index in the list */
+			gt4 = (POLY_GT4 *)((int)pPkt + (UINT)*pPoly_no * 0x68);
+			pPoly_no++;
+			gt4->u0 = ((gt4->u0 << 12) / Late >> 12) + Du;
+			gt4->v0 = ((gt4->v0 << 12) / Late >> 12) + Dv;
+			gt4->u1 = ((gt4->u1 << 12) / Late >> 12) + Du;
+			gt4->v1 = ((gt4->v1 << 12) / Late >> 12) + Dv;
+			gt4->u2 = ((gt4->u2 << 12) / Late >> 12) + Du;
+			gt4->v2 = ((gt4->v2 << 12) / Late >> 12) + Dv;
+			gt4->u3 = ((gt4->u3 << 12) / Late >> 12) + Du;
+			gt4->v3 = ((gt4->v3 << 12) / Late >> 12) + Dv;
+			gt4++;
+			gt4->u0 = ((gt4->u0 << 12) / Late >> 12) + Du;
+			gt4->v0 = ((gt4->v0 << 12) / Late >> 12) + Dv;
+			gt4->u1 = ((gt4->u1 << 12) / Late >> 12) + Du;
+			gt4->v1 = ((gt4->v1 << 12) / Late >> 12) + Dv;
+			gt4->u2 = ((gt4->u2 << 12) / Late >> 12) + Du;
+			gt4->v2 = ((gt4->v2 << 12) / Late >> 12) + Dv;
+			gt4->u3 = ((gt4->u3 << 12) / Late >> 12) + Du;
+			gt4->v3 = ((gt4->v3 << 12) / Late >> 12) + Dv;
+			Prev_cnt = Poly_cnt;
+			Poly_cnt--;
+		} while (Prev_cnt != 0);
 	}
 }
 
@@ -1431,30 +1465,23 @@ void Rot_neck(ENEMY_WORK *pPm, short Cdir_y)
 		pNeck_parts = pNeck_enemy->pSin_parts_ptr;
 		Own_neck_no = pPm->Neck_no;
 		pOwn = &pOwn_parts[Own_neck_no];
-		Neck_tgt.vx = pNeck_parts[Enemy_neck_no].Workm.t[0];
-		Neck_tgt.vy = pNeck_parts[Enemy_neck_no].Workm.t[1];
-		Neck_tgt.vz = pNeck_parts[Enemy_neck_no].Workm.t[2];
-		Neck_tgt.pad = PAD_XY(pNeck_parts[Enemy_neck_no].Cdir_x, pNeck_parts[Enemy_neck_no].Cdir_y);
+		Neck_tgt = *(VECTOR *)pNeck_parts[Enemy_neck_no].Workm.t;
 		if ((pPm->Neck_flg & 4) != 0)
 		{
 			Neck_tgt.vy = (long)pPm->Neck_point_y;
 			Neck_tgt.vx = (long)pPm->Neck_point_x;
 			Neck_tgt.vz = (long)pPm->Neck_point_z;
-			if (pPm->Neck_point_y == -0x8000)
+			if ((USHORT)Neck_tgt.vy == 0x8000)
 			{
 				pNeck_parts = G.pEnemy[Neck_tgt.vx]->pSin_parts_ptr + G.pEnemy[Neck_tgt.vx]->Neck_no;
 				if (Neck_tgt.vx == 0x15)
 				{
 					pNeck_parts = pPm->pSin_parts_ptr + pPm->Neck_no;
 				}
-				Neck_tgt.vx = pNeck_parts->Workm.t[0];
-				Neck_tgt.vy = pNeck_parts->Workm.t[1];
-				Neck_tgt.vz = pNeck_parts->Workm.t[2];
-				Neck_tgt.pad = PAD_XY(pNeck_parts->Cdir_x, pNeck_parts->Cdir_y);
+				Neck_tgt = *(VECTOR *)pNeck_parts->Workm.t;
 			}
 		}
-		Neck_Dir_ZY((VECTOR *)pOwn->Workm.t, &Neck_tgt, &Neck_rot,
-					(short)(Cdir_y + Body_dir_y));
+		Neck_Dir_ZY((VECTOR *)pOwn->Workm.t, &Neck_tgt, &Neck_rot, (short)(Cdir_y + Body_dir_y));
 		if ((pPm->Neck_flg & 8) != 0)
 		{
 			Neck_rot.vx = 0;
@@ -1490,35 +1517,32 @@ void Rot_neck(ENEMY_WORK *pPm, short Cdir_y)
 			Spd_lim = (UINT)(UCHAR)pOwn->Free[6];
 		}
 		Ang_dif = ((int)Neck_rot.vy - (int)Cdir_y) - (int)(short)Body_dir_y;
-		if ((int)Vel << 1 < (int)((Ang_dif + (int)Vel) & 0xfff))
+		if ((int)((Ang_dif + (int)Vel) & 0xfff) > ((int)Vel << 1))
 		{
 			if ((Ang_dif & 0x800) != 0)
 			{
-				Vel = -Vel;
+				Neck_rot.vy = (Cdir_y + Body_dir_y) - Vel;
 			}
-			Neck_rot.vy = Cdir_y + (Body_dir_y + Vel);	/* DS: association keeps this sum from being shared with the Neck_Dir_ZY argument (frees s5) */
+			else
+			{
+				Neck_rot.vy = (Cdir_y + Body_dir_y) + Vel;
+			}
 		}
 		pFree = &pOwn->Free[0];
 		Vel = pOwn->Free[0] - (short)Spd_lim;
-		Ang_dif = Spd_lim + ((UINT)(USHORT)Neck_rot.vy -
-						((UINT)(USHORT)pOwn->Free[0] +
-						(UINT)Body_dir_y + (UINT)(USHORT)Cdir_y + (UINT)(USHORT)pOwn->Cdir_y));
+		Ang_dif = Spd_lim + ((UINT)(USHORT)Neck_rot.vy - ((UINT)(USHORT)pOwn->Free[0] + (UINT)Body_dir_y + (UINT)(USHORT)Cdir_y + (UINT)(USHORT)pOwn->Cdir_y));
 		pOwn->Free[0] = Vel;
 		if ((Ang_dif & 0x800) == 0)
 		{
 			pOwn->Free[0] = Vel + (short)Spd_lim * 2;
 		}
-		if (((int)(Ang_dif & 0xfff) < (int)(Spd_lim << 0x10) >> 0xf) &&
-			(pOwn->Free[0] = Neck_rot.vy - (Body_dir_y + (Cdir_y + pOwn->Cdir_y)),
-			 (pPm->Neck_flg & 0x40) != 0))
+		if (((int)(Ang_dif & 0xfff) < (int)(Spd_lim << 0x10) >> 0xf) && (pOwn->Free[0] = Neck_rot.vy - (Body_dir_y + (Cdir_y + pOwn->Cdir_y)), (pPm->Neck_flg & 0x40) != 0))
 		{
-			Vel = pPm->Neck_point_x;
-			pPm->Neck_point_x = Vel + -1;
-			if (Vel == 1)
+			if (--pPm->Neck_point_x == 0)
 			{
 				pPm->Neck_flg = 18;
 			}
-			pPm->Neck_point_y = Body_dir_y * 2 + ((Cdir_y * 2 + 0x80) - pPm->Neck_point_y);
+			pPm->Neck_point_y = Body_dir_y + (Cdir_y + ((short)Body_dir_y - (pPm->Neck_point_y - (Cdir_y + 0x80))));
 		}
 		pOwn->Cdir_y = pOwn->Cdir_y + *pFree;
 		if ((pPm->Neck_flg & 0x20) != 0)
@@ -1535,30 +1559,32 @@ void Rot_neck(ENEMY_WORK *pPm, short Cdir_y)
 		Body_dir_y = pOwn->Free[5];
 		if ((pPm->Neck_flg & 0x80) != 0)
 		{
-			Spd_lim = (UINT)((USHORT)pOwn->Free[6] >> 8);
+			Spd_lim = (UINT)((UCHAR *)&pOwn->Free[6])[1];
 		}
 		Ang_dif = (UINT)Neck_rot.vz;
-		if (((int)(short)Body_dir_y << 1 < (int)((Ang_dif + (int)(short)Body_dir_y) & 0xfff)) &&
-			(Neck_rot.vz = Body_dir_y, (Ang_dif & 0x800) != 0))
+		if ((int)((Ang_dif + (int)(short)Body_dir_y) & 0xfff) > ((int)(short)Body_dir_y << 1))
 		{
-			Neck_rot.vz = -Body_dir_y;
+			if ((Ang_dif & 0x800) != 0)
+			{
+				Neck_rot.vz = -Body_dir_y;
+			}
+			else
+			{
+				Neck_rot.vz = Body_dir_y;
+			}
 		}
 		Vel = pOwn->Free[1] - (short)Spd_lim;
-		Ang_dif = Spd_lim + ((UINT)(USHORT)Neck_rot.vz -
-						((UINT)(USHORT)pOwn->Cdir_z + (UINT)(USHORT)pOwn->Free[1]));
+		Ang_dif = Spd_lim + ((UINT)(USHORT)Neck_rot.vz - ((UINT)(USHORT)pOwn->Cdir_z + (UINT)(USHORT)pOwn->Free[1]));
 		pOwn->Free[1] = Vel;
 		if ((Ang_dif & 0x800) == 0)
 		{
 			pOwn->Free[1] = Vel + (short)Spd_lim * 2;
 		}
-		if (((int)(Ang_dif & 0xfff) < (int)(Spd_lim << 0x10) >> 0xf) &&
-			(pOwn->Free[1] = Neck_rot.vz - pOwn->Cdir_z, (pPm->Neck_flg & 0x20) != 0))
+		if (((int)(Ang_dif & 0xfff) < (int)(Spd_lim << 0x10) >> 0xf) && (pOwn->Free[1] = Neck_rot.vz - pOwn->Cdir_z, (pPm->Neck_flg & 0x20) != 0))
 		{
 			if (Neck_rot.vz != 0)
 			{
-				Vel = pPm->Neck_point_x;
-				pPm->Neck_point_x = Vel + -1;
-				if (Vel == 1)
+				if (--pPm->Neck_point_x == 0)
 				{
 					pPm->Neck_flg = 18;
 				}
@@ -1583,18 +1609,20 @@ void Rot_neck(ENEMY_WORK *pPm, short Cdir_y)
 /* DS 0x80017d98 (Rot_neck_em) */
 void Rot_neck_em(ENEMY_WORK *pPm, short Cdir_y)
 {
-	UCHAR Own_neck_no;
-	UCHAR Enemy_neck_no;
+	UINT Own_neck_no;
+	UINT Enemy_neck_no;
 	USHORT Body_dir_y;
-	short Lim_sgn;
 	PARTS_W *pEn_parts;
+	PARTS_W *pEn_p;
 	short Vel;
-	UINT Ang_dif;
 	PARTS_W *pOwn_parts;
-	PARTS_W *pOwn;
+	PARTS_W *pOwn_p;
+	UINT Ang_dif;
+	short Free_dif;
+	UINT Free_dif12;
 	UINT Spd_lim;
 	ENEMY_WORK *pNeck_enemy;
-	int Dir_sum;
+	short Dir_sum;
 	SVECTOR Neck_rot;
 	VECTOR Neck_tgt;
 
@@ -1602,60 +1630,57 @@ void Rot_neck_em(ENEMY_WORK *pPm, short Cdir_y)
 	{
 		Own_neck_no = pPm->Neck_no;
 		pOwn_parts = pPm->pSin_parts_ptr;
-		/* DS keeps the own neck PARTS_W in one saved register (s0), so one pointer matches its frame */
-		pOwn = &pOwn_parts[Own_neck_no];
+		pOwn_p = &pOwn_parts[Own_neck_no];
 		pNeck_enemy = (ENEMY_WORK *)pPm->pEnemy_ptr;
 		Enemy_neck_no = pNeck_enemy->Neck_no;
 		Body_dir_y = pOwn_parts->Cdir_y;
 		pEn_parts = pNeck_enemy->pSin_parts_ptr;
-		Dir_sum = (UINT)(USHORT)Cdir_y + (UINT)Body_dir_y;
-		Neck_tgt.vx = pEn_parts[Enemy_neck_no].Workm.t[0];
-		Neck_tgt.vy = pEn_parts[Enemy_neck_no].Workm.t[1];
-		Neck_tgt.vz = pEn_parts[Enemy_neck_no].Workm.t[2];
-		Neck_tgt.pad = PAD_XY(pEn_parts[Enemy_neck_no].Cdir_x, pEn_parts[Enemy_neck_no].Cdir_y);
-		Neck_Dir_ZY((VECTOR *)pOwn->Workm.t, &Neck_tgt, &Neck_rot,
-					(short)((UINT)(Dir_sum * 0x10000) >> 0x10));
+		pEn_p = &pEn_parts[Enemy_neck_no];
+		Neck_tgt = *(VECTOR *)pEn_p->Workm.t;
+		Dir_sum = Cdir_y + Body_dir_y;
+		Neck_Dir_ZY((VECTOR *)pOwn_p->Workm.t, &Neck_tgt, &Neck_rot, Dir_sum);
 		if ((pPm->Neck_flg & 2) != 0)
 		{
-			Neck_rot.vy = Body_dir_y + Cdir_y + pOwn->Cdir_y;
+			Neck_rot.vy = Cdir_y + pOwn_p->Cdir_y + Body_dir_y;
 		}
 		if (pPm == pNeck_enemy)
 		{
+			Neck_rot.vy = Cdir_y + pOwn_p->Cdir_y + Body_dir_y;
 			Neck_rot.vz = 0;
-			Neck_rot.vy = Body_dir_y + Cdir_y + pOwn->Cdir_y;
 		}
-		Spd_lim = (UINT)(USHORT)pOwn->Free[2];
-		Vel = pOwn->Free[4];
+		Spd_lim = (USHORT)pOwn_p->Free[2];
+		Vel = pOwn_p->Free[4];
 		if ((pPm->Neck_flg & 0x80) != 0)
 		{
-			Spd_lim = (UINT)(UCHAR)pOwn->Free[6];
+			Spd_lim = (UCHAR)pOwn_p->Free[6];
 		}
-		Ang_dif = ((int)Neck_rot.vy - (int)Cdir_y) - (int)(short)Body_dir_y;
-		if ((int)Vel << 1 < (int)((Ang_dif + (int)Vel) & 0xfff))
+		Ang_dif = (Neck_rot.vy - Cdir_y) - (short)Body_dir_y;
+		if ((int)((Ang_dif + Vel) & 0xfff) > Vel * 2)
 		{
-			Lim_sgn = -Vel;
 			if ((Ang_dif & 0x800) == 0)
 			{
-				Lim_sgn = Vel;
+				Neck_rot.vy = Vel + Dir_sum;
 			}
-			Neck_rot.vy = (short)Dir_sum + Lim_sgn;
+			else
+			{
+				Neck_rot.vy = Dir_sum - Vel;
+			}
 		}
-		Vel = pOwn->Free[0] - (short)Spd_lim;
-		Ang_dif = Spd_lim + ((UINT)(USHORT)Neck_rot.vy -
-						((UINT)(USHORT)pOwn->Free[0] +
-						(UINT)Body_dir_y + (UINT)(USHORT)Cdir_y + (UINT)(USHORT)pOwn->Cdir_y));
-		pOwn->Free[0] = Vel;
-		if ((Ang_dif & 0x800) == 0)
+		Free_dif = Spd_lim + ((USHORT)Neck_rot.vy - ((Cdir_y + (USHORT)pOwn_p->Cdir_y + Body_dir_y) + (USHORT)pOwn_p->Free[0]));
+		Vel = pOwn_p->Free[0] - Spd_lim;
+		Free_dif12 = Free_dif & 0xfff;
+		pOwn_p->Free[0] = Vel;
+		if ((Free_dif & 0x800) == 0)
 		{
-			pOwn->Free[0] = Vel + (short)Spd_lim * 2;
+			pOwn_p->Free[0] = Vel + Spd_lim * 2;
 		}
-		if ((int)(Ang_dif & 0xfff) < (int)(Spd_lim << 0x10) >> 0xf)
+		if ((int)Free_dif12 < (int)(Spd_lim << 0x10) >> 0xf)
 		{
-			pOwn->Free[0] = Neck_rot.vy - (Body_dir_y + Cdir_y + pOwn->Cdir_y);
+			pOwn_p->Free[0] = Neck_rot.vy - (Cdir_y + pOwn_p->Cdir_y + Body_dir_y);
 		}
-		pOwn->Cdir_y += pOwn->Free[0];
-		RotMatrix((SVECTOR *)&pOwn->Cdir_x, (MATRIX *)pOwn->M);
-		pOwn->Cdir_y = pOwn->Cdir_y - pOwn->Free[0];
+		pOwn_p->Cdir_y += pOwn_p->Free[0];
+		RotMatrix((SVECTOR *)&pOwn_p->Cdir_x, (MATRIX *)pOwn_p->M);
+		pOwn_p->Cdir_y = pOwn_p->Cdir_y - pOwn_p->Free[0];
 	}
 }
 
@@ -1666,82 +1691,79 @@ void Rot_neck_em(ENEMY_WORK *pPm, short Cdir_y)
 /* DS 0x80017fdc (Rot_neck_em_n) */
 void Rot_neck_em_n(ENEMY_WORK *pPm, short Cdir_y, short *pDir)
 {
-	UCHAR Own_neck_no;
-	UCHAR Enemy_neck_no;
+	UINT Own_neck_no;
+	UINT Enemy_neck_no;
 	USHORT Body_dir_y;
-	short Lim_sgn;
 	PARTS_W *pEn_parts;
+	PARTS_W *pEn_p;
 	short Vel;
 	PARTS_W *pOwn_parts;
+	PARTS_W *pOwn_p;
 	UINT Ang_dif;
+	short Free_dif;
+	UINT Free_dif12;
 	UINT Spd_lim;
 	ENEMY_WORK *pNeck_enemy;
-	int Dir_sum;
+	short Dir_sum;
 	SVECTOR Neck_rot;
 	VECTOR Neck_tgt;
 
 	if ((pPm->Neck_flg & 1) == 0)
 	{
-		pNeck_enemy = (ENEMY_WORK *)pPm->pEnemy_ptr;
-		pOwn_parts = pPm->pSin_parts_ptr;
 		Own_neck_no = pPm->Neck_no;
+		pOwn_parts = pPm->pSin_parts_ptr;
+		pOwn_p = &pOwn_parts[Own_neck_no];
+		pNeck_enemy = (ENEMY_WORK *)pPm->pEnemy_ptr;
 		Enemy_neck_no = pNeck_enemy->Neck_no;
 		Body_dir_y = pOwn_parts->Cdir_y;
 		pEn_parts = pNeck_enemy->pSin_parts_ptr;
-		Dir_sum = (UINT)(USHORT)Cdir_y + (UINT)Body_dir_y;
-		Neck_tgt.vx = pEn_parts[Enemy_neck_no].Workm.t[0];
-		Neck_tgt.vy = pEn_parts[Enemy_neck_no].Workm.t[1];
-		Neck_tgt.vz = pEn_parts[Enemy_neck_no].Workm.t[2];
-		Neck_tgt.pad = PAD_XY(pEn_parts[Enemy_neck_no].Cdir_x, pEn_parts[Enemy_neck_no].Cdir_y);
-		Neck_Dir_ZY((VECTOR *)pOwn_parts[Own_neck_no].Workm.t, &Neck_tgt, &Neck_rot,
-					(short)((UINT)(Dir_sum * 0x10000) >> 0x10));
+		pEn_p = &pEn_parts[Enemy_neck_no];
+		Neck_tgt = *(VECTOR *)pEn_p->Workm.t;
+		Dir_sum = Cdir_y + Body_dir_y;
+		Neck_Dir_ZY((VECTOR *)pOwn_p->Workm.t, &Neck_tgt, &Neck_rot, Dir_sum);
 		if ((pPm->Neck_flg & 2) != 0)
 		{
-			Neck_rot.vy = Body_dir_y + Cdir_y + pOwn_parts[Own_neck_no].Cdir_y;
+			Neck_rot.vy = Cdir_y + pOwn_p->Cdir_y + Body_dir_y;
 		}
 		if (pPm == pNeck_enemy)
 		{
-			Neck_rot.vy = Body_dir_y + Cdir_y + pOwn_parts[Own_neck_no].Cdir_y;
+			Neck_rot.vy = Cdir_y + pOwn_p->Cdir_y + Body_dir_y;
+			Neck_rot.vz = 0;
 		}
-		Spd_lim = (UINT)(USHORT)pOwn_parts[Own_neck_no].Free[2];
-		Vel = pOwn_parts[Own_neck_no].Free[4];
+		Spd_lim = (USHORT)pOwn_p->Free[2];
+		Vel = pOwn_p->Free[4];
 		if ((pPm->Neck_flg & 0x80) != 0)
 		{
-			Spd_lim = (UINT)(UCHAR)pOwn_parts[Own_neck_no].Free[6];
+			Spd_lim = (UCHAR)pOwn_p->Free[6];
 		}
-		Ang_dif = ((int)Neck_rot.vy - (int)Cdir_y) - (int)(short)Body_dir_y;
-		if ((int)Vel << 1 < (int)((Ang_dif + (int)Vel) & 0xfff))
+		Ang_dif = (Neck_rot.vy - Cdir_y) - (short)Body_dir_y;
+		if ((int)((Ang_dif + Vel) & 0xfff) > Vel * 2)
 		{
-			Lim_sgn = -Vel;
 			if ((Ang_dif & 0x800) == 0)
 			{
-				Lim_sgn = Vel;
+				Neck_rot.vy = Vel + Dir_sum;
 			}
-			Neck_rot.vy = (short)Dir_sum + Lim_sgn;
+			else
+			{
+				Neck_rot.vy = Dir_sum - Vel;
+			}
 		}
-		Vel = pOwn_parts[Own_neck_no].Free[0] - (short)Spd_lim;
-		Ang_dif = Spd_lim + ((UINT)(USHORT)Neck_rot.vy -
-						((UINT)(USHORT)pOwn_parts[Own_neck_no].Free[0] +
-						(UINT)Body_dir_y + (UINT)(USHORT)Cdir_y + (UINT)(USHORT)pOwn_parts[Own_neck_no].Cdir_y));
-		pOwn_parts[Own_neck_no].Free[0] = Vel;
-		if ((Ang_dif & 0x800) == 0)
+		Free_dif = Spd_lim + ((USHORT)Neck_rot.vy - ((USHORT)pOwn_p->Free[0] + (Cdir_y + (USHORT)pOwn_p->Cdir_y + Body_dir_y)));
+		Vel = pOwn_p->Free[0] - Spd_lim;
+		Free_dif12 = Free_dif & 0xfff;
+		pOwn_p->Free[0] = Vel;
+		if ((Free_dif & 0x800) == 0)
 		{
-			pOwn_parts[Own_neck_no].Free[0] = Vel + (short)Spd_lim * 2;
+			pOwn_p->Free[0] = Vel + Spd_lim * 2;
 		}
-		if ((int)(Ang_dif & 0xfff) < (int)(Spd_lim << 0x10) >> 0xf)
+		if ((int)Free_dif12 < (int)(Spd_lim << 0x10) >> 0xf)
 		{
-			pOwn_parts[Own_neck_no].Free[0] = Neck_rot.vy - (Body_dir_y + Cdir_y + pOwn_parts[Own_neck_no].Cdir_y);
+			pOwn_p->Free[0] = Neck_rot.vy - (Cdir_y + pOwn_p->Cdir_y + Body_dir_y);
 		}
-		*pDir = pOwn_parts[Own_neck_no].Free[0];
+		*pDir = pOwn_p->Free[0];
 	}
 }
 
-/* ------------------------------------------------------------------ */
-/* Texture_Move_GT4_up                                                 */
-/* Slide UV coords for GT4 polys (upper half variant)                 */
-/* GAP: DS 0x8001745c has no function in Ghidra (Texture_Move_GT4 ends  */
-/* at 0x80017458, Rot_neck starts at 0x800177c0). Body not recovered.  */
-/* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
 /* Neck_Dir_ZY                                                         */
@@ -1755,6 +1777,7 @@ ULONG Neck_Dir_ZY(VECTOR *pSv0, VECTOR *pSv1, SVECTOR *pRot, short Front_dir_y)
 	ULONG Ang_z;
 	UINT Dz;
 	UINT Dy;
+	UINT Side;
 	long x;
 
 	x = pSv1->vx - pSv0->vx;
@@ -1775,14 +1798,22 @@ ULONG Neck_Dir_ZY(VECTOR *pSv0, VECTOR *pSv1, SVECTOR *pRot, short Front_dir_y)
 	Ang_z = 0x80000000;
 	if (Dy != 0)
 	{
-		Ang_z = (UINT)((Dy & 0x80000000) == 0) * 0x800 + 0xc00;
+		if ((Dy & 0x80000000) != 0)
+		{
+			Side = 0;
+		}
+		else
+		{
+			Side = 1;
+		}
+		Ang_z = Side * 0x800 + 0xc00;
 		pRot->vz = (short)Ang_z;
 	}
 	if (Dist != 0)
 	{
 		DIV_S(Ang_z, (int)(Dy * 0x1000), Dist);
 		Ang_z = catan((int)Ang_z);
-		pRot->vz = (0x1000U - (short)Ang_z) & 0xfff;
+		pRot->vz = (0x1000U - Ang_z) & 0xfff;
 	}
 	return Ang_z;
 }
@@ -1794,19 +1825,20 @@ ULONG Neck_Dir_ZY(VECTOR *pSv0, VECTOR *pSv1, SVECTOR *pRot, short Front_dir_y)
 /* DS 0x80018378 (Op_PartsSort00) */
 void Op_PartsSort00(ENEMY_WORK *pEm)
 {
+	/* retail frame is 208 (Op_PartsSort00); this 32-byte reservation and pTmp_m fill it; never read */
+	volatile int Rsv[8];
 	USHORT Em_dir_y;
 	PARTS_W *pP_ptr;
-	ULONG Frame_pad[8];	/* 0x38..0x57 (32 bytes): no retail instruction references them; retail tmp_m is at 0x58 */
 	MATRIX tmp_m[3];
+	MATRIX *pTmp_m;
 
-	(void)Frame_pad;
 	pP_ptr = pEm->pSin_parts_ptr;
+	pTmp_m = tmp_m;
 	RotMatrix((SVECTOR *)&pEm->Cdir_x, (MATRIX *)pEm->M);
-	CompM((MATRIX *)pEm->M, (MATRIX *)pP_ptr->M, tmp_m);
+	CompM((MATRIX *)pEm->M, (MATRIX *)pP_ptr->M, pTmp_m);
 	Em_dir_y = pEm->Cdir_y;
 	pP_ptr->Cdir_z &= 0xfff;
-	Kami_rot05(pP_ptr + 9, tmp_m, 400, 0, 0x28, 4, 0, 400, 0, 0x18, 4, 0,
-			   (int)(((UINT)Em_dir_y + (UINT)(USHORT)pP_ptr->Cdir_y) * 0x10000) >> 0x10);
+	Kami_rot05(pP_ptr + 9, pTmp_m, 400, 0, 0x28, 4, 0, 400, 0, 0x18, 4, 0, (int)(((UINT)Em_dir_y + (UINT)(USHORT)pP_ptr->Cdir_y) * 0x10000) >> 0x10);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1816,14 +1848,16 @@ void Op_PartsSort00(ENEMY_WORK *pEm)
 /* DS 0x8001844c (Op_PartsSort05) */
 void Op_PartsSort05(ENEMY_WORK *pEm)
 {
+	/* retail reserves 32 more bytes of locals (Op_PartsSort05 frame 224); never read */
+	volatile int Rsv[8];
 	short rot_y;
 	int now_y;
 	PARTS_W *pP_ptr;
-	ULONG Frame_pad[8];	/* 0x38..0x57 (32 bytes): no retail instruction references them; retail tmp_m is at 0x58 */
+	PARTS_W *pKami_parts;
 	MATRIX tmp_m[3];
 
-	(void)Frame_pad;
 	pP_ptr = pEm->pSin_parts_ptr;
+	pKami_parts = pP_ptr + 0xf;
 	if ((pEm->Be_flg & 0x40000) == 0)
 	{
 		RotMatrix((SVECTOR *)&pEm->Cdir_x, (MATRIX *)pEm->M);
@@ -1837,10 +1871,10 @@ void Op_PartsSort05(ENEMY_WORK *pEm)
 		rot_y = pP_ptr[8].Free[0] + rot_y;
 	}
 	now_y = (int)rot_y;
-	Kami_rot05(pP_ptr + 0xf, &pP_ptr[8].Workm,  400, 100, 0x28, 2, 0, 400, 100, 0x18, 4, 0, now_y);
-	Kami_rot05(pP_ptr + 0x10, &pP_ptr[0xf].Workm, 0x15e, 0, 0x30, 4, 0x96, 0x96, 0, 0x18, 6, 0, now_y);
-	Kami_rot05(pP_ptr + 0x11, &pP_ptr[0x10].Workm, 300, 0, 0x30, 4, 0, 0x96, 0, 0x18, 6, 0, now_y);
-	Kami_rot05(pP_ptr + 0x12, &pP_ptr[0x11].Workm, 0xfa, 0, 0x30, 4, 0, 100, 0, 0x18, 6, 0, now_y);
+	Kami_rot05(pKami_parts, &pP_ptr[8].Workm,  400, 100, 0x28, 2, 0, 400, 100, 0x18, 4, 0, now_y);
+	Kami_rot05(pKami_parts + 1, &pKami_parts->Workm, 0x15e, 0, 0x30, 4, 0x96, 0x96, 0, 0x18, 6, 0, now_y);
+	Kami_rot05(pKami_parts + 2, &pKami_parts[1].Workm, 300, 0, 0x30, 4, 0, 0x96, 0, 0x18, 6, 0, now_y);
+	Kami_rot05(pKami_parts + 3, &pKami_parts[2].Workm, 0xfa, 0, 0x30, 4, 0, 100, 0, 0x18, 6, 0, now_y);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1850,12 +1884,12 @@ void Op_PartsSort05(ENEMY_WORK *pEm)
 /* DS 0x80018648 (Op_PartsSort06) */
 void Op_PartsSort06(ENEMY_WORK *pEm)
 {
+	/* retail reserves 128 more bytes of locals (Op_PartsSort06 frame 208); never read */
+	volatile int Rsv[32];
 	USHORT Em_dir_y;
 	PARTS_W *pP_ptr;
 	PARTS_W *pKami_parts;
-	ULONG Frame_pad[32];	/* 0x38..0xb7 (128 bytes): retail uses only outgoing args 0x10..0x33 and saves 0xb8..0xcb */
 
-	(void)Frame_pad;
 	pP_ptr = pEm->pSin_parts_ptr;
 	pKami_parts = pP_ptr + 0xf;	/* retail computes this in the Be_flg bne delay slot (0x8001867c), so it runs on both paths */
 	if ((pEm->Be_flg & 0x40000) == 0)
@@ -1865,8 +1899,7 @@ void Op_PartsSort06(ENEMY_WORK *pEm)
 	CompM((MATRIX *)pEm->M, (MATRIX *)pP_ptr->M, &pP_ptr->Workm);
 	Em_dir_y = pEm->Cdir_y;
 	pP_ptr->Cdir_z &= 0xfff;
-	Kami_rot05(pKami_parts, &pP_ptr->Workm, 400, 100, 0x30, 4, 0, 0x32, 0, 0x30, 6, 0,
-			   (int)(((UINT)Em_dir_y + (UINT)(USHORT)pP_ptr->Cdir_y) * 0x10000) >> 0x10);
+	Kami_rot05(pKami_parts, &pP_ptr->Workm, 400, 100, 0x30, 4, 0, 0x32, 0, 0x30, 6, 0, (int)(((UINT)Em_dir_y + (UINT)(USHORT)pP_ptr->Cdir_y) * 0x10000) >> 0x10);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1874,10 +1907,10 @@ void Op_PartsSort06(ENEMY_WORK *pEm)
 /* Hair/cloth spring physics rotation for parts type 5                */
 /* ------------------------------------------------------------------ */
 /* DS 0x80018728 (Kami_rot05) */
-void Kami_rot05(PARTS_W *pP_ptr, MATRIX *opw,
-				short jyu, short mg, int ow, int air_u, int z_under,
-				int jyu_x, int mg_x, int ow_x, int air_u_x, int x_under, int now_y)
+void Kami_rot05(PARTS_W *pP_ptr, MATRIX *opw, short jyu, short mg, int ow, int air_u, int z_under, int jyu_x, int mg_x, int ow_x, int air_u_x, int x_under, int now_y)
 {
+	/* retail reserves 68 more bytes of locals (Kami_rot05 frame 288); never read */
+	volatile int Rsv[17];
 	MATRIX M1;
 	MATRIX Mtmp;
 	MATRIX Mchk;
@@ -1892,7 +1925,7 @@ void Kami_rot05(PARTS_W *pP_ptr, MATRIX *opw,
 	UINT Uv;
 	int Ang;
 	int Tmp;
-	int Div;
+	int Late;
 	short Rz;
 	USHORT Rx;
 	short Air_u;
@@ -1972,8 +2005,8 @@ void Kami_rot05(PARTS_W *pP_ptr, MATRIX *opw,
 	/* spring the free angles (damped toward zero, driven by the sin of the lag) */
 	Ang = rsin((int)Rz - (int)(short)z_under);
 	Tmp = (int)pP_ptr->Free[0];
-	DIV_S(Div, Tmp, (int)Air_u);	/* DS: signed divide with the zero and overflow checks */
-	Uv  = (UINT)(Tmp - Div) - (UINT)(((int)(short)ow * Ang) >> 12);
+	DIV_S(Late, Tmp, (int)Air_u);	/* DS: signed divide with the zero and overflow checks */
+	Uv  = (UINT)(Tmp - Late) - (UINT)(((int)(short)ow * Ang) >> 12);
 	pP_ptr->Free[0] = (USHORT)(Uv & 0xfff);
 	if ((Uv & 0x800) != 0)
 	{
@@ -1982,8 +2015,8 @@ void Kami_rot05(PARTS_W *pP_ptr, MATRIX *opw,
 
 	Ang = rsin((int)(short)Rx - (int)(short)x_under);
 	Tmp = (int)pP_ptr->Free[1];
-	DIV_S(Div, Tmp, (int)(short)air_u_x);
-	Uv  = (UINT)(Tmp - Div) - (UINT)(((int)(short)ow_x * Ang) >> 12);
+	DIV_S(Late, Tmp, (int)(short)air_u_x);
+	Uv  = (UINT)(Tmp - Late) - (UINT)(((int)(short)ow_x * Ang) >> 12);
 	pP_ptr->Free[1] = (USHORT)(Uv & 0xfff);
 	if ((Uv & 0x800) != 0)
 	{
@@ -2006,19 +2039,29 @@ void Kami_rot05(PARTS_W *pP_ptr, MATRIX *opw,
 /* DS 0x80018cc8 (W_rot) */
 short W_rot(short rxz, short ry)
 {
+	UINT Pos_side;
 	long x;
 	long y;
+	long z;
 	short rot;
 
-	rot = (USHORT)(((int)rxz & 0x80000000U) == 0) * 0x800 + 0xc00;
+	if (((int)rxz & 0x80000000U) != 0)
+	{
+		Pos_side = 0;
+	}
+	else
+	{
+		Pos_side = 1;
+	}
+	rot = Pos_side * 0x800 + 0xc00;
 	y = -(int)ry;
 	if (y != 0)
 	{
 		x = (int)rxz << 0xc;
-		DIV_S(y, (int)x, y);	/* DS: signed divide with the zero and overflow checks */
-		y = catan(y);
-		rot = (short)y;
-		if (0 < ry)
+		DIV_S(z, (int)x, y);	/* DS: signed divide with the zero and overflow checks */
+		z = catan(z);
+		rot = (short)z;
+		if (y < 0)
 		{
 			rot += 0x800;
 		}
@@ -2033,19 +2076,29 @@ short W_rot(short rxz, short ry)
 /* DS 0x80018d64 (W_rot_x) */
 short W_rot_x(short rxz, short ry)
 {
+	UINT Pos_side;
 	long x;
 	long y;
+	long z;
 	short rot;
 
-	rot = (USHORT)(((int)rxz & 0x80000000U) == 0) << 0xb | 0x400;
+	if (((int)rxz & 0x80000000U) != 0)
+	{
+		Pos_side = 0;
+	}
+	else
+	{
+		Pos_side = 1;
+	}
+	rot = Pos_side << 0xb | 0x400;
 	y = -(int)ry;
 	if (y != 0)
 	{
 		x = (int)rxz << 0xc;
-		DIV_S(y, (int)x, y);	/* DS: signed divide with the zero and overflow checks */
-		y = catan(y);
-		rot = (short)y;
-		if (0 < ry)
+		DIV_S(z, (int)x, y);	/* DS: signed divide with the zero and overflow checks */
+		z = catan(z);
+		rot = (short)z;
+		if (y < 0)
 		{
 			rot = -rot;
 		}
@@ -2072,52 +2125,51 @@ void Rbj_set(void)
 	pRbj = (G.pRoom)->pRbj;
 	if (pRbj != (ULONG *)0x0)
 	{
+		Em_no = 0;
 		Rec_cnt = (char)pRbj[1];
 		pKan_ofs = (int *)((int)pRbj + *pRbj);
 		pSeq_ofs = pKan_ofs + 1;
 		do
 		{
-			Em_no = 0;
 			pRbj_rec = (ULONG *)((int)pRbj + *pKan_ofs);
 			Flg_bits = (UINT)*pRbj_rec;
-			if ((G.System_flg & SYS_EX_BATTLE) == 0)
+			if ((G.System_flg & SYS_EX_BATTLE) != 0)
 			{
-				if ((G.Status_flg & STAT_SPECIAL_RUN) == 0)
+				/* life 0 and 3 take the first record bit, life 1 and 2 the second */
+				switch (G.SaveData.Player_life)
 				{
-					if ((Flg_bits & 1) != 0) goto Rbj_set_player;
+				case 0:
+				case 3:
+					if ((Flg_bits & 1) != 0)
+					{
+												G.Player.pRoom_kan_t_ptr = pRbj_rec + 1;
+						G.Player.pRoom_seq_t_ptr = (ULONG *)((int)pRbj + *pSeq_ofs);
+					}
+					break;
+				case 1:
+				case 2:
+					if ((Flg_bits & 2) != 0)
+					{
+												G.Player.pRoom_kan_t_ptr = pRbj_rec + 1;
+						G.Player.pRoom_seq_t_ptr = (ULONG *)((int)pRbj + *pSeq_ofs);
+					}
+					break;
 				}
-				else if ((int)Flg_bits < 0)
+				Em_no++;
+				Flg_bits >>= 1;
+			}
+			else if ((G.Status_flg & STAT_SPECIAL_RUN) != 0)
+			{
+				if ((int)Flg_bits < 0)
 				{
-Rbj_set_player:
 					G.Player.pRoom_kan_t_ptr = pRbj_rec + 1;
 					G.Player.pRoom_seq_t_ptr = (ULONG *)((int)pRbj + *pSeq_ofs);
 				}
 			}
-			else
+			else if ((Flg_bits & 1) != 0)
 			{
-				if (G.SaveData.Player_life < 3)
-				{
-					if (G.SaveData.Player_life < 1)
-					{
-						if (G.SaveData.Player_life == 0) goto Rbj_set_life0;
-					}
-					else if ((Flg_bits & 2) != 0)
-					{
-						G.Player.pRoom_seq_t_ptr = (ULONG *)((int)pRbj + *pSeq_ofs);
-						G.Player.pRoom_kan_t_ptr = pRbj_rec + 1;
-					}
-				}
-				else if (G.SaveData.Player_life == 3)
-				{
-Rbj_set_life0:
-					if ((Flg_bits & 1) != 0)
-					{
-						G.Player.pRoom_seq_t_ptr = (ULONG *)((int)pRbj + *pSeq_ofs);
-						G.Player.pRoom_kan_t_ptr = pRbj_rec + 1;
-					}
-				}
-				Em_no = 1;
-				Flg_bits >>= 1;
+				G.Player.pRoom_kan_t_ptr = pRbj_rec + 1;
+				G.Player.pRoom_seq_t_ptr = (ULONG *)((int)pRbj + *pSeq_ofs);
 			}
 			Flg_bits >>= 1;
 			if (Flg_bits != 0)
@@ -2139,8 +2191,8 @@ Rbj_set_life0:
 			}
 			pSeq_ofs += 2;
 			pKan_ofs += 2;
-			Rec_cnt = Rec_cnt + -1;
-		} while (Rec_cnt != 0);
+			Em_no = 0;
+		} while (--Rec_cnt != 0);
 	}
 }
 
@@ -2151,28 +2203,25 @@ Rbj_set_life0:
 /* DS 0x80018fb0 (Em_dead_flg_on) */
 void Em_dead_flg_on(ENEMY_WORK *pEm)
 {
-	ULONG *p;
-	ULONG x;
-
-	if (G.SaveData.Stage_no < 3)
+	/* Stage_no 3 and above, or a run with STAT_SPECIAL_RUN set, records the kill in Enemy_flg2;
+	   otherwise the kill goes to Enemy_flg. The bit number is the enemy's Em_set_flg.
+	   DS sets up both arguments separately in each of the three branches (lbu a1 from Em_set_flg,
+	   then a0 = Enemy_flg2 or Enemy_flg) and all three branches reach one shared jal Flg_on, so the
+	   source calls Flg_on once per branch and the compiler merges the calls into that one call site.
+	   A single call fed by pointer and bit locals lets CCPSX fold the two identical Enemy_flg2
+	   branches into one block, which DS keeps apart. The Oct 97 mockup lists no locals here. */
+	if (G.SaveData.Stage_no >= 3)
 	{
-		if ((G.Status_flg & STAT_SPECIAL_RUN) == 0)
-		{
-			x = (ULONG)pEm->Em_set_flg;
-			p = G.SaveData.Enemy_flg;
-		}
-		else
-		{
-			x = (ULONG)pEm->Em_set_flg;
-			p = G.SaveData.Enemy_flg2;
-		}
+		Flg_on(G.SaveData.Enemy_flg2, pEm->Em_set_flg);
+	}
+	else if ((G.Status_flg & STAT_SPECIAL_RUN) != 0)
+	{
+		Flg_on(G.SaveData.Enemy_flg2, pEm->Em_set_flg);
 	}
 	else
 	{
-		x = (ULONG)pEm->Em_set_flg;
-		p = G.SaveData.Enemy_flg2;
+		Flg_on(G.SaveData.Enemy_flg, pEm->Em_set_flg);
 	}
-	Flg_on(p, x);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2223,10 +2272,7 @@ void Aida_Jh_move(ENEMY_WORK *pEm)
 	MulJh(pEm, pP_ptr, &Aida_jh5_head);
 	VSync(1);
 	Aida_Jh_sort(pEm);
-	if (((G.Status_flg & STAT_MIRROR_MATRIX) != 0) &&
-		((G.Mirror_flg == 2 ||
-		 (Mirror_in_view((G.pRoom)->pRcut + G.SaveData.Cut_no, G.Mirror_flg,
-								 (VECTOR *)&pEm->Pos_x) != 0))))
+	if (((G.Status_flg & STAT_MIRROR_MATRIX) != 0) && ((G.Mirror_flg == 2 || (Mirror_in_view((G.pRoom)->pRcut + G.SaveData.Cut_no, G.Mirror_flg, (VECTOR *)&pEm->Pos_x) != 0))))
 	{
 		Parts_work_cp(pEm);
 		pTmp = pEm->pSin_parts_ptr;
@@ -2236,34 +2282,10 @@ void Aida_Jh_move(ENEMY_WORK *pEm)
 		MulJh(pEm, pP_ptr, &Aida_jh2_head);
 		MulJh(pEm, pP_ptr, &Aida_jh4_head);
 		MulJh(pEm, pP_ptr, &Aida_jh5_head);
-		{
-			static const UCHAR Mtx_copy_ofs[8] = { 0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c };
-			int i;
-
-			for (i = 0; i < 8; i++)
-			{
-				MTX_L(&Save_ws, Mtx_copy_ofs[i]) = MTX_L(&GsWSMATRIX, Mtx_copy_ofs[i]);
-			}
-		}
-		{
-			static const UCHAR Mtx_copy_ofs[8] = { 0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c };
-			int i;
-
-			for (i = 0; i < 8; i++)
-			{
-				MTX_L(&GsWSMATRIX, Mtx_copy_ofs[i]) = MTX_L(&GsMWSMATRIX, Mtx_copy_ofs[i]);
-			}
-		}
+		Save_ws = GsWSMATRIX;
+		GsWSMATRIX = GsMWSMATRIX;
 		Aida_Jh_sort(pEm);
-		{
-			static const UCHAR Mtx_copy_ofs[8] = { 0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c };
-			int i;
-
-			for (i = 0; i < 8; i++)
-			{
-				MTX_L(&GsWSMATRIX, Mtx_copy_ofs[i]) = MTX_L(&Save_ws, Mtx_copy_ofs[i]);
-			}
-		}
+		GsWSMATRIX = Save_ws;
 		pEm->pSin_parts_ptr = pTmp;
 	}
 }
@@ -2295,44 +2317,31 @@ void Kg_Jh_move(ENEMY_WORK *pEm)
 	Jh_sort(pEm, pP_ptr + 2);
 }
 
-/* ------------------------------------------------------------------ */
-/* Player jelly-hair data (exe ROM initialisers)                       */
-/* Jh_set fills the pointer fields of Pl_jh_head at run time           */
-/* ------------------------------------------------------------------ */
-/* DS 0x8009ac98 (Pl_jh_tbl) */
-JH_TBL Pl_jh_tbl[73] = {
-	{ 5, 0x1000 }, { 7, 0x1000 }, { 9, 0x1000 }, { 6, 0x1000 },
-	{ 4, 0x1000 }, { 8, 0x1000 }, { 11, 0x1000 }, { 14, 0x1000 },
-	{ 13, 0x1000 }, { 28, 0x1000 }, { 21, 0x1000 }, { 22, 0x1000 },
-	{ 23, 0x1000 }, { 20, 0x1000 }, { 39, 0x1000 }, { 38, 0x1000 },
-	{ 34, 0x1000 }, { 43, 0x1000 }, { 44, 0x1000 }, { 46, 0x1000 },
-	{ 42, 0x1000 }, { 41, 0x1000 }, { 45, 0x1000 }, { 40, 0x1000 },
-	{ 65, 0x1000 }, { 69, 0x1000 }, { 66, 0x1000 }, { 67, 0x1000 },
-	{ 68, 0x1000 }, { 70, 0x1000 }, { 71, 0x1000 }, { 72, 0x1000 },
-	{ 16, 0x0e00 }, { 10, 0x0e00 }, { 17, 0x0e00 }, { 3, 0x0c00 },
-	{ 36, 0x0c00 }, { 33, 0x0c00 }, { 24, 0x0c00 }, { 26, 0x0c00 },
-	{ 32, 0x0c00 }, { 35, 0x0c00 }, { 31, 0x0800 }, { 12, 0x0800 },
-	{ 30, 0x0800 }, { 18, 0x0800 }, { 37, 0x0800 }, { 15, 0x0800 },
-	{ 19, 0x0800 }, { 0, 0x0400 }, { 1, 0x0400 }, { 25, 0x0400 },
-	{ 2, 0x0400 }, { 27, 0x0400 }, { 29, 0x0400 }, { 56, 0x0400 },
-	{ 49, 0x0400 }, { 48, 0x0400 }, { 50, 0x0400 }, { 57, 0x0400 },
-	{ 47, 0x0400 }, { 51, 0x0200 }, { 58, 0x0200 }, { 53, 0x0000 },
-	{ 61, 0x0000 }, { 62, 0x0000 }, { 54, 0x0000 }, { 55, 0x0000 },
-	{ 60, 0x0000 }, { 59, 0x0000 }, { 52, 0x0000 }, { 64, 0x0000 },
-	{ 63, 0x0000 },
+/* DS 0x8009a7c4 (Aida_jh0_tbl) */
+JH_TBL Aida_jh0_tbl[73] = {
+	{ 0x0019, 0x1000 }, { 0x001a, 0x1000 }, { 0x0011, 0x1000 }, { 0x001c, 0x1000 },
+	{ 0x0025, 0x1000 }, { 0x0024, 0x1000 }, { 0x0026, 0x1000 }, { 0x0003, 0x1000 },
+	{ 0x0008, 0x1000 }, { 0x0009, 0x1000 }, { 0x0006, 0x1000 }, { 0x0007, 0x1000 },
+	{ 0x0016, 0x1000 }, { 0x000a, 0x1000 }, { 0x0022, 0x1000 }, { 0x0067, 0x1000 },
+	{ 0x0023, 0x1000 }, { 0x000d, 0x1000 }, { 0x0004, 0x1000 }, { 0x001d, 0x1000 },
+	{ 0x0021, 0x1000 }, { 0x0012, 0x1000 }, { 0x001f, 0x1000 }, { 0x0000, 0x1000 },
+	{ 0x000e, 0x1000 }, { 0x0005, 0x1000 }, { 0x0001, 0x1000 }, { 0x001b, 0x1000 },
+	{ 0x000c, 0x1000 }, { 0x001e, 0x1000 }, { 0x0018, 0x1000 }, { 0x0014, 0x1000 },
+	{ 0x0017, 0x1000 }, { 0x0068, 0x1000 }, { 0x0028, 0x1000 }, { 0x0029, 0x1000 },
+	{ 0x000b, 0x1000 }, { 0x0013, 0x1000 }, { 0x0027, 0x1000 }, { 0x000f, 0x1000 },
+	{ 0x002f, 0x0c00 }, { 0x0036, 0x0c00 }, { 0x0031, 0x0c00 }, { 0x0069, 0x0c00 },
+	{ 0x0037, 0x0c00 }, { 0x0035, 0x0c00 }, { 0x0030, 0x0c00 }, { 0x0041, 0x0800 },
+	{ 0x0044, 0x0800 }, { 0x0045, 0x0800 }, { 0x006a, 0x0800 }, { 0x0046, 0x0800 },
+	{ 0x0042, 0x0800 }, { 0x0043, 0x0800 }, { 0x004d, 0x0400 }, { 0x004f, 0x0400 },
+	{ 0x0040, 0x0400 }, { 0x003b, 0x0400 }, { 0x004b, 0x0400 }, { 0x004c, 0x0400 },
+	{ 0x004e, 0x0400 }, { 0x004a, 0x0400 }, { 0x003f, 0x0400 }, { 0x003a, 0x0000 },
+	{ 0x0053, 0x0000 }, { 0x0052, 0x0000 }, { 0x003e, 0x0000 }, { 0x006e, 0x0000 },
+	{ 0x0075, 0x0000 }, { 0x0057, 0x0000 }, { 0x003d, 0x0000 }, { 0x0055, 0x0000 },
+	{ 0x0056, 0x0000 }
 };
 
-/* DS 0x8009adbc (Pl_jh_head) */
-JH_HEAD Pl_jh_head = {
-	0,						/* Parts0_no */
-	1,						/* Parts1_no */
-	73,						/* Vn_num */
-	0, 0, 0, 0,				/* p0Vec, p0Nor, p0Ovec, p0Onor (runtime pointers, zero in ROM) */
-	{ 0, 0, 0 },				/* Parts0_off */
-	0, 0, 0, 0,				/* p1Vec, p1Nor, p1Ovec, p1Onor (runtime pointers, zero in ROM) */
-	{ 29, 19, 0 },				/* Parts1_off */
-	Pl_jh_tbl					/* pJh (retail 0x8009ac98) */
-};
+/* DS 0x8009a8e8 (Aida_jh0_head) */
+JH_HEAD Aida_jh0_head = { 0x00, 0x01, 0x0049, 0, 0, 0, 0, { 0x0000, 0x0000, 0x0000, 0x0000 }, 0, 0, 0, 0, { 0x0000, 0x0000, 0x0000, 0x0000 }, Aida_jh0_tbl };
 
 /* ------------------------------------------------------------------ */
 /* Pl_jh_init                                                          */
@@ -2360,41 +2369,16 @@ void Pl_jh_move(ENEMY_WORK *pEm)
 	Jh_sort(pEm, pH_parts);
 	if ((G.Status_flg & STAT_MIRROR_MATRIX) != 0)
 	{
-		if ((G.Mirror_flg == 2) ||
-			(Mirror_in_view((G.pRoom)->pRcut + G.SaveData.Cut_no, G.Mirror_flg, (VECTOR *)&pEm->Pos_x) != 0))
+		if ((G.Mirror_flg == 2) || (Mirror_in_view((G.pRoom)->pRcut + G.SaveData.Cut_no, G.Mirror_flg, (VECTOR *)&pEm->Pos_x) != 0))
 		{
 			Parts_work_cp(pEm);
 			pPl = pEm->pSin_parts_ptr;
 			pEm->pSin_parts_ptr = (PARTS_W *)pEm->pM_char_ptr;
 			MulJh(pEm, pH_parts, &Pl_jh_head);
-			{
-				static const UCHAR Mtx_copy_ofs[8] = { 0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c };
-				int i;
-
-				for (i = 0; i < 8; i++)
-				{
-					MTX_L(&Save_ws, Mtx_copy_ofs[i]) = MTX_L(&GsWSMATRIX, Mtx_copy_ofs[i]);
-				}
-			}
-			{
-				static const UCHAR Mtx_copy_ofs[8] = { 0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c };
-				int i;
-
-				for (i = 0; i < 8; i++)
-				{
-					MTX_L(&GsWSMATRIX, Mtx_copy_ofs[i]) = MTX_L(&GsMWSMATRIX, Mtx_copy_ofs[i]);
-				}
-			}
+			Save_ws = GsWSMATRIX;
+			GsWSMATRIX = GsMWSMATRIX;
 			Jh_sort(pEm, pEm->pSin_parts_ptr);
-			{
-				static const UCHAR Mtx_copy_ofs[8] = { 0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c };
-				int i;
-
-				for (i = 0; i < 8; i++)
-				{
-					MTX_L(&GsWSMATRIX, Mtx_copy_ofs[i]) = MTX_L(&Save_ws, Mtx_copy_ofs[i]);
-				}
-			}
+			GsWSMATRIX = Save_ws;
 			pEm->pSin_parts_ptr = pPl;
 		}
 	}
@@ -2485,6 +2469,8 @@ ULONG Jh_set(ENEMY_WORK *pEm, PARTS_W *pH_parts, JH_HEAD *pJhh, ULONG Mem_top)
 /* DS 0x800197f4 (MulJh) */
 void MulJh(ENEMY_WORK *pEm, PARTS_W *pH_parts, JH_HEAD *pJhh)
 {
+	/* retail reserves 8 more bytes of locals (MulJh frame 16); never read */
+	volatile int Rsv[2];
 	PARTS_W *pWm;
 	SVECTOR *pSrc;
 	SVECTOR *pDst;
@@ -2508,53 +2494,54 @@ void MulJh(ENEMY_WORK *pEm, PARTS_W *pH_parts, JH_HEAD *pJhh)
 	UINT Per;
 	UINT Pt;
 	int Ir;
-	UINT Frame_pad[2];
 
-	(void)Frame_pad;
 	Vn   = (UINT)pJhh->Vn_num;
 	pTmd = pH_parts->pTmd;
 
-	/* pass 0: parts0 vertices/normals, pass 1: parts1 (both read p0Onor) */
-	for (Pass = 0; Pass < 2; Pass++)
+	pWm   = pEm->pSin_parts_ptr + pJhh->Parts0_no;
+	pSrc  = (SVECTOR *)pJhh->p0Ovec;
+	pDst  = (SVECTOR *)pJhh->p0Vec;
+	pNdst = (SVECTOR *)pJhh->p0Nor;
+	pNsrc = (SVECTOR *)pJhh->p0Onor;
+	gte_SetRotMatrix((MATRIX *)&pWm->Workm);
+	Pass = 0;
+	goto Vert_loop;
+
+Pass1:
+	pWm   = pEm->pSin_parts_ptr + pJhh->Parts1_no;
+	pSrc  = (SVECTOR *)pJhh->p1Ovec;
+	pDst  = (SVECTOR *)pJhh->p1Vec;
+	pNdst = (SVECTOR *)pJhh->p1Nor;
+	pNsrc = (SVECTOR *)pJhh->p0Onor;
+	gte_SetRotMatrix((MATRIX *)&pWm->Workm);
+	Pass = 1;
+
+Vert_loop:
+	Tx = pWm->Workm.t[0];
+	Ty = pWm->Workm.t[1];
+	Tz = pWm->Workm.t[2];
+	j = Vn;
+	do
 	{
-		if (Pass == 0)
-		{
-			pWm   = pEm->pSin_parts_ptr + pJhh->Parts0_no;
-			pSrc  = (SVECTOR *)pJhh->p0Ovec;
-			pDst  = (SVECTOR *)pJhh->p0Vec;
-			pNdst = (SVECTOR *)pJhh->p0Nor;
-		}
-		else
-		{
-			pWm   = pEm->pSin_parts_ptr + pJhh->Parts1_no;
-			pSrc  = (SVECTOR *)pJhh->p1Ovec;
-			pDst  = (SVECTOR *)pJhh->p1Vec;
-			pNdst = (SVECTOR *)pJhh->p1Nor;
-		}
-		pNsrc = (SVECTOR *)pJhh->p0Onor;
-
-		gte_SetRotMatrix((MATRIX *)&pWm->Workm);
-		Tx = pWm->Workm.t[0];
-		Ty = pWm->Workm.t[1];
-		Tz = pWm->Workm.t[2];
-
-		for (j = Vn; j != 0; j--)
-		{
-			gte_ldv0(pSrc);
-			gte_rtv0_b();
-			gte_stsv(pDst);
-			gte_ldv0(pNsrc);
-			pDst->vx = pDst->vx + (short)Tx;
-			gte_rtv0_b();
-			pDst->vy = pDst->vy + (short)Ty;
-			pDst->vz = pDst->vz + (short)Tz;
-			gte_stsv(pNdst);
-			pSrc++;
-			pNsrc++;
-			pDst++;
-			pNdst++;
-		}
+		gte_ldv0(pSrc);
+		gte_rtv0_b();
+		gte_stsv(pDst);
+		gte_ldv0(pNsrc);
+		pDst->vx = pDst->vx + (short)Tx;
+		gte_rtv0_b();
+		pDst->vy = pDst->vy + (short)Ty;
+		pDst->vz = pDst->vz + (short)Tz;
+		gte_stsv(pNdst);
+		pSrc++;
+		pNsrc++;
+		pDst++;
+		pNdst++;
+	} while (--j != 0);
+	if (Pass == 0)
+	{
+		goto Pass1;
 	}
+
 
 	/* blend the transformed vertices/normals into the TMD by joint table */
 	pV0 = (SVECTOR *)pJhh->p0Vec;
@@ -2566,19 +2553,19 @@ void MulJh(ENEMY_WORK *pEm, PARTS_W *pH_parts, JH_HEAD *pJhh)
 	pJt = pJhh->pJh;
 	Cnt = Vn;
 
-	while (Cnt != 0)
+	do
 	{
 		Pt  = (UINT)pJt->Point;
 		Per = (UINT)pJt->Per;
 		if (Per == 0x1000)
 		{
-			*(SVECTOR *)(Vert_top + Pt * 8) = *pV0;
-			*(SVECTOR *)(Nor_top + Pt * 8) = *pN0;
+			COPY_SV8(Vert_top + Pt * 8, pV0);
+			COPY_SV8(Nor_top + Pt * 8, pN0);
 		}
 		else if (Per == 0)
 		{
-			*(SVECTOR *)(Vert_top + Pt * 8) = *pV1;
-			*(SVECTOR *)(Nor_top + Pt * 8) = *pN1;
+			COPY_SV8(Vert_top + Pt * 8, pV1);
+			COPY_SV8(Nor_top + Pt * 8, pN1);
 		}
 		else
 		{
@@ -2603,8 +2590,7 @@ void MulJh(ENEMY_WORK *pEm, PARTS_W *pH_parts, JH_HEAD *pJhh)
 		pV1++;
 		pN0++;
 		pN1++;
-		Cnt--;
-	}
+	} while (--Cnt != 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2614,6 +2600,7 @@ void MulJh(ENEMY_WORK *pEm, PARTS_W *pH_parts, JH_HEAD *pJhh)
 /* DS 0x80019b3c (Aida_Jh_sort) */
 void Aida_Jh_sort(ENEMY_WORK *pEm)
 {
+	POLY_GT4 *p4;
 	ULONG Hit_flg;
 	MATRIX *r0;
 	PARTS_W *pP_ptr;
@@ -2625,24 +2612,26 @@ void Aida_Jh_sort(ENEMY_WORK *pEm)
 	MATRIX M;
 	MATRIX M1;
 
-	Set_light((VECTOR *)(pEm->pSin_parts_ptr->Workm).t);
+	pP_ptr = pEm->pSin_parts_ptr;
+	Set_light((VECTOR *)pP_ptr->Workm.t);
 	SetColorMatrix((MATRIX *)&COLORMATRIX);
 	CompM(&GsWSMATRIX, (MATRIX *)&GsIDMATRIX, &M);
 	m2 = &M1;
 	CompM(&LIGHTMATRIX, (MATRIX *)&GsIDMATRIX, m2);
 	Hit_flg = Hit_ck_point4((VECTOR *)&pEm->Pos_x, G.Cccut);
-	if ((Hit_flg != 0) && (r0 = &M, (pEm->Be_flg & 0x80000) == 0))
+	if ((Hit_flg != 0) && (pEm->Be_flg & 0x80000) == 0)
 	{
-		gte_SetRotMatrix((MATRIX *)r0);
-		gte_SetTransMatrix((MATRIX *)r0);
+		gte_SetRotMatrix((MATRIX *)&M);
+		gte_SetTransMatrix((MATRIX *)&M);
 		gte_SetLightMatrix((MATRIX *)m2);
 		pP_ptr = pEm->pSin_parts_ptr;
 		rgb   = pP_ptr->Poly_rgb;
+		Att = (pP_ptr->Attribute & 2) >> 1;
 		tmd2  = pP_ptr->pPacket2;
 		pT_head = (TMD_MEM *)pP_ptr->pTmd2;
-		Att = (pP_ptr->Attribute & 2) >> 1;
+		p4 = (POLY_GT4 *)(tmd2 + (UINT)G.Cbuf_id * 0xd);
 		SortGT3_neo((TMD_MEM *)pP_ptr->pTmd,  (POLY_GT3 *)(pP_ptr->pPacket + (UINT)G.Cbuf_id * 10), rgb, Att);
-		SortGT4_neo(pT_head, (POLY_GT4 *)(tmd2 + (UINT)G.Cbuf_id * 0xd), rgb, Att);
+		SortGT4_neo(pT_head, p4, rgb, Att);
 	}
 }
 
@@ -2654,6 +2643,7 @@ void Aida_Jh_sort(ENEMY_WORK *pEm)
 void Jh_sort(ENEMY_WORK *pEm, PARTS_W *pP_ptr)
 {
 	ULONG Hit_flg;
+	POLY_GT4 *p4;
 	MATRIX *r0;
 	UINT Cbuf_no;
 	ULONG *tmd2;
@@ -2681,11 +2671,8 @@ void Jh_sort(ENEMY_WORK *pEm, PARTS_W *pP_ptr)
 		CompM(&LIGHTMATRIX, (MATRIX *)&GsIDMATRIX, m2);
 		if ((pP_ptr->Be_flg & 0x400) != 0)
 		{
-			/* M2 = copy of Workm (retail 0x80019d74-0x80019dac copies the same matrix words; t[] is set below) */
+			/* M2 = copy of Workm (the translation words come with the matrix) */
 			M2 = pP_ptr->Workm;
-			M2.t[0] = pP_ptr->Workm.t[0];
-			M2.t[1] = pP_ptr->Workm.t[1];
-			M2.t[2] = pP_ptr->Workm.t[2];
 			V.vx = (long)pP_ptr->Size_x;
 			V.vy = (long)pP_ptr->Size_y;
 			V.vz = (long)pP_ptr->Size_z;
@@ -2694,23 +2681,17 @@ void Jh_sort(ENEMY_WORK *pEm, PARTS_W *pP_ptr)
 			M3.t[0] = 0;
 			M3.t[1] = 0;
 			M3.t[2] = 0;
-			M4.m[0][0] = GsIDMATRIX.m[0][0]; M4.m[0][1] = GsIDMATRIX.m[0][1]; M4.m[0][2] = GsIDMATRIX.m[0][2];
-			M4.m[1][0] = GsIDMATRIX.m[1][0]; M4.m[1][1] = GsIDMATRIX.m[1][1]; M4.m[1][2] = GsIDMATRIX.m[1][2];
-			M4.m[2][0] = GsIDMATRIX.m[2][0]; M4.m[2][1] = GsIDMATRIX.m[2][1];
-			MTX_L(&M4, 0x10) = MTX_L(&GsIDMATRIX, 0x10);
+			M4 = GsIDMATRIX;
 			M4.t[0] = -M2.t[0];
-			M4.t[2] = -M2.t[2];
 			M4.t[1] = -M2.t[1];
+			M4.t[2] = -M2.t[2];
 			CompM(&M3, &M4, &M3);
 			CompM(&M2, &M3, &M2);
 			CompM(&GsWSMATRIX, &M2, &M);
 		}
 		if ((pP_ptr->Be_flg & 0x2000) != 0)
 		{
-			M2.m[0][0] = GsIDMATRIX.m[0][0]; M2.m[0][1] = GsIDMATRIX.m[0][1]; M2.m[0][2] = GsIDMATRIX.m[0][2];
-			M2.m[1][0] = GsIDMATRIX.m[1][0]; M2.m[1][1] = GsIDMATRIX.m[1][1]; M2.m[1][2] = GsIDMATRIX.m[1][2];
-			M2.m[2][0] = GsIDMATRIX.m[2][0]; M2.m[2][1] = GsIDMATRIX.m[2][1];
-			MTX_L(&M2, 0x10) = MTX_L(&GsIDMATRIX, 0x10);
+			M2 = GsIDMATRIX;
 			M2.t[0] = pP_ptr->Workm.t[0];
 			M2.t[1] = pP_ptr->Workm.t[1];
 			M2.t[2] = pP_ptr->Workm.t[2];
@@ -2718,38 +2699,29 @@ void Jh_sort(ENEMY_WORK *pEm, PARTS_W *pP_ptr)
 			V.vy = (long)pP_ptr->Size_y;
 			V.vz = (long)pP_ptr->Size_z;
 			ScaleMatrix((MATRIX *)&M2, &V);
-			M3.m[0][0] = GsIDMATRIX.m[0][0]; M3.m[0][1] = GsIDMATRIX.m[0][1]; M3.m[0][2] = GsIDMATRIX.m[0][2];
-			M3.m[1][0] = GsIDMATRIX.m[1][0]; M3.m[1][1] = GsIDMATRIX.m[1][1]; M3.m[1][2] = GsIDMATRIX.m[1][2];
-			M3.m[2][0] = GsIDMATRIX.m[2][0]; M3.m[2][1] = GsIDMATRIX.m[2][1];
-			MTX_L(&M3, 0x10) = MTX_L(&GsIDMATRIX, 0x10);
+			M3 = GsIDMATRIX;
 			M3.t[0] = -M2.t[0];
-			M3.t[2] = -M2.t[2];
 			M3.t[1] = -M2.t[1];
+			M3.t[2] = -M2.t[2];
 			CompM(&M2, &M3, &M2);
 			CompM(&GsWSMATRIX, &M2, &M);
 		}
 		Hit_flg = Hit_ck_point4((VECTOR *)&pEm->Pos_x, G.Cccut);
-		if ((Hit_flg != 0) && (r0 = &M, (pEm->Be_flg & 0x80000) == 0))
+		if ((Hit_flg != 0) && (pEm->Be_flg & 0x80000) == 0)
 		{
-			gte_SetRotMatrix((MATRIX *)r0);
-			gte_SetTransMatrix((MATRIX *)r0);
+			gte_SetRotMatrix((MATRIX *)&M);
+			gte_SetTransMatrix((MATRIX *)&M);
 			gte_SetLightMatrix((MATRIX *)m2);
-			Cbuf_no = (UINT)G.Cbuf_id;
 			rgb = pP_ptr->Poly_rgb;
 			tmd2 = pP_ptr->pPacket2;
 			pT_head = (TMD_MEM *)pP_ptr->pTmd2;
 			Att = (pP_ptr->Attribute & 2) >> 1;
-			SortGT3_neo((TMD_MEM *)pP_ptr->pTmd, (POLY_GT3 *)(pP_ptr->pPacket + Cbuf_no * 10), rgb, Att);
-			SortGT4_neo(pT_head, (POLY_GT4 *)(tmd2 + Cbuf_no * 0xd), rgb, Att);
+			p4 = (POLY_GT4 *)(tmd2 + (UINT)G.Cbuf_id * 0xd);
+			SortGT3_neo((TMD_MEM *)pP_ptr->pTmd, (POLY_GT3 *)(pP_ptr->pPacket + (UINT)G.Cbuf_id * 10), rgb, Att);
+			SortGT4_neo(pT_head, p4, rgb, Att);
 		}
 	}
 }
-
-/* DS 0x8009ac60 (Kg_jh0_head) */
-JH_HEAD Kg_jh0_head = { 0x02, 0x03, 0x0034, 0, 0, 0, 0, { 0x0000, 0x0000, 0x0000, 0x0000 }, 0, 0, 0, 0, { -504, 0x0000, 0x0000, 0x0000 }, Kg_jh0_tbl };
-
-/* DS 0x8009a8e8 (Aida_jh0_head) */
-JH_HEAD Aida_jh0_head = { 0x00, 0x01, 0x0049, 0, 0, 0, 0, { 0x0000, 0x0000, 0x0000, 0x0000 }, 0, 0, 0, 0, { 0x0000, 0x0000, 0x0000, 0x0000 }, Aida_jh0_tbl };
 
 /* DS 0x8009a920 (Aida_jh1_tbl) */
 JH_TBL Aida_jh1_tbl[23] = {
@@ -2776,6 +2748,17 @@ JH_TBL Aida_jh2_tbl[23] = {
 
 /* DS 0x8009aa10 (Aida_jh2_head) */
 JH_HEAD Aida_jh2_head = { 0x01, 0x05, 0x0017, 0, 0, 0, 0, { 0x0000, 0x0000, 0x0000, 0x0000 }, 0, 0, 0, 0, { 0x0019, -199, -139, 0x0000 }, Aida_jh2_tbl };
+
+/* DS 0x8009aa48 (Aida_jh3_tbl) */
+JH_TBL Aida_jh3_tbl[4] = {
+	{ 0x003c, 0x0800 },
+	{ 0x0075, 0x0800 },
+	{ 0x003c, 0x0800 },
+	{ 0x0075, 0x0800 }
+};
+
+/* DS 0x8009aa58 (Aida_jh3_head) */
+JH_HEAD Aida_jh3_head = { 0x02, 0x05, 0x0002, 0, 0, 0, 0, { 0x0019, -199, 0x008c, 0x0000 }, 0, 0, 0, 0, { 0x0019, -199, -139, 0x0000 }, Aida_jh3_tbl };
 
 /* DS 0x8009aa90 (Aida_jh4_tbl) */
 JH_TBL Aida_jh4_tbl[18] = {
@@ -2818,25 +2801,44 @@ JH_TBL Kg_jh0_tbl[52] = {
 	{ 0x002a, 0x0000 }, { 0x0033, 0x0000 }, { 0x0027, 0x0000 }, { 0x0024, 0x0000 }
 };
 
-/* DS 0x8009a7c4 (Aida_jh0_tbl) */
-JH_TBL Aida_jh0_tbl[73] = {
-	{ 0x0019, 0x1000 }, { 0x001a, 0x1000 }, { 0x0011, 0x1000 }, { 0x001c, 0x1000 },
-	{ 0x0025, 0x1000 }, { 0x0024, 0x1000 }, { 0x0026, 0x1000 }, { 0x0003, 0x1000 },
-	{ 0x0008, 0x1000 }, { 0x0009, 0x1000 }, { 0x0006, 0x1000 }, { 0x0007, 0x1000 },
-	{ 0x0016, 0x1000 }, { 0x000a, 0x1000 }, { 0x0022, 0x1000 }, { 0x0067, 0x1000 },
-	{ 0x0023, 0x1000 }, { 0x000d, 0x1000 }, { 0x0004, 0x1000 }, { 0x001d, 0x1000 },
-	{ 0x0021, 0x1000 }, { 0x0012, 0x1000 }, { 0x001f, 0x1000 }, { 0x0000, 0x1000 },
-	{ 0x000e, 0x1000 }, { 0x0005, 0x1000 }, { 0x0001, 0x1000 }, { 0x001b, 0x1000 },
-	{ 0x000c, 0x1000 }, { 0x001e, 0x1000 }, { 0x0018, 0x1000 }, { 0x0014, 0x1000 },
-	{ 0x0017, 0x1000 }, { 0x0068, 0x1000 }, { 0x0028, 0x1000 }, { 0x0029, 0x1000 },
-	{ 0x000b, 0x1000 }, { 0x0013, 0x1000 }, { 0x0027, 0x1000 }, { 0x000f, 0x1000 },
-	{ 0x002f, 0x0c00 }, { 0x0036, 0x0c00 }, { 0x0031, 0x0c00 }, { 0x0069, 0x0c00 },
-	{ 0x0037, 0x0c00 }, { 0x0035, 0x0c00 }, { 0x0030, 0x0c00 }, { 0x0041, 0x0800 },
-	{ 0x0044, 0x0800 }, { 0x0045, 0x0800 }, { 0x006a, 0x0800 }, { 0x0046, 0x0800 },
-	{ 0x0042, 0x0800 }, { 0x0043, 0x0800 }, { 0x004d, 0x0400 }, { 0x004f, 0x0400 },
-	{ 0x0040, 0x0400 }, { 0x003b, 0x0400 }, { 0x004b, 0x0400 }, { 0x004c, 0x0400 },
-	{ 0x004e, 0x0400 }, { 0x004a, 0x0400 }, { 0x003f, 0x0400 }, { 0x003a, 0x0000 },
-	{ 0x0053, 0x0000 }, { 0x0052, 0x0000 }, { 0x003e, 0x0000 }, { 0x006e, 0x0000 },
-	{ 0x0075, 0x0000 }, { 0x0057, 0x0000 }, { 0x003d, 0x0000 }, { 0x0055, 0x0000 },
-	{ 0x0056, 0x0000 }
+/* DS 0x8009ac60 (Kg_jh0_head) */
+JH_HEAD Kg_jh0_head = { 0x02, 0x03, 0x0034, 0, 0, 0, 0, { 0x0000, 0x0000, 0x0000, 0x0000 }, 0, 0, 0, 0, { -504, 0x0000, 0x0000, 0x0000 }, Kg_jh0_tbl };
+
+/* ------------------------------------------------------------------ */
+/* Player jelly-hair data (exe ROM initialisers)                       */
+/* Jh_set fills the pointer fields of Pl_jh_head at run time           */
+/* ------------------------------------------------------------------ */
+/* DS 0x8009ac98 (Pl_jh_tbl) */
+JH_TBL Pl_jh_tbl[73] = {
+	{ 5, 0x1000 }, { 7, 0x1000 }, { 9, 0x1000 }, { 6, 0x1000 },
+	{ 4, 0x1000 }, { 8, 0x1000 }, { 11, 0x1000 }, { 14, 0x1000 },
+	{ 13, 0x1000 }, { 28, 0x1000 }, { 21, 0x1000 }, { 22, 0x1000 },
+	{ 23, 0x1000 }, { 20, 0x1000 }, { 39, 0x1000 }, { 38, 0x1000 },
+	{ 34, 0x1000 }, { 43, 0x1000 }, { 44, 0x1000 }, { 46, 0x1000 },
+	{ 42, 0x1000 }, { 41, 0x1000 }, { 45, 0x1000 }, { 40, 0x1000 },
+	{ 65, 0x1000 }, { 69, 0x1000 }, { 66, 0x1000 }, { 67, 0x1000 },
+	{ 68, 0x1000 }, { 70, 0x1000 }, { 71, 0x1000 }, { 72, 0x1000 },
+	{ 16, 0x0e00 }, { 10, 0x0e00 }, { 17, 0x0e00 }, { 3, 0x0c00 },
+	{ 36, 0x0c00 }, { 33, 0x0c00 }, { 24, 0x0c00 }, { 26, 0x0c00 },
+	{ 32, 0x0c00 }, { 35, 0x0c00 }, { 31, 0x0800 }, { 12, 0x0800 },
+	{ 30, 0x0800 }, { 18, 0x0800 }, { 37, 0x0800 }, { 15, 0x0800 },
+	{ 19, 0x0800 }, { 0, 0x0400 }, { 1, 0x0400 }, { 25, 0x0400 },
+	{ 2, 0x0400 }, { 27, 0x0400 }, { 29, 0x0400 }, { 56, 0x0400 },
+	{ 49, 0x0400 }, { 48, 0x0400 }, { 50, 0x0400 }, { 57, 0x0400 },
+	{ 47, 0x0400 }, { 51, 0x0200 }, { 58, 0x0200 }, { 53, 0x0000 },
+	{ 61, 0x0000 }, { 62, 0x0000 }, { 54, 0x0000 }, { 55, 0x0000 },
+	{ 60, 0x0000 }, { 59, 0x0000 }, { 52, 0x0000 }, { 64, 0x0000 },
+	{ 63, 0x0000 },
+};
+
+/* DS 0x8009adbc (Pl_jh_head) */
+JH_HEAD Pl_jh_head = {
+	0,						/* Parts0_no */
+	1,						/* Parts1_no */
+	73,						/* Vn_num */
+	0, 0, 0, 0,				/* p0Vec, p0Nor, p0Ovec, p0Onor (runtime pointers, zero in ROM) */
+	{ 0, 0, 0 },				/* Parts0_off */
+	0, 0, 0, 0,				/* p1Vec, p1Nor, p1Ovec, p1Onor (runtime pointers, zero in ROM) */
+	{ 29, 19, 0 },				/* Parts1_off */
+	Pl_jh_tbl					/* pJh (DS 0x8009ac98) */
 };

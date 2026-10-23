@@ -6,13 +6,11 @@
 
 #include "TYPES.H"
 #include <ASM.H>
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBETC.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBSND.H>
 #include <LIBSPU.H>
 #include <MALLOC.H>
@@ -40,10 +38,21 @@
 #include "FILECODE.H"
 #include "flag.h"
 
+/* DS 0x8011e5b0 (Ending_inittbl_buf) */
+UCHAR Ending_inittbl_buf[0x2d90];
+/* DS 0x80121408 (Ending_prim) */
+POLY_FT4 Ending_prim[2][200];
+/* DS 0x801252b8 (Ending_save_copy) */
+ULONG Ending_save_copy[0x598 / 4];
+/* DS 0x8012a000 (Ending_work_buf): load area of Ending_init for END00.TIM (0x41020 bytes, the largest load; END19.TIM is 0x8040) and then ROOM800.SND (0x9c4c bytes, over the same start). The later END1x.TIM and INIT_TBL.DAT loads go to Bg_img_buf and Ending_inittbl_buf */
+UCHAR *Ending_work_buf = (UCHAR *)0x8012a000;
+
 /* Overlay data (ENDING::8011xxxx) and DS work RAM referenced by this overlay, defined here.
  * Items inside ENDING.BIN (ENDING::8011a000..8012585a) carry the retail bytes as initialisers;
  * items past the end of the file are zero-initialised RAM.
- * Record tables are indexed by address-of, e.g. (&Ending_glyph_W)[n]. */
+
+ * The stat and result screen tables (Ending_stat_glyph_tbl, Ending_stat_rec_tbl, Ending_glyph_Tbl, Ending_result_rec_tbl,
+ * Ending_glyph_idx_tbl) are sized typed arrays. */
 
 /* Rank/score display tables (ENDING overlay data) */
 /* DS 0x8011a08c (Ending_rank_x0) */
@@ -81,7 +90,7 @@ UCHAR  Ending_save_area_init2 = 0x12;   /* next_set local init, byte 1 */
 
 /* Glyph/record tables used by Ending_draw_score, Ending_draw_rank, Ending_moji_draw */
 /* DS 0x8011dcc0 (Ending_msg_row_00) */
-UCHAR Ending_msg_row_00[19] = {
+UCHAR Ending_msg_row_00[20] = {
 	0x29, 0x45, 0x4f, 0x4f, 0x45, 0x4b, 0x4a, 0x00, 0x3f, 0x4b, 0x49, 0x4c, 0x48, 0x41, 0x50, 0x41,
 	0x1a, 0x1a, 0xfe
 };
@@ -181,6 +190,63 @@ UCHAR Ending_msg_row_fe[1] = {
 	0xfe
 };
 
+/* DS 0x8011de48 (Ending_stat_glyph_tbl): 14 glyph records of the stat screen, 0x8c bytes. Ending_moji_draw reads
+ * record n at ENDING::8011de48 + n * 10 (lbu +0 and +1, lhu +2, lbu +4..+9). The retail bytes are ENDING.BIN offset 0x3e48. */
+typedef struct {
+	UCHAR  Tpage;     /* +0, low four bits are the tpage number */
+	UCHAR  Clut_x;    /* +1, CLUT x in 16-pixel units */
+	USHORT Clut_y;    /* +2 */
+	UCHAR  U;         /* +4 */
+	UCHAR  V;         /* +5 */
+	UCHAR  Uw;        /* +6, texture width */
+	UCHAR  Vh;        /* +7, texture height */
+	UCHAR  W;         /* +8, screen width */
+	UCHAR  H;         /* +9, screen height */
+} ENDING_STAT_GLYPH;
+ENDING_STAT_GLYPH Ending_stat_glyph_tbl[14] = {
+	{ 0x0c, 0x00, 0x01f1, 0x00, 0x00, 0xff, 0x20, 0xff, 0x20 },
+	{ 0x0c, 0x00, 0x01f1, 0x00, 0x20, 0xff, 0x20, 0xff, 0x20 },
+	{ 0x0c, 0x00, 0x01f1, 0x00, 0x40, 0xff, 0x20, 0xff, 0x20 },
+	{ 0x0c, 0x00, 0x01f1, 0x00, 0x60, 0xff, 0x20, 0xff, 0x20 },
+	{ 0x0c, 0x00, 0x01f1, 0x00, 0x80, 0xff, 0x20, 0xff, 0x20 },
+	{ 0x0c, 0x00, 0x01f1, 0x00, 0xa0, 0xff, 0x20, 0xff, 0x20 },
+	{ 0x0e, 0x00, 0x01f3, 0x00, 0x00, 0x78, 0xb4, 0x50, 0x78 },
+	{ 0x0e, 0x00, 0x01f3, 0x03, 0x14, 0x78, 0xb4, 0x50, 0x78 },
+	{ 0x0e, 0x00, 0x01f3, 0x05, 0x1e, 0x78, 0xb4, 0x50, 0x78 },
+	{ 0x0e, 0x00, 0x01f3, 0x07, 0x00, 0x78, 0xb4, 0x50, 0x78 },
+	{ 0x0e, 0x00, 0x01f3, 0x00, 0x4b, 0x78, 0xb4, 0x50, 0x78 },
+	{ 0x0e, 0x00, 0x01f3, 0x05, 0x32, 0x78, 0xb4, 0x50, 0x78 },
+	{ 0x0e, 0x00, 0x01f3, 0x03, 0x28, 0x78, 0xb4, 0x50, 0x78 },
+	{ 0x0e, 0x00, 0x01f3, 0x07, 0x4b, 0x78, 0xb4, 0x50, 0x78 },
+};
+
+/* DS 0x8011ded4 (Ending_stat_rec_tbl): 12 stat-display records of 8 bytes (0x60 bytes). Ending_moji_draw and
+ * Ending_stat_flg_set walk them through Ending_stat_rec_ptr in steps of 8: byte +0 is the shown flag, byte +1
+ * bit 0x20 disables the record, +3 is the glyph index, +4 and +6 the screen x and y. Byte +2 is never read. */
+typedef struct {
+	UCHAR  Flg;       /* +0 */
+	UCHAR  Opt;       /* +1 */
+	UCHAR  Kind;      /* +2, unread (0x02 in every record) */
+	UCHAR  Glyph;     /* +3, index into Ending_stat_glyph_tbl */
+	USHORT X;         /* +4 */
+	USHORT Y;         /* +6 */
+} ENDING_STAT_REC;
+ENDING_STAT_REC Ending_stat_rec_tbl[12] = {
+	{ 0x00, 0x20, 0x02, 0, 0x0020, 0x00b4 },
+	{ 0x00, 0x21, 0x02, 0, 0x0020, 0x00b4 },
+	{ 0x00, 0x20, 0x02, 1, 0x0020, 0x00b4 },
+	{ 0x00, 0x21, 0x02, 1, 0x0020, 0x00b4 },
+	{ 0x00, 0x20, 0x02, 2, 0x0020, 0x00b4 },
+	{ 0x00, 0x21, 0x02, 2, 0x0020, 0x00b4 },
+	{ 0x00, 0x20, 0x02, 3, 0x0020, 0x00b4 },
+	{ 0x00, 0x21, 0x02, 3, 0x0020, 0x00b4 },
+	{ 0x00, 0x20, 0x02, 4, 0x0020, 0x00b4 },
+	{ 0x00, 0x21, 0x02, 4, 0x0020, 0x00b4 },
+	{ 0x00, 0x20, 0x02, 5, 0x0020, 0x00b4 },
+	{ 0x00, 0x21, 0x02, 5, 0x0020, 0x00b4 },
+};
+
+
 /* DS 0x8011df34 (Ending_msg_row_tbl): 22 row pointers in entry order; entries 1, 6, 17, 18 and 20 share Ending_msg_row_fe */
 UCHAR *Ending_msg_row_tbl[22] = {
 	Ending_msg_row_00, Ending_msg_row_fe, Ending_msg_row_02, Ending_msg_row_03, Ending_msg_row_04, Ending_msg_row_05,
@@ -188,49 +254,34 @@ UCHAR *Ending_msg_row_tbl[22] = {
 	Ending_msg_row_12, Ending_msg_row_13, Ending_msg_row_14, Ending_msg_row_15, Ending_msg_row_16, Ending_msg_row_fe,
 	Ending_msg_row_fe, Ending_msg_row_19, Ending_msg_row_fe, Ending_msg_row_21
 };
-/* DS 0x8011ded4 (Ending_stat_rec_tbl) */
-UCHAR  Ending_stat_rec_tbl = 0x00;   /* stat-display record base */
-/* DS 0x8011de48 (Ending_stat_glyph_Tbl) */
-UCHAR  Ending_stat_glyph_Tbl = 0x0C;   /* glyph record table (stride 10) */
-/* DS 0x8011de49 (Ending_stat_glyph_Clut_x) */
-UCHAR  Ending_stat_glyph_Clut_x = 0x00;   /* glyph record, +1 */
-/* DS 0x8011de4a (Ending_stat_glyph_Clut_y) */
-UCHAR  Ending_stat_glyph_Clut_y = 0xF1;   /* glyph record, +2 (USHORT) */
-/* DS 0x8011de4c (Ending_stat_glyph_U) */
-UCHAR  Ending_stat_glyph_U = 0x00;   /* glyph record, +4 */
-/* DS 0x8011de4d (Ending_stat_glyph_V) */
-UCHAR  Ending_stat_glyph_V = 0x00;   /* glyph record, +5 */
-/* DS 0x8011de4e (Ending_stat_glyph_Uw) */
-UCHAR  Ending_stat_glyph_Uw = 0xFF;   /* glyph record, +6 */
-/* DS 0x8011de4f (Ending_stat_glyph_Vh) */
-UCHAR  Ending_stat_glyph_Vh = 0x20;   /* glyph record, +7 */
-/* DS 0x8011de50 (Ending_stat_glyph_W) */
-UCHAR  Ending_stat_glyph_W = 0xFF;   /* glyph record, +8 */
-/* DS 0x8011de51 (Ending_stat_glyph_H) */
-UCHAR  Ending_stat_glyph_H = 0x20;   /* glyph record, +9 */
-/* DS 0x8011df8c (Ending_msg_char_cnt_tbl) */
-UCHAR  Ending_msg_char_cnt_tbl = 0x05;   /* per-row character count table */
-/* DS 0x8011e0b8 (Ending_glyph_Tbl) */
-UCHAR  Ending_glyph_Tbl = 0x0E;   /* glyph descriptor table (stride 10) */
-/* DS 0x8011e0ba (Ending_glyph_Clut) */
-UCHAR  Ending_glyph_Clut = 0xC0;   /* glyph descriptor, +2 (short) */
-/* DS 0x8011e0bc (Ending_glyph_U) */
-UCHAR  Ending_glyph_U = 0x00;   /* glyph descriptor, +4 */
-/* DS 0x8011e0bd (Ending_glyph_V) */
-UCHAR  Ending_glyph_V = 0x00;   /* glyph descriptor, +5 */
-/* DS 0x8011e0be (Ending_glyph_Uw) */
-UCHAR  Ending_glyph_Uw = 0x0D;   /* glyph descriptor, +6 */
-/* DS 0x8011e0bf (Ending_glyph_Vh) */
-UCHAR  Ending_glyph_Vh = 0x0E;   /* glyph descriptor, +7 */
-/* DS 0x8011e0c0 (Ending_glyph_W) */
-UCHAR  Ending_glyph_W = 0x0D;   /* glyph descriptor, +8 */
-/* DS 0x8011e0c1 (Ending_glyph_H) */
-UCHAR  Ending_glyph_H = 0x0E;   /* glyph descriptor, +9 */
-/* DS 0x8011e4b0 (Ending_glyph_idx_tbl) */
-UCHAR  Ending_glyph_idx_tbl = 0x02;   /* glyph index list (0xff terminated) */
-
-/* Glyph record (stride 10) at Ending_glyph_Tbl (ENDING::8011e0b8): one record base, fields at +0..+9.
- * Natural alignment gives the same offsets as the retail record. */
+/* DS 0x8011df8c (Ending_msg_char_cnt_tbl): typing delay per message character, 300 bytes up to Ending_glyph_Tbl at 0x8011e0b8
+ * (the last byte is 0x03, so no alignment pad belongs to it). Indexed by Ending_msg_row_cnt in Ending_main. */
+UCHAR Ending_msg_char_cnt_tbl[300] = {
+	0x05, 0x03, 0x05, 0x05, 0x03, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x05, 0x05, 0x03, 0x05, 0x03,
+	0x06, 0x04, 0x05, 0x05, 0x03, 0x05, 0x05, 0x05, 0x0a, 0x05, 0x03, 0x0a, 0x05, 0x03, 0x03, 0x05,
+	0x0a, 0x03, 0x05, 0x05, 0x03, 0x05, 0x05, 0x05, 0x04, 0x05, 0x05, 0x03, 0x0a, 0x05, 0x03, 0x05,
+	0x03, 0x05, 0x05, 0x03, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05, 0x03, 0x05, 0x0a,
+	0x05, 0x03, 0x03, 0x05, 0x0a, 0x03, 0x05, 0x03, 0x05, 0x03, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05,
+	0x05, 0x03, 0x05, 0x0a, 0x03, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x06, 0x03, 0x05,
+	0x03, 0x0a, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05, 0x0a, 0x05, 0x03,
+	0x05, 0x05, 0x03, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x0a, 0x05, 0x05, 0x03, 0x05,
+	0x05, 0x05, 0x03, 0x0a, 0x05, 0x03, 0x05, 0x05, 0x03, 0x05, 0x0a, 0x03, 0x05, 0x0a, 0x05, 0x05,
+	0x03, 0x05, 0x05, 0x03, 0x03, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05, 0x06, 0x05, 0x05, 0x03,
+	0x05, 0x03, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05,
+	0x0a, 0x05, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x03, 0x05, 0x03, 0x03, 0x05, 0x05,
+	0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x03, 0x0a, 0x03, 0x05, 0x03, 0x03, 0x05, 0x0a, 0x05, 0x03,
+	0x03, 0x05, 0x0a, 0x05, 0x05, 0x03, 0x03, 0x05, 0x03, 0x05, 0x05, 0x03, 0x03, 0x05, 0x03, 0x05,
+	0x03, 0x05, 0x05, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x05, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05,
+	0x03, 0x05, 0x05, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05, 0x0a, 0x03,
+	0x05, 0x03, 0x0a, 0x03, 0x05, 0x05, 0x03, 0x05, 0x05, 0x03, 0x05, 0x05, 0x06, 0x01, 0x05, 0x03,
+	0x05, 0x05, 0x05, 0x03, 0x05, 0x03, 0x05, 0x03, 0x05, 0x03, 0x03, 0x05, 0x05, 0x01, 0x01, 0x01,
+	0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x05, 0x03, 0x05, 0x03, 0x04, 0x03
+};
+/* Glyph record (10 bytes) of Ending_glyph_Tbl (ENDING::8011e0b8 + n*10). The offsets and access widths
+ * are the retail reads in Ending_draw_score (ENDING::8011bd40..8011bddc, s1 = record) and
+ * Ending_draw_rank (s0 = record): lhu +0 tpage, lhu +2 clut, lbu +4 u, +5 v, +6 uw, +7 vh, +8 w, +9 h.
+ * uw/vh are the texture width/height, w/h the screen width/height (equal except on the
+ * three reward images, glyphs 54..56). Natural alignment gives these offsets; sizeof is 10. */
 typedef struct {
 	USHORT tpage;   /* +0 */
 	USHORT clut;    /* +2 */
@@ -241,6 +292,198 @@ typedef struct {
 	UCHAR  w;       /* +8 */
 	UCHAR  h;       /* +9 */
 } ENDING_GLYPH;
+
+/* Result-screen record (12 bytes) of Ending_result_rec_tbl (ENDING::8011e324 + n*12).
+ * Offsets and access widths from retail Ending_draw_score (ENDING::8011bb94), which walks the
+ * table with a2 = record and s7 = record + 6, and Ending_result_flg_set (ENDING::8011c140, v1 = record):
+ *   +0 flg     lbu/sb 0(a2): bit 0 draw, bit 2 colour fades in, bit 3 colour fades out.
+ *              Ending_result_flg_set stores Val (0, 1 or 5) and Ending_fade_unk stores 0 or 5 (draw + fade in).
+ *   +1 attr    lbu -5(s7): bit 0x20 keeps the record off (its flg is cleared every frame).
+ *   +2 ot      lbu -4(s7): ordering-table index, the quads go to G.pOt1 + ot.
+ *   +3 row     lbu -3(s7): row number in Ending_glyph_idx_tbl (the row starts after `row` 0xff bytes).
+ *   +4 x       lhu -2(s7): screen x of the first glyph; each glyph advances it by its w.
+ *   +6 y       lhu 0(s7): screen y.
+ *   +8 colour  lw/sw 2(s7): RGB added to the POLY_FT4 code word. The fades step it by Ending_scroll_spd
+ *              and stop at 0 (faded out) or 0x808080 (faded in).
+ * Natural alignment gives these offsets (no padding); sizeof is 12, and the int member keeps the
+ * array 4-aligned, so the halfword and word accesses are aligned. */
+typedef struct {
+	UCHAR flg;      /* +0 */
+	UCHAR attr;     /* +1 */
+	UCHAR ot;       /* +2 */
+	UCHAR row;      /* +3 */
+	SHORT x;        /* +4 */
+	SHORT y;        /* +6 */
+	int   colour;   /* +8 */
+} ENDING_RESULT_REC;
+
+/* Records of Ending_result_rec_tbl that the code addresses by number. The text of each record is its
+ * row in Ending_glyph_idx_tbl (see the table comments below). */
+#define END_REC_RANK      4    /* records 4..8: rank letters "A".."E", record END_REC_RANK + Ending_rank_no */
+#define END_REC_LEON_A    9    /* "LEON A" */
+#define END_REC_CLAIRE_A  10   /* "CLAIRE A" */
+#define END_REC_LEON_B    11   /* "LEON B" */
+#define END_REC_CLAIRE_B  12   /* "CLAIRE B" */
+#define END_REC_CONGRATS  13   /* "CONGRATULATIONS!!", first record of the result page (slot mask bits 13..17);
+                                  its flg also gates Ending_draw_rank and its colour tints the time digits */
+#define END_REC_ITEM_A    18   /* reward image, glyph 54 (Ending_item_ck(15)) */
+#define END_REC_ITEM_B    19   /* reward image, glyph 55 (Ending_item_ck(17)) */
+#define END_REC_ITEM_C    20   /* reward image, glyph 56 (Ending_item_ck(18)) */
+#define END_REC_HUNK      31   /* "HUNK" */
+#define END_REC_TOFU      32   /* "TOFU" */
+
+/* DS 0x8011e0b8 (Ending_glyph_Tbl): font and image glyphs of the result screen, 57 records.
+ * Size (largest reachable glyph index 56): Ending_glyph_idx_tbl holds glyphs 0..56 (largest 0x38, row 29),
+ * and Ending_draw_rank reads glyphs 23..38 through the time digits (Ending_score_set stores
+ * digit + 23, 32, 28, 0x24 and 0x26). No code writes the index list, so nothing else can be drawn.
+ * ENDING.BIN holds five more records of the same font after glyph 56 (ENDING::8011e2f2..8011e323);
+ * no retail code reaches them, so they are not defined here.
+ * The letters were decoded from the rows of Ending_glyph_idx_tbl, which spell words with one
+ * consistent map; the digits follow from Ending_score_set (glyph = digit + 23).
+ * Initial values: the retail bytes, ENDING.BIN offset 0x40b8 (file offset = address - 0x8011a000), 570 bytes.
+ *      tpage   clut    u     v     uw    vh    w     h */
+ENDING_GLYPH Ending_glyph_Tbl[57] = {
+	{ 0x000e, 0x79c0, 0x00, 0x00, 0x0d, 0x0e, 0x0d, 0x0e },   /*  0 'A' */
+	{ 0x000e, 0x79c0, 0x0f, 0x00, 0x0d, 0x0e, 0x0d, 0x0e },   /*  1 'B' */
+	{ 0x000e, 0x79c0, 0x1d, 0x00, 0x0d, 0x0e, 0x0d, 0x0e },   /*  2 'C' */
+	{ 0x000e, 0x79c0, 0x2b, 0x00, 0x0d, 0x0e, 0x0d, 0x0e },   /*  3 'D' */
+	{ 0x000e, 0x79c0, 0x3a, 0x00, 0x0b, 0x0e, 0x0b, 0x0e },   /*  4 'E' */
+	{ 0x000e, 0x79c0, 0x47, 0x00, 0x0b, 0x0e, 0x0b, 0x0e },   /*  5 'F' */
+	{ 0x000e, 0x79c0, 0x54, 0x00, 0x0e, 0x0e, 0x0e, 0x0e },   /*  6 'G' */
+	{ 0x000e, 0x79c0, 0x71, 0x20, 0x0c, 0x0e, 0x0c, 0x0e },   /*  7 'H' */
+	{ 0x000e, 0x79c0, 0x66, 0x00, 0x06, 0x0e, 0x06, 0x0e },   /*  8 'I' */
+	{ 0x000e, 0x79c0, 0x70, 0x00, 0x0d, 0x0e, 0x0d, 0x0e },   /*  9 'K' */
+	{ 0x000e, 0x79c0, 0x7f, 0x00, 0x0b, 0x0e, 0x0b, 0x0e },   /* 10 'L' */
+	{ 0x000e, 0x79c0, 0x8c, 0x00, 0x0e, 0x0e, 0x0e, 0x0e },   /* 11 'M' */
+	{ 0x000e, 0x79c0, 0x9a, 0x00, 0x0d, 0x0e, 0x0d, 0x0e },   /* 12 'N' */
+	{ 0x000e, 0x79c0, 0xa8, 0x00, 0x0e, 0x0e, 0x0e, 0x0e },   /* 13 'O' */
+	{ 0x000e, 0x79c0, 0xb7, 0x00, 0x0b, 0x0e, 0x0b, 0x0e },   /* 14 not used by the rows or the digit code */
+	{ 0x000e, 0x79c0, 0xc5, 0x00, 0x0d, 0x0e, 0x0d, 0x0e },   /* 15 'R' */
+	{ 0x000e, 0x79c0, 0xd4, 0x00, 0x0a, 0x0e, 0x0a, 0x0e },   /* 16 'S' */
+	{ 0x000e, 0x79c0, 0xe1, 0x00, 0x0c, 0x0e, 0x0c, 0x0e },   /* 17 'T' */
+	{ 0x000e, 0x79c0, 0xee, 0x00, 0x0d, 0x0e, 0x0d, 0x0e },   /* 18 'U' */
+	{ 0x000e, 0x79c0, 0x00, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 19 'V' */
+	{ 0x000e, 0x79c0, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 20 'W' */
+	{ 0x000e, 0x79c0, 0x1c, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 21 'X' */
+	{ 0x000e, 0x79c0, 0x2a, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 22 'Y' */
+	{ 0x000e, 0x79c0, 0x38, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 23 digit '0' */
+	{ 0x000e, 0x79c0, 0x46, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 24 digit '1' */
+	{ 0x000e, 0x79c0, 0x54, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 25 digit '2' */
+	{ 0x000e, 0x79c0, 0x62, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 26 digit '3' */
+	{ 0x000e, 0x79c0, 0x70, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 27 digit '4' */
+	{ 0x000e, 0x79c0, 0x7e, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 28 digit '5' */
+	{ 0x000e, 0x79c0, 0x8c, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 29 digit '6' */
+	{ 0x000e, 0x79c0, 0x9a, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 30 digit '7' */
+	{ 0x000e, 0x79c0, 0xa8, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 31 digit '8' */
+	{ 0x000e, 0x79c0, 0xb6, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 32 digit '9' */
+	{ 0x000e, 0x79c0, 0xc4, 0x0e, 0x0a, 0x0e, 0x0a, 0x0e },   /* 33 not used by the rows or the digit code */
+	{ 0x000e, 0x79c0, 0xd5, 0x0e, 0x08, 0x0e, 0x08, 0x0e },   /* 34 '!' */
+	{ 0x000e, 0x79c0, 0xe0, 0x0e, 0x0e, 0x0e, 0x0e, 0x0e },   /* 35 not used by the rows or the digit code */
+	{ 0x000e, 0x79c0, 0xf0, 0x0e, 0x0a, 0x0e, 0x0a, 0x0e },   /* 36 time separator (Ending_label_chr_a/b) */
+	{ 0x000e, 0x79c0, 0x98, 0x20, 0x0a, 0x0e, 0x0a, 0x0e },   /* 37 not used by the rows or the digit code */
+	{ 0x000e, 0x79c0, 0xf1, 0x20, 0x08, 0x0e, 0x08, 0x0e },   /* 38 blank (word gap in the rows) */
+	{ 0x000e, 0x79c0, 0x00, 0x20, 0x2a, 0x0e, 0x2a, 0x0e },   /* 39 not used by the rows or the digit code */
+	{ 0x000e, 0x79c0, 0x38, 0x20, 0x2a, 0x0e, 0x2a, 0x0e },   /* 40 not used by the rows or the digit code */
+	{ 0x000e, 0x79c0, 0x00, 0x20, 0x38, 0x0e, 0x38, 0x0e },   /* 41 not used by the rows or the digit code */
+	{ 0x000e, 0x79c0, 0x38, 0x20, 0x38, 0x0e, 0x38, 0x0e },   /* 42 not used by the rows or the digit code */
+	{ 0x000c, 0x7980, 0x00, 0x00, 0xfe, 0x30, 0xfe, 0x30 },   /* 43 image */
+	{ 0x000c, 0x7980, 0x00, 0x30, 0xfe, 0x20, 0xfe, 0x20 },   /* 44 image */
+	{ 0x000c, 0x7980, 0x00, 0x50, 0xfe, 0x20, 0xfe, 0x20 },   /* 45 image */
+	{ 0x000c, 0x7980, 0x00, 0x70, 0xfe, 0x20, 0xfe, 0x20 },   /* 46 image */
+	{ 0x000a, 0x7940, 0x00, 0xa0, 0xfe, 0x20, 0xfe, 0x20 },   /* 47 image */
+	{ 0x000a, 0x7940, 0x00, 0xc0, 0xfe, 0x20, 0xfe, 0x20 },   /* 48 image */
+	{ 0x000a, 0x7940, 0x00, 0xe0, 0xfe, 0x1f, 0xfe, 0x1f },   /* 49 image */
+	{ 0x000a, 0x7900, 0x00, 0x00, 0xfe, 0x40, 0xfe, 0x40 },   /* 50 image */
+	{ 0x000a, 0x7900, 0x00, 0x40, 0xfe, 0x20, 0xfe, 0x20 },   /* 51 image */
+	{ 0x000a, 0x7900, 0x00, 0x60, 0xfe, 0x20, 0xfe, 0x20 },   /* 52 image */
+	{ 0x000a, 0x7900, 0x00, 0x80, 0xfe, 0x20, 0xfe, 0x20 },   /* 53 image */
+	{ 0x0008, 0x7800, 0x00, 0x00, 0x70, 0x48, 0x54, 0x36 },   /* 54 image, reward item A */
+	{ 0x0008, 0x7840, 0x00, 0x48, 0x70, 0x48, 0x54, 0x36 },   /* 55 image, reward item B */
+	{ 0x0008, 0x7880, 0x00, 0x90, 0x70, 0x48, 0x54, 0x36 }    /* 56 image, reward item C */
+};
+
+/* DS 0x8011e324 (Ending_result_rec_tbl): the 33 records of the result screen.
+ * Size: Ending_draw_score walks 0x21 records (li t2,0x21 at ENDING::8011bba0, stride addiu 0xc), and
+ * Ending_glyph_idx_tbl follows at 0x8011e324 + 33*12 = 0x8011e4b0. Ending_result_flg_set covers
+ * records 0..30 (one slot-mask bit each); records 31 and 32 are set by number.
+ * Initial values: the retail bytes, ENDING.BIN offset 0x4324, 396 bytes.
+ *      flg   attr  ot  row   x    y    colour */
+ENDING_RESULT_REC Ending_result_rec_tbl[33] = {
+	{ 0x00, 0x00, 10, 16,  32,  90, 0x00000000 },   /*  0: row 16, image glyph 43 */
+	{ 0x00, 0x00, 10, 17,  32,  97, 0x00000000 },   /*  1: row 17, image glyph 44 */
+	{ 0x00, 0x20, 10, 18,  32, 180, 0x00808080 },   /*  2: row 18, image glyph 45 */
+	{ 0x00, 0x20, 10, 19,  32, 180, 0x00808080 },   /*  3: row 19, image glyph 46 */
+	{ 0x00, 0x00, 10,  7, 240,  76, 0x00000000 },   /*  4: row  7, "A" (END_REC_RANK) */
+	{ 0x00, 0x00, 10,  8, 240,  76, 0x00000000 },   /*  5: row  8, "B" */
+	{ 0x00, 0x00, 10,  9, 240,  76, 0x00000000 },   /*  6: row  9, "C" */
+	{ 0x00, 0x00, 10, 10, 240,  76, 0x00000000 },   /*  7: row 10, "D" */
+	{ 0x00, 0x00, 10, 11, 240,  76, 0x00000000 },   /*  8: row 11, "E" */
+	{ 0x00, 0x00, 10,  2, 210, 108, 0x00000000 },   /*  9: row  2, "LEON A" */
+	{ 0x00, 0x00, 10,  3, 201, 108, 0x00000000 },   /* 10: row  3, "CLAIRE A" */
+	{ 0x00, 0x00, 10,  4, 210, 108, 0x00000000 },   /* 11: row  4, "LEON B" */
+	{ 0x00, 0x00, 10,  5, 201, 108, 0x00000000 },   /* 12: row  5, "CLAIRE B" */
+	{ 0x00, 0x00, 10,  0,  60,  25, 0x00000000 },   /* 13: row  0, "CONGRATULATIONS!!" */
+	{ 0x00, 0x00, 10,  6,  30,  76, 0x00000000 },   /* 14: row  6, "RANKING" */
+	{ 0x00, 0x00, 10,  1,  30, 108, 0x00000000 },   /* 15: row  1, "CLEAR GAME" */
+	{ 0x00, 0x00, 10, 12,  30, 140, 0x00000000 },   /* 16: row 12, "TOTAL TIME" */
+	{ 0x00, 0x00, 10, 13,  30, 172, 0x00000000 },   /* 17: row 13, "NUMBER OF SAVES" */
+	{ 0x00, 0x10, 10, 27,  28,  80, 0x00000000 },   /* 18: row 27, image glyph 54 (END_REC_ITEM_A) */
+	{ 0x00, 0x11, 10, 28, 122,  80, 0x00000000 },   /* 19: row 28, image glyph 55 (END_REC_ITEM_B) */
+	{ 0x00, 0x12, 10, 29, 216,  80, 0x00000000 },   /* 20: row 29, image glyph 56 (END_REC_ITEM_C) */
+	{ 0x00, 0x00, 10, 21,  32, 150, 0x00808080 },   /* 21: row 21, image glyph 48 */
+	{ 0x00, 0x20, 10, 22,  32, 150, 0x00808080 },   /* 22: row 22, image glyph 49 */
+	{ 0x00, 0x00, 10, 14,  99,  30, 0x00808080 },   /* 23: row 14, "YOUR REWARD" */
+	{ 0x00, 0x00, 10, 15,  71, 200, 0x00808080 },   /* 24: row 15, "CHECK ITEM BOX!!" */
+	{ 0x00, 0x20, 10, 20,  32, 180, 0x00808080 },   /* 25: row 20, image glyph 47 */
+	{ 0x00, 0x20, 10, 20,  32, 180, 0x00808080 },   /* 26: row 20, image glyph 47 */
+	{ 0x00, 0x00, 10, 23,  32,  70, 0x00000000 },   /* 27: row 23, image glyph 50 */
+	{ 0x00, 0x00, 10, 24,  32, 100, 0x00000000 },   /* 28: row 24, image glyph 51 */
+	{ 0x00, 0x20, 10, 25,  32, 180, 0x00808080 },   /* 29: row 25, image glyph 52 */
+	{ 0x00, 0x20, 10, 26,  32, 180, 0x00808080 },   /* 30: row 26, image glyph 53 */
+	{ 0x00, 0x00, 10, 30, 224, 108, 0x00000000 },   /* 31: row 30, "HUNK" (END_REC_HUNK) */
+	{ 0x00, 0x00, 10, 31, 217, 108, 0x00000000 }    /* 32: row 31, "TOFU" (END_REC_TOFU) */
+};
+
+/* DS 0x8011e4b0 (Ending_glyph_idx_tbl): glyph index rows of the result records, each ended by 0xff.
+ * Ending_draw_score finds row n by skipping n 0xff bytes, then draws glyphs up to the next 0xff.
+ * Size: the largest row number in Ending_result_rec_tbl is 31 (record 32), and no code writes a
+ * row byte or this list (the only reference is the lui at ENDING::8011bc38 with the addiu at 8011bc3c), so 32 rows are
+ * reachable; the 32nd 0xff (ENDING::8011e55c) is the last byte, 173 bytes in all.
+ * Initial values: the retail bytes, ENDING.BIN offset 0x44b0, 173 bytes. */
+UCHAR Ending_glyph_idx_tbl[173] = {
+	0x02, 0x0d, 0x0c, 0x06, 0x0f, 0x00, 0x11, 0x12, 0x0a, 0x00, 0x11, 0x08, 0x0d, 0x0c, 0x10, 0x22, 0x22, 0xff,   /* row  0: "CONGRATULATIONS!!" */
+	0x02, 0x0a, 0x04, 0x00, 0x0f, 0x26, 0x06, 0x00, 0x0b, 0x04, 0xff,   /* row  1: "CLEAR GAME" */
+	0x0a, 0x04, 0x0d, 0x0c, 0x26, 0x00, 0xff,   /* row  2: "LEON A" */
+	0x02, 0x0a, 0x00, 0x08, 0x0f, 0x04, 0x26, 0x00, 0xff,   /* row  3: "CLAIRE A" */
+	0x0a, 0x04, 0x0d, 0x0c, 0x26, 0x01, 0xff,   /* row  4: "LEON B" */
+	0x02, 0x0a, 0x00, 0x08, 0x0f, 0x04, 0x26, 0x01, 0xff,   /* row  5: "CLAIRE B" */
+	0x0f, 0x00, 0x0c, 0x09, 0x08, 0x0c, 0x06, 0xff,   /* row  6: "RANKING" */
+	0x00, 0xff,   /* row  7: "A" */
+	0x01, 0xff,   /* row  8: "B" */
+	0x02, 0xff,   /* row  9: "C" */
+	0x03, 0xff,   /* row 10: "D" */
+	0x04, 0xff,   /* row 11: "E" */
+	0x11, 0x0d, 0x11, 0x00, 0x0a, 0x26, 0x11, 0x08, 0x0b, 0x04, 0xff,   /* row 12: "TOTAL TIME" */
+	0x0c, 0x12, 0x0b, 0x01, 0x04, 0x0f, 0x26, 0x0d, 0x05, 0x26, 0x10, 0x00, 0x13, 0x04, 0x10, 0xff,   /* row 13: "NUMBER OF SAVES" */
+	0x16, 0x0d, 0x12, 0x0f, 0x26, 0x0f, 0x04, 0x14, 0x00, 0x0f, 0x03, 0xff,   /* row 14: "YOUR REWARD" */
+	0x02, 0x07, 0x04, 0x02, 0x09, 0x26, 0x08, 0x11, 0x04, 0x0b, 0x26, 0x01, 0x0d, 0x15, 0x22, 0x22, 0xff,   /* row 15: "CHECK ITEM BOX!!" */
+	0x2b, 0xff,   /* row 16: image glyph 43 */
+	0x2c, 0xff,   /* row 17: image glyph 44 */
+	0x2d, 0xff,   /* row 18: image glyph 45 */
+	0x2e, 0xff,   /* row 19: image glyph 46 */
+	0x2f, 0xff,   /* row 20: image glyph 47 */
+	0x30, 0xff,   /* row 21: image glyph 48 */
+	0x31, 0xff,   /* row 22: image glyph 49 */
+	0x32, 0xff,   /* row 23: image glyph 50 */
+	0x33, 0xff,   /* row 24: image glyph 51 */
+	0x34, 0xff,   /* row 25: image glyph 52 */
+	0x35, 0xff,   /* row 26: image glyph 53 */
+	0x36, 0xff,   /* row 27: image glyph 54 */
+	0x37, 0xff,   /* row 28: image glyph 55 */
+	0x38, 0xff,   /* row 29: image glyph 56 */
+	0x07, 0x12, 0x0c, 0x09, 0xff,   /* row 30: "HUNK" */
+	0x11, 0x0d, 0x05, 0x12, 0xff    /* row 31: "TOFU" */
+};
 /* TIM sector-table at ENDING::8011e560: 12 USHORT entries (0x18 bytes), indexed by Tim_no & 0xff.
  * Entries 0-8 are FILECODE TIM ids (FILECODE.H END10_TIM..END18_TIM); entries 9-11 are raw
  * values, not file codes. Retail call sites pass Tim_no 0-8 (largest index 8).
@@ -262,25 +505,12 @@ USHORT Ending_tim_sect_tbl[12] = {   /* TIM sector-table (USHORT entries) */
 	0x00A2, 0xF0D2, 0x0014, 0x0000,
 };
 
-/* Result/score display state (ENDING overlay data) */
-/* DS 0x8011e324 (Ending_result_rec_tbl) */
-UCHAR  Ending_result_rec_tbl = 0x00;   /* result slot records (12 bytes each) */
-/* DS 0x8011e32a (Ending_result_rec_Y) */
-UCHAR  Ending_result_rec_Y = 0x5A;   /* result slot record field base */
-/* DS 0x8011e3c0 (Ending_result_mode_flg) */
-UCHAR  Ending_result_mode_flg = 0x00;   /* result display mode flags */
-/* DS 0x8011e3c8 (Ending_result_rank_col) */
-UINT   Ending_result_rank_col = 0x00000000;   /* result rank colour bits */
-/* DS 0x8011e404 (Ending_item_a_col) */
-UINT   Ending_item_a_col = 0x00000000;   /* item-A colour */
-/* DS 0x8011e410 (Ending_item_b_col) */
-UINT   Ending_item_b_col = 0x00000000;   /* item-B colour */
-/* DS 0x8011e41c (Ending_item_c_col) */
-UINT   Ending_item_c_col = 0x00000000;   /* item-C colour */
-/* DS 0x8011e498 (Ending_fade_scratch0) */
-UCHAR  Ending_fade_scratch0 = 0x00;   /* fade-in scratch (byte store) */
-/* DS 0x8011e4a4 (Ending_fade_scratch1) */
-UCHAR  Ending_fade_scratch1 = 0x00;   /* fade-in scratch (byte store) */
+/* Result/score display state (ENDING overlay data).
+ * The former scalars Ending_result_rec_Y (0x8011e32a), Ending_result_mode_flg (0x8011e3c0),
+ * Ending_result_rank_col (0x8011e3c8), Ending_item_a/b/c_col (0x8011e404/0x8011e410/0x8011e41c) and
+ * Ending_fade_scratch0/1 (0x8011e498/0x8011e4a4) lie inside Ending_result_rec_tbl; they are now the
+ * members record 0 .y, END_REC_CONGRATS .flg and .colour, END_REC_ITEM_A/B/C .colour and
+ * END_REC_HUNK/END_REC_TOFU .flg. */
 /* DS 0x8011e578 (Ending_scroll_step) */
 SHORT  Ending_scroll_step = 0x0000;   /* timeline step increment */
 /* DS 0x8011e57c (Ending_scroll_spd) */
@@ -290,11 +520,9 @@ int    Ending_msg_col = 0x00000000;   /* message column index */
 /* DS 0x8011e588 (Ending_msg_line_buf) */
 UCHAR  Ending_msg_line_buf = 0x00;   /* message line buffer */
 /* DS 0x8011e589 (Ending_msg_line_buf1) */
-UCHAR  Ending_msg_line_buf1 = 0x00;   /* message line buffer, +1 */
+UCHAR  Ending_msg_line_buf1[31];   /* message line buffer, +1 */
 /* DS 0x8011e5a8 (Ending_msg_row) */
 int    Ending_msg_row = 0x00000000;   /* message row index */
-/* DS 0x8011e5b0 (Ending_inittbl_buf) */
-UCHAR  Ending_inittbl_buf = 0x00;   /* Init_tbl load buffer */
 
 /* Overlay runtime state */
 /* DS 0x80121340 (Ending_type_cnt) */
@@ -307,24 +535,16 @@ UINT   Ending_result_slot_mask = 0x00000000;   /* result slot mask */
 SHORT  Ending_fade_ofs = 0x0000;   /* scroll/fade offset */
 /* DS 0x80121374 (Ending_msg_state) */
 int    Ending_msg_state = 0x00000000;   /* message state (switch selector) */
-/* DS 0x80121378 (Ending_room_work) */
-UCHAR  Ending_room_work = 0x00;   /* ROOM_WORK block */
-/* DS 0x8012137e (Ending_room_flg) */
-UCHAR  Ending_room_flg = 0x00;   /* room flag */
-/* DS 0x80121380 (Ending_pwork_tim) */
-UCHAR *Ending_pwork_tim = 0;   /* work pointer (-> Ending_tim_buf) */
-/* DS 0x80121384 (Ending_pwork_inita) */
-UCHAR *Ending_pwork_inita = 0;   /* work pointer (-> Ending_inita_tbl) */
-/* DS 0x80121388 (Ending_pwork_initb) */
-UCHAR *Ending_pwork_initb = 0;   /* work pointer (-> Ending_initb_tbl) */
+/* DS 0x80121378 (Ending_room_work): ROOM_WORK block that Ending_init hands to Snd_sys_room_set through
+ * G.pRoom. Retail Ending_init stores Reverb_lv (+6), pEdt0 (+8), pVh0 (+0xc) and pVb0 (+0x10) into it;
+ * sizeof(ROOM_WORK) is 0x84. The member pointers point into Ending_work_buf (see below). */
+ROOM_WORK Ending_room_work;
 /* DS 0x801213fc (Ending_fade_dir) */
 UCHAR  Ending_fade_dir = 0x00;   /* fade direction state */
 /* DS 0x80121400 (Ending_timeline_cnt) */
 int    Ending_timeline_cnt = 0x00000000;   /* timeline frame counter */
 /* DS 0x80121404 (Ending_msg_col_base) */
 UCHAR  Ending_msg_col_base = 0x00;   /* message table column base */
-/* DS 0x8012142d (Ending_cbuf) */
-char   Ending_cbuf = 0x00;   /* character buffer (per cut-buffer, stride 8000) */
 /* DS 0x80125288 (Ending_load_err_flg) */
 UCHAR  Ending_load_err_flg = 0x00;   /* load error flags (byte store) */
 /* DS 0x80125290 (Ending_time_dig_d10) */
@@ -363,8 +583,6 @@ int    Ending_msg_draw_idx = 0x00000000;   /* message draw index */
 POLY_FT4 *Ending_pPoly = 0;   /* next free POLY_FT4 in OT buffer */
 /* DS 0x801252b0 (Ending_state_flg) */
 ULONG  Ending_state_flg = 0x00000000;   /* ending state flag word */
-/* DS 0x801252b8 (Ending_save_copy) */
-ULONG  Ending_save_copy = 0x00000000;   /* copied save record (0x598 bytes) */
 /* DS 0x801252d4 (Ending_zombie_cnt) */
 USHORT Ending_zombie_cnt = 0x0000;   /* zombie count (save copy) */
 /* DS 0x801252d6 (Ending_save_rank_in) */
@@ -373,12 +591,8 @@ USHORT Ending_save_rank_in = 0x0000;   /* save field (rank input) */
 USHORT Ending_save_bonus_in = 0x0000;   /* save field (bonus input) */
 /* DS 0x801252e0 (Ending_save_weapon_mugen) */
 UINT   Ending_save_weapon_mugen = 0x00000000;   /* save field (weapon mugen) */
-/* DS 0x801254d0 (Ending_flg_ck_tbl) */
-ULONG  Ending_flg_ck_tbl = 0x00000000;   /* flag word array (Flg_ck) */
-/* DS 0x80125640 (Ending_flg_tbl) */
-ULONG  Ending_flg_tbl = 0x00000000;   /* ending flag word array (Flg_on/Flg_ck) */
-/* DS 0x80125644 (Ending_flg_tbl_b1) */
-ULONG  Ending_flg_tbl_b1 = 0x00000000;   /* zapping flags word 1 (low byte used) */
+/* The copy of G.SaveData from Game_play_time (0x598 bytes, memcpy16 in Ending_init) holds the flag words the ending tests:
+ * Item_flg at copy +0x218 (DS 0x801254d0), Zapping_flg[0] at +0x388 (DS 0x80125640) and Zapping_flg[1] at +0x38c (DS 0x80125644). */
 /* DS 0x80125796 (Ending_save_zapping_cnt) */
 UCHAR  Ending_save_zapping_cnt = 0x00;   /* save field (zapping count) */
 /* DS 0x80125850 (Ending_step_flg) */
@@ -395,12 +609,6 @@ int    Ending_msg_row_cnt = 0x00000000;   /* message row counter */
 UCHAR  Ending_time_sec = 0x00;   /* time-digit scratch (seconds) */
 /* DS 0x80125859 (Ending_bonus_val) */
 UCHAR  Ending_bonus_val = 0x00;   /* bonus-digit scratch */
-/* DS 0x8012a000 (Ending_tim_buf) */
-UCHAR  Ending_tim_buf;   /* TIM load buffer */
-/* DS 0x8012a0c0 (Ending_inita_tbl) */
-UCHAR  Ending_inita_tbl;   /* init table A */
-/* DS 0x8012ace0 (Ending_initb_tbl) */
-UCHAR  Ending_initb_tbl;   /* init table B */
 /* shared TIM load buffer at DS 0x80198000 is Bg_img_buf (DIESPR.C) */
 /* DS 0x8011a004 (Ending_mess_end1a) */
 UCHAR Ending_mess_end1a[16] = {   /* overlay string (END1A_TIM_LD) */
@@ -449,73 +657,81 @@ static void Ending_stat_flg_set(UINT Slot_mask, UCHAR Val, char Clr_sw);
 /* DS 0x8011a18c (Ending_init) */
 static void Ending_init(void)
 {
+	GLOBAL *pG = &G;
 	UCHAR cbuf_save;
 	ULONG read_size;
 	BGMCTR bgm_ctr[4];
+	/* Frame reservation: retail Ending_init reserves sp+0x10..0x37 (40 bytes, between the outgoing
+	 * argument area and bgm_ctr) and never reads it, so this volatile pad keeps the frame at 0x50. */
+	volatile UCHAR frame_pad[0x28];
 
 	Snd_bgm_fade_ON(0xb4, 24);
-	G.Status_flg &= ~STAT_CINESCO;
+	pG->Status_flg &= ~STAT_CINESCO;
 	Bg_set_mode(2, 0);
 	Main.Bg_chg_flg = 0;
 	Pad_rep_set(0xf01c, 0x308);
 	SetGeomScreen(200);
 	SetGeomOffset(0, 0);
-	G.pFree_work = &Ending_tim_buf;
+	pG->pFree_work = Ending_work_buf;
 	Main.Vloop = 0;
 	Ending_load_err_flg = 0;
-	if ((G.System_flg & SYS_EX_BATTLE) == 0) {
+	if ((pG->System_flg & SYS_EX_BATTLE) == 0) {
 		do {
-			read_size = Cd_read(END00_TIM, (ULONG *)G.pFree_work, 1, Ending_mess_end00);
-		} while (read_size == 0xffffffff);
-		G.Cclut = 16;
-		G.Ctpage = 8;
+			read_size = Cd_read(END00_TIM, (ULONG *)pG->pFree_work, 1, Ending_mess_end00);
+		} while (read_size + 1 == 0);
+		pG->Cclut = 16;
+		pG->Ctpage = 8;
 	}
 	else {
 		do {
-			read_size = Cd_read(END19_TIM, (ULONG *)G.pFree_work, 1, Ending_mess_end1a);
-		} while (read_size == 0xffffffff);
-		G.Cclut = 17;
-		G.Ctpage = 12;
+			read_size = Cd_read(END19_TIM, (ULONG *)pG->pFree_work, 1, Ending_mess_end1a);
+		} while (read_size + 1 == 0);
+		pG->Cclut = 17;
+		pG->Ctpage = 12;
 	}
-	Mapping_tim((ULONG *)G.pFree_work);
+	Mapping_tim((ULONG *)pG->pFree_work);
 	do {
-		read_size = Cd_read(ROOM800_SND, (ULONG *)G.pFree_work, 1, Ending_mess_room800);
-	} while (read_size == 0xffffffff);
-	Ending_room_flg = 0;
-	Ending_pwork_inita = &Ending_inita_tbl;
-	Ending_pwork_tim = &Ending_tim_buf;
-	Ending_pwork_initb = &Ending_initb_tbl;
-	G.pRoom = (ROOM_WORK *)&Ending_room_work;
-	G.pFree_work += read_size;
+		read_size = Cd_read(ROOM800_SND, (ULONG *)pG->pFree_work, 1, Ending_mess_room800);
+	} while (read_size + 1 == 0);
+	{
+		ROOM_WORK *pRoom = &Ending_room_work;
+		/* G.pFree_work still equals Ending_work_buf here (set at the top, advanced only after this block) */
+		pRoom->Reverb_lv = 0;
+		pRoom->pEdt0 = (ULONG *)pG->pFree_work;
+		pRoom->pVh0 = (ULONG *)(pG->pFree_work + 0xc0);
+		pRoom->pVb0 = (ULONG *)(pG->pFree_work + 0xce0);
+		pG->pRoom = pRoom;
+	}
+	pG->pFree_work += read_size;
 	Snd_sys_room_set();
 	Ending_fade_dir = 1;
-	if ((G.Status_flg & STAT_SPECIAL_RUN) == 0) {
+	if ((pG->Status_flg & STAT_SPECIAL_RUN) == 0) {
 		Ending_disp_mode = 0;
 	}
 	else {
 		Ending_disp_mode = 0x11;
 	}
-	if ((G.System_flg & SYS_EX_BATTLE) != 0) {
-		G.ExData[2]    = (UCHAR)G.SaveData.Sce_timer;
+	if ((pG->System_flg & SYS_EX_BATTLE) != 0) {
+		pG->ExData[2]    = (UCHAR)pG->SaveData.Sce_timer;
 		{
-			UCHAR *pSrc = (UCHAR *)&G.SaveData.ExData3[8];
+			UCHAR *pSrc = (UCHAR *)&pG->SaveData.ExData3[8];
 			int i;
 			for (i = 0; i < 0x3c; i++) {
-				G.ExData[4 + i] = pSrc[i];
+				pG->ExData[4 + i] = pSrc[i];
 			}
 		}
-		G.ExData[3]    = (UCHAR)G.SaveData.Player_life;
+		pG->ExData[3]    = (UCHAR)pG->SaveData.Player_life;
 	}
 	Ending_timeline_cnt = 0;
 	Ending_state_flg = 0x2000;
 	Ending_result_slot_mask = 0;
-	memcpy16((ULONG *)&Ending_save_copy, &G.SaveData.Game_play_time, 0x598);
+	memcpy16(Ending_save_copy, &pG->SaveData.Game_play_time, 0x598);
 	Ending_rank_no = 0;
 	Ending_score_time = 0;
 	Ending_score_life = 0;
 	Ending_score_item = 0;
 	Ending_score_set();
-	if ((G.System_flg & SYS_EX_BATTLE) != 0) {
+	if ((pG->System_flg & SYS_EX_BATTLE) != 0) {
 		do {
 			Task_sleep(1);
 		} while (pEdt_adr[0].id_check != 0);
@@ -528,18 +744,18 @@ static void Ending_init(void)
 		Snd_bgm_main();
 		Snd_bgm_ctr(0x1000000);
 	}
-	cbuf_save = G.Cbuf_id;
-	G.Cbuf_id = 0;
+	cbuf_save = pG->Cbuf_id;
+	pG->Cbuf_id = 0;
 	Fade_adjust(0, 0xffffffff, 0xffffff, NULL);
 	Fade_adjust(1, 0xffffffff, 0xffffff, NULL);
 	Fade_adjust(2, 0xffffffff, 0xffffff, NULL);
 	Fade_adjust(3, 0xffffffff, 0xffffff, NULL);
-	G.Cbuf_id = 1;
+	pG->Cbuf_id = 1;
 	Fade_adjust(0, 0xffffffff, 0xffffff, NULL);
 	Fade_adjust(1, 0xffffffff, 0xffffff, NULL);
 	Fade_adjust(2, 0xffffffff, 0xffffff, NULL);
 	Fade_adjust(3, 0xffffffff, 0xffffff, NULL);
-	G.Cbuf_id = cbuf_save;
+	pG->Cbuf_id = cbuf_save;
 	return;
 }
 
@@ -549,16 +765,14 @@ static void Ending_init(void)
 /* DS 0x8011a630 (Ending_exit) */
 static void Ending_exit(void)
 {
-	BOOL loop_flg;
 	int wait_cnt;
 
-	wait_cnt = 0x3b;
+	wait_cnt = 60;
 	do {
+		wait_cnt--;
 		Bg_set_mode(2, 0);
 		Task_sleep(1);
-		loop_flg = wait_cnt != 0;
-		wait_cnt = wait_cnt + -1;
-	} while (loop_flg);
+	} while (wait_cnt != 0);
 	Init_global();
 	Bg_set_mode(2, 0);
 	if ((G.System_flg & SYS_EX_BATTLE) != 0) {
@@ -637,8 +851,8 @@ static void Ending_fade_in(void)
 			if ((Ending_state_flg & 0x2000) != 0) {
 				Ending_state_flg ^= 0x2000;
 				Ending_result_flg_set(0xffffffff, 0, 1);
-				Ending_fade_scratch0 = 0;
-				Ending_fade_scratch1 = 0;
+				Ending_result_rec_tbl[END_REC_HUNK].flg = 0;
+				Ending_result_rec_tbl[END_REC_TOFU].flg = 0;
 			}
 			Bg_set_mode(2, 0);
 		}
@@ -650,20 +864,24 @@ static void Ending_fade_in(void)
  * Fade direction 1 handler (entry 1 of Ending_fade_tbl). Runs the ending scene
  * state machine: a 22-way switch on Ending_disp_mode (jump table ENDING::8011a034;
  * modes 22 and up do nothing), then counts Ending_timeline_cnt up by one.
- * Timeline thresholds are frame counts. Ending_result_rec_tbl records are 12 bytes,
- * so (&Ending_result_rec_tbl)[12 * n] is record n. */
+ * Timeline thresholds are frame counts. Ending_result_rec_tbl[n].flg is the flag byte
+ * of result record n (retail stores sb at 0x8011e324 + 12 * n). */
 /* DS 0x8011a8e4 (Ending_fade_unk) */
 static void Ending_fade_unk(void)
 {
-	BGMCTR bgm_ctr;
+	/* retail reserves 12 BGMCTR entries (local_28[12]) and writes only element 0 */
+	BGMCTR bgm_ctr[12];
+	/* retail stores 600 and 1200 at sp+0x10 and sp+0x12 and never reads them; volatile keeps those 8 bytes in the frame */
+	volatile SHORT rsv[4];
+	rsv[0] = 600;
+	rsv[1] = 1200;
 
 	switch (Ending_disp_mode) {
 	case 0:
 		if (pEdt_adr[0].id_check == 0) {
 			if ((G.Status_flg & STAT_SCENARIO_B) == 0) {
-				bgm_ctr.Main = 0x26;
-				bgm_ctr.Sub = 0xff;
-				pBgm = &bgm_ctr;
+				*(USHORT *)bgm_ctr = 0xff26;
+				pBgm = bgm_ctr;
 				Seq_ctr[0].Ctrl = 0;
 				Seq_ctr[0].Vol.left = 100;
 				Seq_ctr[0].Vol.right = 100;
@@ -705,9 +923,9 @@ static void Ending_fade_unk(void)
 	case 4:
 		if (pEdt_adr[0].id_check == 0) {
 			if ((G.Status_flg & STAT_SCENARIO_B) == 0) {
-				bgm_ctr.Main = 0xff;
-				bgm_ctr.Sub = 0xff;
-				pBgm = &bgm_ctr;
+				/* Main is the low byte and Sub the high byte, so one halfword store sets both (retail uses sh too) */
+				*(USHORT *)bgm_ctr = 0xffff;
+				pBgm = bgm_ctr;
 				Seq_ctr[0].Ctrl = 0;
 				Seq_ctr[0].Vol.left = 100;
 				Seq_ctr[0].Vol.right = 100;
@@ -717,9 +935,8 @@ static void Ending_fade_unk(void)
 			Ending_fade_set(0, 0, 0, NULL);
 			Ending_state_flg |= 0x800;
 			Ending_fade_out();
-			bgm_ctr.Main = 0x2a;
-			bgm_ctr.Sub = 0xff;
-			pBgm = &bgm_ctr;
+			*(USHORT *)bgm_ctr = 0xff2a;
+			pBgm = bgm_ctr;
 			Seq_ctr[0].Ctrl = 0;
 			Seq_ctr[0].Vol.left = 100;
 			Seq_ctr[0].Vol.right = 100;
@@ -748,21 +965,21 @@ static void Ending_fade_unk(void)
 			}
 		}
 		if (Ending_timeline_cnt == 480 && Ending_step_flg == 0) {
-			(&Ending_result_rec_tbl)[12 * (Ending_rank_no + 4)] = 5;
+			Ending_result_rec_tbl[Ending_rank_no + END_REC_RANK].flg = 5;
 			if ((G.Status_flg & STAT_SCENARIO_B) != 0) {
 				if ((G.Status_flg & STAT_PLAYER) == 0) {
-					(&Ending_result_rec_tbl)[12 * 11] = 5;
+					Ending_result_rec_tbl[END_REC_LEON_B].flg = 5;
 				}
 				else {
-					(&Ending_result_rec_tbl)[12 * 12] = 5;
+					Ending_result_rec_tbl[END_REC_CLAIRE_B].flg = 5;
 				}
 			}
 			else {
 				if ((G.Status_flg & STAT_PLAYER) == 0) {
-					(&Ending_result_rec_tbl)[12 * 9] = 5;
+					Ending_result_rec_tbl[END_REC_LEON_A].flg = 5;
 				}
 				else {
-					(&Ending_result_rec_tbl)[12 * 10] = 5;
+					Ending_result_rec_tbl[END_REC_CLAIRE_A].flg = 5;
 				}
 			}
 			Ending_result_flg_set(0x3e000, 5, 0);
@@ -836,16 +1053,14 @@ static void Ending_fade_unk(void)
 			Ending_exit();
 			break;
 		}
-		bgm_ctr.Main = 0xff;
-		bgm_ctr.Sub = 0xff;
-		pBgm = &bgm_ctr;
+		*(USHORT *)bgm_ctr = 0xffff;
+		pBgm = bgm_ctr;
 		Seq_ctr[0].Ctrl = 0;
 		Seq_ctr[0].Vol.left = 100;
 		Seq_ctr[0].Vol.right = 100;
 		Snd_bgm_main();
-		bgm_ctr.Main = 0xff;
-		bgm_ctr.Sub = 0x33;
-		pBgm = &bgm_ctr;
+		*(USHORT *)bgm_ctr = 0x33ff;
+		pBgm = bgm_ctr;
 		Seq_ctr[1].Ctrl = 0;
 		Seq_ctr[1].Vol.left = 100;
 		Seq_ctr[1].Vol.right = 100;
@@ -906,7 +1121,7 @@ static void Ending_fade_unk(void)
 		if (Ending_timeline_cnt != 60) {
 			break;
 		}
-		memcpy16(&G.SaveData.Game_play_time, &Ending_save_copy, 0x598);
+		memcpy16(&G.SaveData.Game_play_time, Ending_save_copy, 0x598);
 		G.System_flg |= SYS_TIMER;
 		Ending_next_set();
 		G.System_flg &= ~SYS_SAVE_GAME;
@@ -955,7 +1170,7 @@ static void Ending_fade_unk(void)
 		if (Ending_timeline_cnt != 60) {
 			break;
 		}
-		memcpy16(&G.SaveData.Game_play_time, &Ending_save_copy, 0x598);
+		memcpy16(&G.SaveData.Game_play_time, Ending_save_copy, 0x598);
 		G.System_flg = G.System_flg | (SYS_TIMER | SYS_TOFU_SURVIVOR);
 		Ending_next_set();
 		G.System_flg &= ~SYS_SAVE_GAME;
@@ -1016,9 +1231,9 @@ static void Ending_fade_unk(void)
 		if (pEdt_adr[0].id_check != 0) {
 			break;
 		}
-		bgm_ctr.Main = 0x30;
-		bgm_ctr.Sub = 0xff;
-		pBgm = &bgm_ctr;
+		bgm_ctr[0].Main = 0x30;
+		bgm_ctr[0].Sub = 0xff;
+		pBgm = bgm_ctr;
 		Seq_ctr[0].Ctrl = 0;
 		Seq_ctr[0].Vol.left = 100;
 		Seq_ctr[0].Vol.right = 100;
@@ -1061,9 +1276,9 @@ static void Ending_fade_unk(void)
 		Ending_fade_set(0, 0, 0, NULL);
 		Ending_state_flg |= 0x800;
 		Ending_fade_out();
-		bgm_ctr.Main = 0x2a;
-		bgm_ctr.Sub = 0xff;
-		pBgm = &bgm_ctr;
+		bgm_ctr[0].Main = 0x2a;
+		bgm_ctr[0].Sub = 0xff;
+		pBgm = bgm_ctr;
 		Seq_ctr[0].Ctrl = 0;
 		Seq_ctr[0].Vol.left = 100;
 		Seq_ctr[0].Vol.right = 100;
@@ -1091,19 +1306,19 @@ static void Ending_fade_unk(void)
 			}
 		}
 		if (Ending_timeline_cnt == 480 && Ending_step_flg == 0) {
-			(&Ending_result_rec_tbl)[12 * (Ending_rank_no + 4)] = 5;
-			(&Ending_result_rec_tbl)[12 * 9] = 0;
-			(&Ending_result_rec_tbl)[12 * 10] = 0;
-			(&Ending_result_rec_tbl)[12 * 11] = 0;
-			(&Ending_result_rec_tbl)[12 * 12] = 0;
+			Ending_result_rec_tbl[Ending_rank_no + END_REC_RANK].flg = 5;
+			Ending_result_rec_tbl[END_REC_LEON_A].flg = 0;
+			Ending_result_rec_tbl[END_REC_CLAIRE_A].flg = 0;
+			Ending_result_rec_tbl[END_REC_LEON_B].flg = 0;
+			Ending_result_rec_tbl[END_REC_CLAIRE_B].flg = 0;
 			Ending_result_flg_set(0x1e000, 5, 0);
 			if ((G.System_flg & SYS_TOFU_SURVIVOR) != 0) {
-				Ending_fade_scratch0 = 0;
-				Ending_fade_scratch1 = 5;
+				Ending_result_rec_tbl[END_REC_HUNK].flg = 0;
+				Ending_result_rec_tbl[END_REC_TOFU].flg = 5;
 			}
 			else {
-				Ending_fade_scratch0 = 5;
-				Ending_fade_scratch1 = 0;
+				Ending_result_rec_tbl[END_REC_HUNK].flg = 5;
+				Ending_result_rec_tbl[END_REC_TOFU].flg = 0;
 			}
 			Ending_scroll_spd = 0x00101010;
 			Ending_step_flg = 1;
@@ -1141,7 +1356,7 @@ static void Ending_fade_unk(void)
 		if (Ending_timeline_cnt != 60) {
 			break;
 		}
-		memcpy16(&G.SaveData.Game_play_time, &Ending_save_copy, 0x598);
+		memcpy16(&G.SaveData.Game_play_time, Ending_save_copy, 0x598);
 		G.Status_flg |= STAT_EX_SAVE;
 		G.System_flg |= SYS_PSP_TRANS;
 		Ending_next_set();
@@ -1172,6 +1387,24 @@ VOID *Ending_fade_tbl[4] = {
 	(VOID *)Ending_exit,	/* 3: ENDING::8011a630 */
 };
 
+/* Ending - ENDING::8011a0fc
+ * Overlay entry. Runs Ending_init, then unless SYS_EX_BATTLE is set it loops once per frame: calls the fade
+ * handler selected by Ending_fade_dir (Ending_fade_tbl), draws the score and sleeps one frame. With SYS_EX_BATTLE
+ * set it runs Ending_main once instead. */
+/* DS 0x8011a0fc (Ending) */
+VOID Ending(VOID)
+{
+	Ending_init();
+	if ((G.System_flg & SYS_EX_BATTLE) == 0) {
+		do {
+			(((void (*)(void))Ending_fade_tbl[Ending_fade_dir])());
+			Ending_draw_score();
+			Task_sleep(1);
+		} while (1);
+	}
+	Ending_main();
+}
+
 /* Ending_draw_score - ENDING::8011bb94
  * Draw ranking/score tile glyphs: iterates result entries and emits
  * POLY_FT4 quads for each character. */
@@ -1191,87 +1424,83 @@ static void Ending_draw_score(void)
 	POLY_FT4 *p;
 	UINT row_no;
 	int scroll_pos;
-	UCHAR *pFlg;
 	int prim_code;
 	int rem_cnt;
-	int tbl_ofs;
 	USHORT x_pos;
-	USHORT *pRec;
+	ENDING_RESULT_REC *pRec;
+	ENDING_GLYPH *pGlyph;
 	UCHAR *pIdx;
 
-	pFlg = &Ending_result_rec_tbl;
-	pRec = (USHORT *)&Ending_result_rec_Y;
-	Ending_pPoly = (POLY_FT4 *)((UINT)G.Cbuf_id * 8000 + -0x7fedebf8);
+	pRec = Ending_result_rec_tbl;
+	Ending_pPoly = Ending_prim[G.Cbuf_id];
 	rem_cnt = 0x21;
 	do {
 		rem_cnt = rem_cnt + -1;
-		if ((pFlg[1] & 0x20) != 0) {
-			*pFlg = 0;
+		if ((pRec->attr & 0x20) != 0) {
+			pRec->flg = 0;
 		}
-		if ((*pFlg & 1) != 0) {
-			pIdx = &Ending_glyph_idx_tbl;
+		if ((pRec->flg & 1) != 0) {
+			pIdx = Ending_glyph_idx_tbl;
 			row_no = 0;
-			if (*(UCHAR *)((int)pRec + -3) != 0) {
+			if (pRec->row != 0) {
 				do {
 					if (*pIdx == 0xff) {
 						row_no++;
 					}
 					pIdx++;
-				} while (*(UCHAR *)((int)pRec + -3) != row_no);
+				} while (pRec->row != row_no);
 			}
-			ot_idx = *(UCHAR *)(pRec - 2);
+			ot_idx = pRec->ot;
 			prim_code = 0x2c000000;
-			if ((*pFlg & 8) != 0) {
+			if ((pRec->flg & 8) != 0) {
 				prim_code = 0x2e000000;
-				scroll_pos = *(int *)(pRec + 1) - Ending_scroll_spd;
-				*(int *)(pRec + 1) = scroll_pos;
+				scroll_pos = pRec->colour - Ending_scroll_spd;
+				pRec->colour = scroll_pos;
 				if (0x80807f < scroll_pos) {
-					*pFlg = 0;
-					pRec[1] = 0;
-					pRec[2] = 0;
+					pRec->flg = 0;
+					pRec->colour = 0;
 				}
 			}
-			if ((*pFlg & 4) != 0) {
+			if ((pRec->flg & 4) != 0) {
 				prim_code = 0x2e000000;
-				scroll_pos = *(int *)(pRec + 1) + Ending_scroll_spd;
-				*(int *)(pRec + 1) = scroll_pos;
+				scroll_pos = pRec->colour + Ending_scroll_spd;
+				pRec->colour = scroll_pos;
 				if (0xf0f0ef < scroll_pos) {
 					prim_code = 0x2c000000;
-					*pFlg = *pFlg & 0xfb;
-					pRec[1] = -0x7f80;
-					pRec[2] = 0x80;
+					pRec->flg = pRec->flg & 0xfb;
+					pRec->colour = 0x808080;
 				}
 			}
-			x_pos = pRec[-1];
-			scroll_pos = *(int *)(pRec + 1);
-			y_pos = *pRec;
+			x_pos = pRec->x;
+			scroll_pos = pRec->colour;
+			y_pos = pRec->y;
 			ch_idx = *pIdx;
 			p = Ending_pPoly;
 			while (Ending_pPoly = p, ch_idx != 0xff) {
-				tbl_ofs = (UINT)ch_idx * 10;
-				ch_idx = (&Ending_glyph_W)[tbl_ofs];
-				glyph_h = (&Ending_glyph_H)[tbl_ofs];
-				glyph_u = (&Ending_glyph_U)[tbl_ofs];
-				glyph_uw = (&Ending_glyph_Uw)[tbl_ofs];
-				glyph_v = (&Ending_glyph_V)[tbl_ofs];
-				glyph_vh = (&Ending_glyph_Vh)[tbl_ofs];
+				pGlyph = &Ending_glyph_Tbl[ch_idx];
+				ch_idx = pGlyph->w;
+				glyph_h = pGlyph->h;
+				glyph_u = pGlyph->u;
+				glyph_uw = pGlyph->uw;
+				glyph_v = pGlyph->v;
+				glyph_vh = pGlyph->vh;
 				SetPolyFT4(p);
 				p->x0 = x_pos;
 				*(int *)&p->r0 = prim_code + scroll_pos;
 				p->y0 = y_pos;
-				p->u0 = (&Ending_glyph_U)[tbl_ofs];
-				p->v0 =(&Ending_glyph_V)[tbl_ofs];
-				attr_val = *(USHORT *)(&Ending_glyph_Clut + tbl_ofs);
+				p->u0 = pGlyph->u;
+				p->v0 = pGlyph->v;
+				attr_val = pGlyph->clut;
 				p->x1 = x_pos + (USHORT)ch_idx;
 				p->y1 = y_pos;
 				p->u1 = glyph_u + glyph_uw;
 				p->clut = attr_val + 0x400;
-				p->v1 =(&Ending_glyph_V)[tbl_ofs];
-				attr_val = ((ENDING_GLYPH *)((UCHAR *)&Ending_glyph_Tbl + tbl_ofs))->tpage;
+				p->v1 = pGlyph->v;
+				attr_val = pGlyph->tpage;
 				p->x2 = x_pos;
 				p->y2 = y_pos + (USHORT)glyph_h;
 				p->tpage = attr_val + 0x80;
-				tex_u2 = (&Ending_glyph_U)[tbl_ofs];
+				tex_u2 = pGlyph->u;
 				p->v2 = glyph_v + glyph_vh;
 				p->x3 = x_pos + (USHORT)ch_idx;
 				p->y3 = y_pos + (USHORT)glyph_h;
@@ -1281,14 +1510,13 @@ static void Ending_draw_score(void)
 				AddPrim(G.pOt1 + ot_idx, p);
 				pIdx++;
 				p = Ending_pPoly + 1;
-				x_pos = x_pos + (USHORT)(UCHAR)(&Ending_glyph_W)[tbl_ofs];
+				x_pos = x_pos + (USHORT)pGlyph->w;
 				ch_idx = *pIdx;
 			}
 		}
-		pRec += 6;
-		pFlg += 0xc;
+		pRec++;
 	} while (rem_cnt != 0);
-	if ((Ending_result_mode_flg & 1) != 0) {
+	if ((Ending_result_rec_tbl[END_REC_CONGRATS].flg & 1) != 0) {
 		Ending_draw_rank();
 	}
 	return;
@@ -1303,13 +1531,12 @@ static void Ending_draw_rank(void)
 	BOOL loop_flg;
 	POLY_FT4 *p;
 	UINT col_code;
-	int tbl_ofs;
 	int ofs;
 	USHORT *pCoord;
 	ENDING_GLYPH *pGlyph;
 	int dig_idx;
-	ULONG rank_x[6];   /* ENDING::8011a08c table, retail sp+0x10; rank_x[5] (sp+0x24) reserved, never read */
-	ULONG rank_y[6];   /* ENDING::8011a0a0 table, retail sp+0x28; rank_y[5] (sp+0x3c) reserved, never read */
+	ULONG rank_x[6];   /* ENDING::8011a08c table, retail sp+0x10; rank_x[5] (sp+0x24) unused, never read */
+	ULONG rank_y[6];   /* ENDING::8011a0a0 table, retail sp+0x28; rank_y[5] (sp+0x3c) unused, never read */
 
 	rank_x[0] = Ending_rank_x0;
 	rank_x[1] = Ending_rank_x1;
@@ -1322,16 +1549,15 @@ static void Ending_draw_rank(void)
 	rank_y[3] = Ending_rank_y3;
 	rank_y[4] = Ending_rank_y4;
 	col_code = 0x2e000000;
-	if ((Ending_result_mode_flg & 0xc) == 0) {
+	if ((Ending_result_rec_tbl[END_REC_CONGRATS].flg & 0xc) == 0) {
 		col_code = 0x2c000000;
 	}
-	col_code = Ending_result_rank_col | col_code;
+	col_code = Ending_result_rec_tbl[END_REC_CONGRATS].colour | col_code;
 	dig_idx = 9;
 	do {
 		p = Ending_pPoly;
 		ofs = dig_idx * 2;
-		tbl_ofs = (UINT)(UCHAR)(&Ending_time_dig_d10)[dig_idx] * 10;
-		pGlyph = (ENDING_GLYPH *)((UCHAR *)&Ending_glyph_Tbl + tbl_ofs);
+		pGlyph = &Ending_glyph_Tbl[(UCHAR)(&Ending_time_dig_d10)[dig_idx]];
 		pCoord = (USHORT *)((int)rank_x + ofs);
 		SetPolyFT4(Ending_pPoly);
 		p->r0 = (char)col_code;
@@ -1370,25 +1596,25 @@ static void Ending_draw_rank(void)
 /* DS 0x8011c140 (Ending_result_flg_set) */
 static void Ending_result_flg_set(UINT Slot_mask, UCHAR Val, char Clr_sw)
 {
-	UCHAR *pFlg;
+	ENDING_RESULT_REC *pRec;
 	UINT slot_no;
 
-	pFlg = &Ending_result_rec_tbl;
+	pRec = Ending_result_rec_tbl;
 	slot_no = 0;
 	do {
 		if ((Slot_mask >> (slot_no & 0x1f) & 1) == 0) {
 			if (Clr_sw != 0) {
-				*pFlg = 0;
+				pRec->flg = 0;
 			}
 		}
 		else {
-			*pFlg = Val;
+			pRec->flg = Val;
 		}
-		if ((pFlg[1] & 0x20) != 0) {
-			*pFlg = 0;
+		if ((pRec->attr & 0x20) != 0) {
+			pRec->flg = 0;
 		}
 		slot_no++;
-		pFlg += 0xc;
+		pRec++;
 	} while (slot_no < 0x1f);
 	return;
 }
@@ -1520,8 +1746,7 @@ static void Ending_score_set(void)
 	Ending_rank_no =
 		(USHORT)Ending_score_item + (USHORT)Ending_score_time + (USHORT)Ending_score_life;
 	low_rank_flg = Ending_rank_no < 0x32;
-	if (((G.Status_flg & STAT_INF_AMMO) != 0) &&
-	   (Ending_rank_no = Ending_rank_no - 0x32, low_rank_flg)) {
+	if (((G.Status_flg & STAT_INF_AMMO) != 0) && (Ending_rank_no = Ending_rank_no - 0x32, low_rank_flg)) {
 		Ending_rank_no = 0;
 	}
 	rank_idx = 0;
@@ -1541,70 +1766,70 @@ static void Ending_score_set(void)
 	Ending_rank_no = rank_idx;
 	ret_val = Ending_item_ck(17);
 	if (ret_val != 0) {
-		Ending_item_b_col = 0;
+		Ending_result_rec_tbl[END_REC_ITEM_B].colour = 0;
 		Ending_state_flg |= 0x20;
 	}
 	else if ((Ending_score_time == 100) && (rank_idx < 2)) {
-		Ending_item_b_col = 0x808080;
+		Ending_result_rec_tbl[END_REC_ITEM_B].colour = 0x808080;
 		Ending_state_flg |= 0xa0;
 	}
 	if ((G.Status_flg & STAT_SCENARIO_B) == 0) {
 		ret_val = Ending_item_ck(15);
 		if (ret_val != 0) {
-			Ending_item_a_col = 0;
+			Ending_result_rec_tbl[END_REC_ITEM_A].colour = 0;
 			Ending_state_flg |= 0x10;
 		}
 		ret_val = Ending_item_ck(18);
 		if (ret_val != 0) {
-			Ending_item_c_col = 0;
+			Ending_result_rec_tbl[END_REC_ITEM_C].colour = 0;
 			Ending_state_flg |= 0x40;
 		}
-		flg_res = Flg_ck((ULONG *)&Ending_flg_ck_tbl, 0x9c);
+		flg_res = Flg_ck(&Ending_save_copy[0x218 / 4], 0x9c);
 		if (flg_res != 0) {
 			return;
 		}
-		Flg_on(&Ending_flg_tbl, 0x12);
+		Flg_on(&Ending_save_copy[0x388 / 4], 0x12);
 		return;
 	}
 	ret_val = Ending_item_ck(15);
 	if (ret_val != 0) {
-		Ending_item_a_col = 0;
+		Ending_result_rec_tbl[END_REC_ITEM_A].colour = 0;
 		Ending_state_flg |= 0x10;
 	}
 	else if ((Ending_score_item == 100) && (Ending_rank_no < 2)) {
-		Ending_item_a_col = 0x808080;
+		Ending_result_rec_tbl[END_REC_ITEM_A].colour = 0x808080;
 		Ending_state_flg |= 0x90;
 	}
 	ret_val = Ending_item_ck(18);
 	if (ret_val != 0) {
-		Ending_item_c_col = 0;
+		Ending_result_rec_tbl[END_REC_ITEM_C].colour = 0;
 		Ending_state_flg |= 0x40;
 	}
 	else if ((Ending_score_life == 100) && (Ending_rank_no < 2)) {
-		Ending_item_c_col = 0x808080;
+		Ending_result_rec_tbl[END_REC_ITEM_C].colour = 0x808080;
 		Ending_state_flg |= 0xc0;
 	}
-	flg_res = Flg_ck(&Ending_flg_tbl, 0x13);
+	flg_res = Flg_ck(&Ending_save_copy[0x388 / 4], 0x13);
 	if (flg_res == 0) {
 		if (Ending_rank_no == 0) {
-			Flg_on(&Ending_flg_tbl, 0x13);
+			Flg_on(&Ending_save_copy[0x388 / 4], 0x13);
 			Ending_state_flg |= 0x100;
 		}
 	}
 	else {
-		flg_res = Flg_ck(&Ending_flg_tbl, 0x14);
+		flg_res = Flg_ck(&Ending_save_copy[0x388 / 4], 0x14);
 		if ((flg_res == 0) && (1 < Ending_save_zapping_cnt)) {
-			Flg_on(&Ending_flg_tbl, 0x14);
+			Flg_on(&Ending_save_copy[0x388 / 4], 0x14);
 			Ending_state_flg |= 0x200;
 		}
 	}
-	flg_res = Flg_ck((ULONG *)&Ending_flg_ck_tbl, 0x9c);
-	if ((flg_res == 0) && (flg_res = Flg_ck(&Ending_flg_tbl, 0x12), flg_res != 0)) {
+	flg_res = Flg_ck(&Ending_save_copy[0x218 / 4], 0x9c);
+	if ((flg_res == 0) && (flg_res = Flg_ck(&Ending_save_copy[0x388 / 4], 0x12), flg_res != 0)) {
 		Ending_state_flg |= 0x400;
 	}
-	flg_res = Flg_ck(&Ending_flg_tbl, 0x15);
+	flg_res = Flg_ck(&Ending_save_copy[0x388 / 4], 0x15);
 	if (flg_res == 0) {
-		Flg_on(&Ending_flg_tbl, 0x15);
+		Flg_on(&Ending_save_copy[0x388 / 4], 0x15);
 		Ending_state_flg |= 0x10000;
 	}
 	return;
@@ -1642,8 +1867,7 @@ static int Ending_item_ck(char Item_id)
 			while (1) {
 				slot_id = *(char *)(ofs + -0x7feda984);
 				nxt_idx = slot_idx + -1;
-				if ((slot_id == Item_id) &&
-				   (((slot_id != 17 && (slot_id != 15)) || (*(char *)(ofs + -0x7feda983) == 0xff))))
+				if ((slot_id == Item_id) && (((slot_id != 17 && (slot_id != 15)) || (*(char *)(ofs + -0x7feda983) == 0xff))))
 					break;
 				ofs = ofs + -4;
 				slot_idx = nxt_idx;
@@ -1690,6 +1914,7 @@ static void Ending_next_set(void)
 		G.Dummy8[1] = flg4000_off ? 4 : 5;
 	}
 	Ending_inittbl_load();
+	G.SaveData.Save_area = save_area[(UINT)G.Dummy8[1]];
 	cnt = 3;
 	if (flg4000_off) {
 		if ((G.System_flg & SYS_TIMER) == 0) {
@@ -1775,7 +2000,6 @@ static void Ending_next_set(void)
 	G.SaveData.Game_play_time = 0;
 	G.SaveData.Max_item_num = 8;
 	G.SaveData.Stereo = G.Sound_mode;
-	G.SaveData.Save_area = save_area[(UINT)G.Dummy8[1]];
 	G.SaveData.Vol_Bgm = Volume_Bgm;
 	G.SaveData.Pl_poison_down = 0;
 	G.Pl_poison_down = 0;
@@ -1785,19 +2009,16 @@ static void Ending_next_set(void)
 	G.SaveData.Key_idx = Main.Key_idx;
 	G.SaveData.Dummy16 = Ending_save_bonus_in;
 	G.Status_flg &= (STAT_PLAYER | STAT_SCENARIO_B | STAT_EASY_MODE);
-	G.SaveData.Status_bak = G.Status_flg;
 	if ((G.System_flg & SYS_TIMER) != 0) {
 		Flg_on(&G.Status_flg, 6);
-		Flg_on(&G.SaveData.Status_bak, 6);
 	}
 	if ((G.System_flg & SYS_TOFU_SURVIVOR) != 0) {
 		Flg_on(&G.Status_flg, 6);
-		Flg_on(&G.SaveData.Status_bak, 6);
 	}
 	if (!flg4000_off) {
 		Flg_on(&G.Status_flg, 0x11);
-		Flg_on(&G.SaveData.Status_bak, 0x11);
 	}
+	G.SaveData.Status_bak = G.Status_flg;
 	G.SaveData.Cure_cnt = 0;
 	G.SaveData.Save_cnt = 0xffff;
 	if (((G.System_flg & SYS_TIMER) == 0) && ((G.Status_flg & STAT_EX_SAVE) == 0)) {
@@ -1805,11 +2026,11 @@ static void Ending_next_set(void)
 		if ((G.Status_flg & STAT_SCENARIO_B) == 0) {
 			G.SaveData.Front_play_time = 0;
 			G.SaveData.Dummy1[0] = Ending_save_zapping_cnt + 1;
-			flg_res = Flg_ck(&Ending_flg_tbl, 0x14);
+			flg_res = Flg_ck(&Ending_save_copy[0x388 / 4], 0x14);
 			if (flg_res != 0) {
 				Flg_on(G.SaveData.Zapping_flg, 0x14);
 			}
-			flg_res = Flg_ck(&Ending_flg_tbl, 0x13);
+			flg_res = Flg_ck(&Ending_save_copy[0x388 / 4], 0x13);
 			if (flg_res != 0) {
 				Flg_on(G.SaveData.Zapping_flg, 0x13);
 			}
@@ -1817,8 +2038,8 @@ static void Ending_next_set(void)
 		else {
 			G.SaveData.Front_play_time = 0;
 			G.SaveData.Dummy1[0] = Ending_save_zapping_cnt;
-			G.SaveData.Zapping_flg[0] = Ending_flg_tbl;
-			G.SaveData.Zapping_flg[1] = Ending_flg_tbl_b1;
+			G.SaveData.Zapping_flg[0] = Ending_save_copy[0x388 / 4];
+			G.SaveData.Zapping_flg[1] = Ending_save_copy[0x38c / 4];
 		}
 		G.SaveData.Weapon_mugen = Ending_save_weapon_mugen & 1;
 		cnt = 2;
@@ -1852,7 +2073,7 @@ static void Ending_inittbl_load(void)
 {
 	ULONG *pInit_buf;
 
-	pInit_buf = (ULONG *)&Ending_inittbl_buf;
+	pInit_buf = (ULONG *)Ending_inittbl_buf;
 	Cd_read(INIT_TBL_DAT, pInit_buf, 1, Ending_mess_init_tbl);
 	memcpy16((ULONG *)&G.SaveData, (ULONG *)&((SAVE_DATA *)pInit_buf)[(UINT)G.Dummy8[1]], 0x798);
 	return;
@@ -1866,8 +2087,7 @@ static void Ending_tim_load(UINT Tim_no)
 {
 	ULONG read_ret;
 
-	read_ret = Cd_read((UINT)*(Ending_tim_sect_tbl + (Tim_no & 0xff)),
-					Bg_img_buf, 0, Ending_mess_end_tim);
+	read_ret = Cd_read((UINT)*(Ending_tim_sect_tbl + (Tim_no & 0xff)), Bg_img_buf, 0, Ending_mess_end_tim);
 	if (read_ret == 0xffffffff) {
 		Ending_load_err_flg |= 1;
 	}
@@ -1913,10 +2133,10 @@ static void Ending_fade_set(int Fade_no, USHORT Ctrl, UINT Col, ULONG *pPos)
 static void Ending_timeline(void)
 {
 	BOOL loop_flg;
-	short wait_cnt;
+	int wait_cnt;
 
 	if (Ending_timeline_cnt == 0) {
-		Ending_stat_rec_ptr = &Ending_stat_rec_tbl;
+		Ending_stat_rec_ptr = (UCHAR *)Ending_stat_rec_tbl;
 		Ending_msg_state = 0;
 		Ending_msg_row = 0;
 		Ending_msg_col = 0;
@@ -1989,7 +2209,7 @@ static void Ending_main(void)
 				}
 				else {
 					Memcpy(&Ending_msg_line_buf, Ending_msg_row_tbl[Ending_msg_row + Ending_msg_col_base], Ending_msg_col + 1);
-					(&Ending_msg_line_buf1)[Ending_msg_col] = 0xfe;
+					Ending_msg_line_buf1[Ending_msg_col] = 0xfe;
 					Mess_print(0x3c, Ending_msg_row * 0xd + 0x20, &Ending_msg_line_buf, 0x4034);
 					if (Ending_type_cnt == 0) {
 						fade_sts = 0x2240000;
@@ -2003,7 +2223,7 @@ static void Ending_main(void)
 					}
 					Mess_print(0x3c, Ending_msg_row * 0xd + 0x20, &Ending_msg_line_buf, 0x4002);
 					Ending_type_cnt++;
-					if ((UCHAR)(&Ending_msg_char_cnt_tbl)[Ending_msg_row_cnt] < Ending_type_cnt) {
+					if (Ending_msg_char_cnt_tbl[Ending_msg_row_cnt] < Ending_type_cnt) {
 						Ending_type_cnt = 0;
 						Ending_msg_col++;
 						Ending_msg_row_cnt++;
@@ -2024,8 +2244,7 @@ static void Ending_main(void)
 			case 4:
 				Ending_type_cnt--;
 				if (Ending_type_cnt == 0) {
-					if ((Ending_scroll_step == 0) &&
-					   (Ending_scroll_step = 0x80, Ending_exit_req == 0)) {
+					if ((Ending_scroll_step == 0) && (Ending_scroll_step = 0x80, Ending_exit_req == 0)) {
 						Ending_scroll_step = 0x400;
 					}
 					Ending_msg_state = 5;
@@ -2041,8 +2260,7 @@ static void Ending_main(void)
 				if (Ending_msg_row != 0) {
 					do {
 						if (Ending_msg_row_tbl[Ending_msg_draw_idx + Ending_msg_col_base] != NULL) {
-							Mess_print(0x3c, Ending_msg_draw_idx * 0xd + 0x20,
-									   Ending_msg_row_tbl[Ending_msg_draw_idx + Ending_msg_col_base], 0x4002);
+							Mess_print(0x3c, Ending_msg_draw_idx * 0xd + 0x20, Ending_msg_row_tbl[Ending_msg_draw_idx + Ending_msg_col_base], 0x4002);
 						}
 						Ending_msg_draw_idx++;
 					} while (Ending_msg_draw_idx < Ending_msg_row);
@@ -2079,69 +2297,56 @@ static void Ending_main(void)
 /* DS 0x8011da60 (Ending_moji_draw) */
 static void Ending_moji_draw(void)
 {
-	UCHAR glyph_w;
-	UCHAR glyph_h;
-	char glyph_u;
-	char glyph_uw;
-	char glyph_v;
-	char glyph_vh;
-	char uv_tmp;
-	UCHAR tpage_b;
 	USHORT x_pos;
 	USHORT y_pos;
-	USHORT clut_val;
-	int tbl_ofs;
+	USHORT x_end;
+	USHORT y_end;
+	char u_end;
+	char v_end;
+	ENDING_STAT_GLYPH *pGlyph;
 	char *pBuf;
 	UCHAR *pRec;
 	int rem_cnt;
 	UCHAR *pFlg;
 	POLY_FT4 *pPrim;
+	USHORT clut_val;
 
 	rem_cnt = 0xc;
-	pPrim = (POLY_FT4 *)((UINT)G.Cbuf_id * 8000 + -0x7fedebf8);
+	pPrim = Ending_prim[G.Cbuf_id];
 	pRec = Ending_stat_rec_ptr + 6;
-	pBuf = &Ending_cbuf + (UINT)G.Cbuf_id * 8000;
+	pBuf = (char *)&pPrim->v3;
 	pFlg = Ending_stat_rec_ptr;
 	do {
 		rem_cnt = rem_cnt + -1;
 		if ((*pFlg & 1) != 0) {
 			x_pos = *(USHORT *)(pRec + -2);
 			y_pos = *(USHORT *)pRec;
-			tbl_ofs = (UINT)pRec[-3] * 10;
-			glyph_w = (&Ending_stat_glyph_W)[tbl_ofs];
-			glyph_h = (&Ending_stat_glyph_H)[tbl_ofs];
-			glyph_u = (&Ending_stat_glyph_U)[tbl_ofs];
-			glyph_uw = (&Ending_stat_glyph_Uw)[tbl_ofs];
-			glyph_v = (&Ending_stat_glyph_V)[tbl_ofs];
-			glyph_vh = (&Ending_stat_glyph_Vh)[tbl_ofs];
+			pGlyph = &Ending_stat_glyph_tbl[pRec[-3]];
+			x_end = x_pos + pGlyph->W;
+			y_end = y_pos + pGlyph->H;
+			u_end = pGlyph->U + pGlyph->Uw;
+			v_end = pGlyph->V + pGlyph->Vh;
 			SetPolyFT4(pPrim);
-			pBuf[-0x21] = -0x80;
-			pBuf[-0x20] = -0x80;
-			pBuf[-0x1f] = -0x80;
-			pBuf[-0x1e] = 46;
+			*(ULONG *)(pBuf + -0x21) = 0x2e808080;
 			*(short *)(pBuf + -0x1d) = x_pos;
 			*(short *)(pBuf + -0x1b) = y_pos;
-			pBuf[-0x19] = (&Ending_stat_glyph_U)[tbl_ofs];
-			uv_tmp = (&Ending_stat_glyph_V)[tbl_ofs];
-			*(USHORT *)(pBuf + -0x15) = x_pos + (USHORT)glyph_w;
+			pBuf[-0x19] = pGlyph->U;
+			*(USHORT *)(pBuf + -0x15) = x_end;
 			*(short *)(pBuf + -0x13) = y_pos;
-			pBuf[-0x11] = glyph_u + glyph_uw;
-			pBuf[-0x18] = uv_tmp;
-			pBuf[-0x10] = (&Ending_stat_glyph_V)[tbl_ofs];
-			clut_val = GetClut((UINT)(UCHAR)(&Ending_stat_glyph_Clut_x)[tbl_ofs] << 4,
-							 (UINT)*(USHORT *)(&Ending_stat_glyph_Clut_y + tbl_ofs));
+			pBuf[-0x11] = u_end;
+			pBuf[-0x18] = pGlyph->V;
+			pBuf[-0x10] = pGlyph->V;
+			clut_val = GetClut((UINT)pGlyph->Clut_x << 4, (UINT)pGlyph->Clut_y);
 			*(USHORT *)(pBuf + -0x17) = clut_val;
-			tpage_b = (&Ending_stat_glyph_Tbl)[tbl_ofs];
 			*(short *)(pBuf + -0xd) = x_pos;
-			*(USHORT *)(pBuf + -0xb) = y_pos + (USHORT)glyph_h;
-			*(USHORT *)(pBuf + -0xf) = tpage_b & 0xf;
-			uv_tmp = (&Ending_stat_glyph_U)[tbl_ofs];
-			pBuf[-8] = glyph_v + glyph_vh;
-			*(USHORT *)(pBuf + -5) = x_pos + (USHORT)glyph_w;
-			*(USHORT *)(pBuf + -3) = y_pos + (USHORT)glyph_h;
-			pBuf[-1] = glyph_u + glyph_uw;
-			*pBuf = glyph_v + glyph_vh;
-			pBuf[-9] = uv_tmp;
+			*(USHORT *)(pBuf + -0xb) = y_end;
+			*(USHORT *)(pBuf + -0xf) = pGlyph->Tpage & 0xf;
+			pBuf[-8] = v_end;
+			*(USHORT *)(pBuf + -5) = x_end;
+			*(USHORT *)(pBuf + -3) = y_end;
+			pBuf[-1] = u_end;
+			*pBuf = v_end;
+			pBuf[-9] = pGlyph->U;
 			pBuf += 0x28;
 			AddPrim(Moji.Moji_mode[G.Cbuf_id] + 3, pPrim);
 			pPrim++;
@@ -2182,10 +2387,9 @@ static void Ending_stat_flg_set(UINT Slot_mask, UCHAR Val, char Clr_sw)
 }
 
 /*
- * NOT YET RECONSTRUCTED (no Ghidra function is defined over this range,
- * so disassemble_function cannot read it; the Ghidra tools available here
- * cannot create functions):
- *  - ENDING::8011a0e0 .. 8011a18c : overlay entry (no Ghidra function)
+ * Ghidra defines no function over this range, so
+ * the entries below are given by address only (overlay dump):
+ *  - ENDING::8011a0e0 .. 8011a18c : overlay entry
  *  - Routine table ENDING::8011de34 .. 8011de40: 8011de34 = Ending_fade_out,
  *      8011de38 = Ending_fade_unk (ENDING::8011a8e4), 8011de3c = Ending_fade_in,
  *      8011de40 = Ending_exit.

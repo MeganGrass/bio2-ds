@@ -11,6 +11,9 @@
 #include "TYPES.H"
 
 /* ---- types migrated from data.h ---- */
+/* Polygon effect work blocks. KI holds four corner vectors and two flat quads; KI2 adds three matrices
+ * and two offsets for the two-quad variant, and KI2_LINE_F3 holds the line primitives of that variant.
+ * POLY_EFF and POLY_EFF2 are the timed polygon effects handled in POLY_SUB.C. */
 struct tagKI {
 	SVECTOR v0;
 	SVECTOR v1;
@@ -103,6 +106,7 @@ void    Sort_poly_eff(void);
 
 /* Globals defined in POLY_SUB.C */
 	extern SVECTOR Poly_test4[4];						// 0x800a70c8
+	extern CHAR ascii_tbl2[20];						// 0x800a70e8
 	extern POLY_EFF2_WORK Poly2_work[16];				// 0x800c4348
 	extern POLY_EFF Poly_eff[32];						// 0x800dbb98
 	extern POLY_EFF2 Poly_eff2[32];						// 0x800dce30

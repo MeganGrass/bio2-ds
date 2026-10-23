@@ -50,6 +50,8 @@ struct tagAOT_DATA {
 	ULONG Data[44];
 };
 
+/* Action-trigger (ATE) work used by the scene at-trigger checks: a main routine and sub routines, the
+ * selection state, and the menu position and view fields used by the screens it opens. */
 struct tagATE {
 	UCHAR Main_rtn;
 	UCHAR Sub_rtn0;

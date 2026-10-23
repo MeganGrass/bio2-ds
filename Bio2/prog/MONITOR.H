@@ -40,7 +40,7 @@ struct tagLOADTASK {
 #define TASK1_STACK_TOP     0x801ff400
 #define TASK2_STACK_TOP     0x801fed00
 
-/* PLACEHOLDER - caller return address capture (Ghidra: Task_sleep stores $ra,
+/* Caller return address capture (Ghidra: Task_sleep stores $ra,
  * i.e. its caller's return address, into DS 0x800c3ab8 "pPc").
  * PSX/MIPS builds: the real retail sequence (inline asm "sw $31,0(&dst)").
  * Host builds (MSVC/GCC): the compiler intrinsic, which yields the return
@@ -50,13 +50,13 @@ struct tagLOADTASK {
 #if defined(__mips__) || defined(__psx__) || defined(__R3000__)
 #define STORE_RA(dst)   __asm__ volatile ("sw $31, 0(%0)" : : "r"(&(dst)) : "memory")
 #elif defined(_MSC_VER)
-#include <intrin.h>
+void *_ReturnAddress(void); /* MSVC intrinsic, declared here so IntelliSense does not need the VC headers (host build only) */
 #include "TYPES.H"
 
 /* ---- types migrated from data.h ---- */
-#define STORE_RA(dst)   ((dst) = (ULONG *)_ReturnAddress())   /* PLACEHOLDER (host build) */
+#define STORE_RA(dst)   ((dst) = (ULONG *)_ReturnAddress())   /* host build stand-in */
 #else
-#define STORE_RA(dst)   ((dst) = (ULONG *)__builtin_return_address(0))   /* PLACEHOLDER (host build) */
+#define STORE_RA(dst)   ((dst) = (ULONG *)__builtin_return_address(0))   /* host build stand-in */
 #endif
 
 /* DS 0x800d76a0 */ extern MONITOR  Monitor;

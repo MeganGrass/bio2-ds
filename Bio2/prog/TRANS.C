@@ -25,8 +25,10 @@
 TRANS Trans;
 
 /* DS 0x800ab218 (Poly_ft4_count): written by Prim_trans; the file bytes are all zero */
-ULONG Poly_ft4_count;
+ULONG Poly_ft4_count = 0;
 
+/* Per-frame transform step: runs the effect sprite pass, then records the high-water mark of polygons used
+ * this frame in the current buffer (Poly_ft4_count), so the buffer size can be checked. */
 /* DS 0x80077874 (Prim_trans) */
 VOID Prim_trans(VOID)
 {
@@ -41,12 +43,17 @@ VOID Prim_trans(VOID)
 	}
 }
 
+/* Start the current frame's polygon list: the keep pointer is set to the head of this buffer's
+ * POLY_FT4 array (double-buffered by Cbuf_id). */
 /* DS 0x800778f8 (Trans_pointer_set) */
 VOID Trans_pointer_set(VOID)
 {
 	Trans.pPoly_ft4_keep = Trans.Prim_poly_ft4[G.Cbuf_id];
 }
 
+/* Effect sprite pass: each active ESP work item is turned into POLY_FT4 quads. Each item goes through
+ * Esp_trans_main or Esp_trans_3d (the branch depends on the item's animation sequence), both with the
+ * projection for this frame. */
 /* DS 0x80077924 (Eff_sprt_trans) */
 VOID Eff_sprt_trans(VOID)
 {
@@ -65,10 +72,10 @@ VOID Eff_sprt_trans(VOID)
 	auto MATRIX workm;					// FFFFFF58		// 32 bytes
 	auto MATRIX workm2;					// FFFFFF78		// 32 bytes
 	auto VECTOR Vec;					// FFFFFF98		// 16 bytes
+	/* retail reserves 16 more bytes of locals (Eff_sprt_trans frame 232); never read */
+	volatile int Rsv[4];
 
-	ULONG   Frame_pad[6];			/* retail's six 8-byte scalar slots at 0x90-0xbf read only their first word */
 
-	(void)Frame_pad;
 	pP = Trans.pPoly_ft4_keep;
 	pP_limit = Trans.Prim_poly_ft4[G.Cbuf_id] + 384;
 	pCcut = G.Cccut;
@@ -81,15 +88,17 @@ VOID Eff_sprt_trans(VOID)
 
 loop_start:									// 800779E8
 	pEff--;
-	Vec.vx = (LONG)pEff->Pos_x;
-	Vec.vy = (LONG)pEff->Pos_y;
-	Vec.vz = (LONG)pEff->Pos_z;
+	/* DS keeps the effect position in the translation of workm (sp+0x54..0x5c): it is the point for
+	 * Hit_ck_point4 here, and the 3D branch below overwrites it with Hot + Mov before CompM reads it. */
+	workm.t[0] = (LONG)pEff->Pos_x;
+	workm.t[1] = (LONG)pEff->Pos_y;
+	workm.t[2] = (LONG)pEff->Pos_z;
 	Be_flg = pEff->Be_flg;
 	pAseq = pEff->pAnmseq + pEff->Anm_cnt;
 	nSpr = (ULONG)pAseq->nSpr;
 
 	if ((Be_flg & 0xa000) == 0xa000) {
-		if (Hit_ck_point4((VECTOR *)&Vec, pCcut) != 0 && nSpr != 0) {
+		if (Hit_ck_point4((VECTOR *)workm.t, pCcut) != 0 && nSpr != 0) {
 			D2 = 0x2c;
 			if ((Be_flg & 0x1000) != 0) {
 				D2 = 0x2e;
@@ -121,9 +130,11 @@ loop_start:									// 800779E8
 					}
 				}
 			} else {
-				Vec.vx = (LONG)pEff->Hot_x + (LONG)pEff->Mov_x;
-				Vec.vy = (LONG)pEff->Hot_y + (LONG)pEff->Mov_y;
-				Vec.vz = (LONG)pEff->Hot_z + (LONG)pEff->Mov_z;
+				/* Local offset of the sprite: RotMatrix fills only workm.m, so CompM transforms this
+				 * translation by pEff->m into workm2.t. */
+				workm.t[0] = (LONG)pEff->Hot_x + (LONG)pEff->Mov_x;
+				workm.t[1] = (LONG)pEff->Hot_y + (LONG)pEff->Mov_y;
+				workm.t[2] = (LONG)pEff->Hot_z + (LONG)pEff->Mov_z;
 				RotMatrix((SVECTOR *)&pEff->Cdir_x, &workm);
 				CompM((MATRIX *)pEff->m, &workm, &workm2);
 				CompM(&GsWSMATRIX, &workm2, &m);
@@ -291,11 +302,13 @@ VOID Esp_trans_3d(register POLY_FT4 * pP, register ESP_WORK * pEff, register ULO
 	register ULONG Clut;
 	register ULONG Tpage;
 	auto ULONG Otz;						// FFFFFFE0
+	SVECTOR *sv;
 	auto SVECTOR Svec[4];				// FFFFFFC0		// 32 bytes
 	register LONG Mag_x;
 	register LONG Mag_y;
 	register LONG Size_x;
 
+	sv = Svec;
 	D2 = (LONG)((ULONG)pEff->Mag * (ULONG)(Projection >> 4));
 	Mag_x = (LONG)((ULONG)D2 * (ULONG)pEff->Transx) >> 12;
 	Clut = (ULONG)pEff->Clut << 16;
@@ -311,19 +324,19 @@ VOID Esp_trans_3d(register POLY_FT4 * pP, register ESP_WORK * pEff, register ULO
 	D1 = (LONG)(((ULONG)Def_size * (ULONG)Mag_y) >> 12);
 
 loop_start:									// 80078228
-	Svec[0].vx = (short)((signed char)pSpGp->Ofsx * Mag_x >> 12);
-	Svec[0].vy = (short)((signed char)pSpGp->Ofsy * Mag_y >> 12);
-	gte_ldv0(&Svec[0]);
-	Svec[1].vx = (short)(Svec[0].vx + (short)D0);
-	Svec[1].vy = Svec[0].vy;
-	Svec[2].vx = Svec[0].vx;
-	Svec[2].vy = (short)(Svec[0].vy + (short)D1);
-	Svec[3].vx = (short)(Svec[0].vx + (short)D0);
-	Svec[3].vy = (short)(Svec[0].vy + (short)D1);
+	sv[0].vx = (short)((signed char)pSpGp->Ofsx * Mag_x >> 12);
+	sv[0].vy = (short)((signed char)pSpGp->Ofsy * Mag_y >> 12);
+	gte_ldv0(&sv[0]);
+	sv[1].vx = (short)(sv[0].vx + (short)D0);
+	sv[1].vy = sv[0].vy;
+	sv[2].vx = sv[0].vx;
+	sv[2].vy = (short)(sv[0].vy + (short)D1);
+	sv[3].vx = (short)(sv[0].vx + (short)D0);
+	sv[3].vy = (short)(sv[0].vy + (short)D1);
 	gte_rtps_b();
 	gte_stsxy((long *)&pP->x0);
 	gte_stszotz((long *)&Otz);
-	gte_ldv3(&Svec[1], &Svec[2], &Svec[3]);
+	gte_ldv3(&sv[1], &sv[2], &sv[3]);
 	if (0x1fff < Otz) {
 		Otz = 0x1fff;
 	}
@@ -354,6 +367,8 @@ loop_exit:
 	return;
 }
 
+/* Initialise both polygon buffers: 0x300 POLY_FT4 entries are cleared to their default tag, colour
+ * (0x80 grey) and code, then the keep pointer is reset. */
 /* DS 0x800783b4 (Trans_work_init) */
 VOID Trans_work_init(VOID)
 {

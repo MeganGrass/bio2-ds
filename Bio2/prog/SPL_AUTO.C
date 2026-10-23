@@ -25,6 +25,7 @@
 #include "ESP_R.H"
 #include "flag.h"
 #include "DIVCHK.H"
+#include "SPL_TBL.H"
 
 
 /* file-local prototypes */
@@ -94,6 +95,9 @@ VOID Spl_die00(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 static UCHAR Spl_pos_ck_timer;
 extern SHORT Spl_r_pos[2][6];
 
+/* Route target for the sub-player AI. Sherry (Ids 0x45, 0x4f) uses the second row of Spl_r_pos. The
+ * sub-player walks to the Spl_r_pos point for its mode, or to the player when there is no guide
+ * point. Root_ck then steps toward the goal, and Dist keeps the distance to it. */
 /* DS 0x80060374 (Spl_Root_ck_sys) */
 VOID Spl_Root_ck_sys(register ENEMY_WORK *pEm)
 {
@@ -161,20 +165,23 @@ guide_ck:
 	SPL_FREE(pEm)->Dist = (USHORT)dist;
 }
 
+/* Per-frame sub-player AI. While At_em_flg bit 0x8000 is set, Blink counts up on its low 7 bits and sets
+ * bit 0x80 above 0x3c. Cool counts down toward zero. Sherry (Ids 0x45, 0x4f) runs Sherry_move; everyone
+ * else runs Aida_move. */
 /* DS 0x800605ac (Spl_Auto) */
 VOID Spl_Auto(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
-	UCHAR blink;
+	ULONG blink;
 	CHAR cool;
 
-	if ((pEm->At_em_flg & 0x8000) == 0) {
-		SPL_FREE(pEm)->Blink = 0;
-	} else {
+	if (pEm->At_em_flg & 0x8000) {
 		blink = (UCHAR)((SPL_FREE(pEm)->Blink + 1) & 0x7f);
 		SPL_FREE(pEm)->Blink = blink;
 		if (0x3c < blink) {
 			SPL_FREE(pEm)->Blink = blink | 0x80;
 		}
+	} else {
+		SPL_FREE(pEm)->Blink = 0;
 	}
 	cool = (CHAR)SPL_FREE(pEm)->Cool;
 	if (cool != 0) {
@@ -187,11 +194,15 @@ VOID Spl_Auto(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 	}
 }
 
+/* Empty in the retail binary (kept as a placeholder entry point). */
 /* DS 0x80060648 (Aida) */
 VOID Aida(register ENEMY_WORK *pEm)
 {
 }
 
+/* Aida movement step. Spl_pos_ck_timer counts down; every 16th frame (timer reset to 0xf) the position is
+ * re-checked. When the position check changes the low type nibble, the new start state is loaded from
+ * Aida_St_pos with the 0x8000 flag set. The move routine for the low type nibble runs every frame. */
 /* DS 0x80060650 (Aida_move) */
 static VOID Aida_move(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
@@ -303,11 +314,10 @@ static VOID Aida_Move_type0a(register ENEMY_WORK *pEm, register ULONG Kan, regis
 /* DS 0x80060cfc (Aida_em10_at00_pl) */
 static VOID Aida_em10_at00_pl(register ENEMY_WORK *pEm, register ULONG Type)
 {
-	USHORT status;
 	ENEMY_WORK *pYo;
 
+	pYo = pSpl_near_em[0];
 	if (SPL_FREE(pEm)->Cool == 0) {
-		pYo = pSpl_near_em[0];
 		if ((Type & 0xf) == 10) {
 			pYo = (ENEMY_WORK *)Spl_em_cdir_ck(pEm);
 			if (pYo == NULL) {
@@ -321,7 +331,7 @@ static VOID Aida_em10_at00_pl(register ENEMY_WORK *pEm, register ULONG Type)
 			if ((pYo->Type & 0x2000) == 0) {
 				SPL_SET_ROUTINE(pEm, 0x0501);
 				pEm->pEnemy_ptr = (ULONG *)pYo;
-				status = (pEm->Status_flg & 0x1fff) | 0x4000;
+				pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x4000;
 			} else {
 				if ((pYo->Type & 1) == 0) {
 					return;
@@ -331,9 +341,8 @@ static VOID Aida_em10_at00_pl(register ENEMY_WORK *pEm, register ULONG Type)
 				}
 				SPL_SET_ROUTINE(pEm, 0x0501);
 				pEm->pEnemy_ptr = (ULONG *)pYo;
-				status = (pEm->Status_flg & 0x1fff) | 0x2000;
+				pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x2000;
 			}
-			pEm->Status_flg = status;
 		}
 	}
 }
@@ -342,32 +351,34 @@ static VOID Aida_em10_at00_pl(register ENEMY_WORK *pEm, register ULONG Type)
 static VOID Aida_em10_at00_spl(register ENEMY_WORK *pEm)
 {
 	ENEMY_WORK *pYo;
+	USHORT len;
 
 	pYo = pSpl_near_em[0];
 	if (SPL_FREE(pEm)->Cool != 0) {
 		return;
 	}
-	if ((pSpl_near_em[0] != NULL) && (pSpl_near_em[0]->Life >= 0)) {
-		if ((pSpl_near_em[0]->Type & 0x2000) == 0) {
+	if ((pYo != NULL) && (pYo->Life >= 0)) {
+		if ((pYo->Type & 0x2000) == 0) {
 			goto lock_target;
 		}
-		if (((pSpl_near_em[0]->Type & 1) != 0) && ((pSpl_near_em[0]->Be_flg & 0x4000000) != 0)) {
+		if (((pYo->Type & 1) != 0) && ((pYo->Be_flg & 0x4000000) != 0)) {
 			SPL_SET_ROUTINE(pEm, 0x0501);
 			pEm->pEnemy_ptr = (ULONG *)pYo;
 			pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x2000;
 		}
 	}
-	if (pSpl_near_em[1] == NULL) {
-		return;
-	}
-	if (pSpl_near_em[1]->Life < 0) {
-		return;
-	}
-	if ((pSpl_near_em[1]->Type & 0x2000) != 0) {
-		return;
-	}
 	pYo = pSpl_near_em[1];
-	if (Em_l[1] > 2999) {
+	len = Em_l[1];
+	if (pYo == NULL) {
+		return;
+	}
+	if (pYo->Life < 0) {
+		return;
+	}
+	if ((pYo->Type & 0x2000) != 0) {
+		return;
+	}
+	if (len > 2999) {
 		return;
 	}
 lock_target:
@@ -410,7 +421,7 @@ height_ck:
 			pEm->pEnemy_ptr = (ULONG *)pYo;
 			pEm->Status_flg = (status & 0x1fff) | 0x4000;
 			if (dy_u < 2999) {
-				pEm->Status_flg = (status & 0x1fff) | 0x8000;
+				pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x8000;
 			}
 			if (((UINT)(dy + 499) & 0xffff) < 0x9c3) {
 				pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x2000;
@@ -422,50 +433,54 @@ height_ck:
 /* DS 0x80060fec (Aida_em25_at00_spl) */
 static VOID Aida_em25_at00_spl(register ENEMY_WORK *pEm)
 {
-	USHORT status;
+	USHORT em_l1;
 	ENEMY_WORK *pNear0;
 	ENEMY_WORK *pNear1;
 	INT dy;
+	INT dy0;
 	UINT dy_u;
 
-	pNear1 = pSpl_near_em[1];
 	pNear0 = pSpl_near_em[0];
-	if ((pSpl_near_em[0] == NULL) || (pSpl_near_em[0]->Life < 0) ||
-		((pSpl_near_em[0]->Type & 0x2000) != 0) ||
-		(((UINT)(pSpl_near_em[0]->Pos_y - pEm->Pos_y) + 4999) & 0xffff) > 0x1b56) {
-		if (pSpl_near_em[1] == NULL) {
+	if (pNear0 != NULL) {
+		dy0 = pNear0->Pos_y - pEm->Pos_y;
+		if ((pNear0->Life >= 0) && ((pNear0->Type & 0x2000) == 0) && (((UINT)(dy0 + 4999) & 0xffff) < 0x1b57)) {
+			SPL_SET_ROUTINE(pEm, 0x0501);
+			pEm->pEnemy_ptr = (ULONG *)pNear0;
+			pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x4000;
+			dy0 = pNear0->Pos_y - pEm->Pos_y;
+			if (((UINT)(dy0 + 4999) & 0xffff) < 2999) {
+				pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x8000;
+			}
+			if (((UINT)(dy0 + 499) & 0xffff) < 0x9c3) {
+				pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x2000;
+			}
 			return;
 		}
-		dy = pSpl_near_em[1]->Pos_y - pEm->Pos_y;
-		if (pSpl_near_em[1]->Life < 0) {
-			return;
-		}
-		if ((pSpl_near_em[1]->Type & 0x2000) != 0) {
-			return;
-		}
-		if (Em_l[1] > 1999) {
-			return;
-		}
-		dy_u = (UINT)(dy + 4999) & 0xffff;
-		if (dy_u > 0x1b56) {
-			return;
-		}
-		status = pEm->Status_flg;
-		SPL_SET_ROUTINE(pEm, 0x0501);
-		pEm->pEnemy_ptr = (ULONG *)pNear1;
-		pEm->Status_flg = (status & 0x1fff) | 0x4000;
-		if (dy_u < 2999) {
-			pEm->Status_flg = (status & 0x1fff) | 0x8000;
-		}
-	} else {
-		status = pEm->Status_flg;
-		SPL_SET_ROUTINE(pEm, 0x0501);
-		pEm->pEnemy_ptr = (ULONG *)pNear0;
-		pEm->Status_flg = (status & 0x1fff) | 0x4000;
-		dy = pNear0->Pos_y - pEm->Pos_y;
-		if (((UINT)(dy + 4999) & 0xffff) < 2999) {
-			pEm->Status_flg = (status & 0x1fff) | 0x8000;
-		}
+	}
+	pNear1 = pSpl_near_em[1];
+	em_l1 = Em_l[1];
+	if (pNear1 == NULL) {
+		return;
+	}
+	dy = pNear1->Pos_y - pEm->Pos_y;
+	if (pNear1->Life < 0) {
+		return;
+	}
+	if ((pNear1->Type & 0x2000) != 0) {
+		return;
+	}
+	if (em_l1 > 1999) {
+		return;
+	}
+	dy_u = (UINT)(dy + 4999) & 0xffff;
+	if (dy_u > 0x1b56) {
+		return;
+	}
+	SPL_SET_ROUTINE(pEm, 0x0501);
+	pEm->pEnemy_ptr = (ULONG *)pNear1;
+	pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x4000;
+	if (dy_u < 2999) {
+		pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x8000;
 	}
 	if (((UINT)(dy + 499) & 0xffff) < 0x9c3) {
 		pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x2000;
@@ -509,7 +524,7 @@ static VOID Aida_mv00_br(register ENEMY_WORK *pEm)
 		}
 	}
 	if ((pSpl_near_em[0] != NULL) && ((G.Room_player_flg & 1) != 0)) {
-		((CODE_PTR)(Aida_em_at00_pl[Aida_em_sel[pSpl_near_em[0]->Id]]))(pEm, pEm->Type);
+		((CODE_PTR)(Aida_em_at00_pl[E_A_at_tbl[pSpl_near_em[0]->Id - 0x10]]))(pEm, pEm->Type);
 	}
 	goto_res = Goto00_ck(pEm, SPL_FREE(pEm)->Goal_x, SPL_FREE(pEm)->Goal_z, 0x400);
 	if ((SPL_FREE(pEm)->Flg & 0x8000) == 0) {
@@ -598,22 +613,22 @@ static VOID Aida_mv00_br_1(register ENEMY_WORK *pEm)
 		}
 	}
 	if (pNear0 != NULL) {
-		((CODE_PTR)(Aida_em_at00_spl[Aida_em_sel[pNear0->Id]]))(pEm, pEm->Type);
+		((CODE_PTR)(Aida_em_at00_spl[E_A_at_tbl[pNear0->Id - 0x10]]))(pEm, pEm->Type);
 	}
 	goto_res = Goto00_ck(pEm, SPL_FREE(pEm)->Goal_x, SPL_FREE(pEm)->Goal_z, 0x400);
 	dist = SPL_FREE(pEm)->Dist;
-	if (dist < 0xbb9) {
+	if (dist >= 0xbb9) {
+		routine = 0x0c01;
+		if (goto_res == 0) {
+			routine = 0x0101;
+		}
+	} else {
 		if (dist < 0x1771) {
 			return;
 		}
 		routine = 0x0d01;
 		if (goto_res == 0) {
 			routine = 0x0201;
-		}
-	} else {
-		routine = 0x0c01;
-		if (goto_res == 0) {
-			routine = 0x0101;
 		}
 	}
 	SPL_SET_ROUTINE(pEm, routine);
@@ -623,67 +638,74 @@ static VOID Aida_mv00_br_1(register ENEMY_WORK *pEm)
 static VOID Aida_mv00(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
 	USHORT Mot[3];
+	ULONG move;
 
 	memcpy(Mot, Spl_mv_taiki_rom, sizeof(Mot));
-	if (pEm->Routine_2 == 0) {
+	switch (pEm->Routine_2) {
+	case 0:
+		move = Mot[(signed char)pEm->D_life_u];
 		pEm->Routine_2 = 1;
-		*(int *)&pEm->Move_no = (UINT)Mot[(signed char)pEm->D_life_u] + 0x70000;
-	} else if (pEm->Routine_2 != 1) {
-		return;
+		*(int *)&pEm->Move_no = move + 0x70000;
+		/* DS: the first pass sets Routine_2 to 1 and drops into the
+		 * Joint_move call of case 1 in the same frame. */
+	case 1:
+		Joint_move(pEm, (ULONG)pEm->pSub0_kan_t_ptr, (ULONG)pEm->pSub0_seq_t_ptr, 0x200);
+		break;
 	}
-	Joint_move(pEm, (ULONG)pEm->pSub0_kan_t_ptr, (ULONG)pEm->pSub0_seq_t_ptr, 0x200);
 }
 
 /* DS 0x80061594 (Aida_em10_at01) */
 static VOID Aida_em10_at01(register ENEMY_WORK *pEm)
 {
 	ENEMY_WORK *pNear0;
-	USHORT status;
+	USHORT em_l0;
 
 	pNear0 = pSpl_near_em[0];
-	if ((SPL_FREE(pEm)->Cool == 0) && (pSpl_near_em[0] != NULL) && (pSpl_near_em[0]->Life >= 0)) {
-		if (((pSpl_near_em[0]->Type & 0x2000) == 0) && (Em_l[0] < 0x9c4)) {
+	em_l0 = Em_l[0];
+	if ((SPL_FREE(pEm)->Cool == 0) && (pNear0 != NULL) && (pNear0->Life >= 0)) {
+		if (((pNear0->Type & 0x2000) == 0) && (em_l0 < 0x9c4)) {
 			SPL_SET_ROUTINE(pEm, 0x0501);
 			pEm->pEnemy_ptr = (ULONG *)pNear0;
-			status = (pEm->Status_flg & 0x1fff) | 0x4000;
+			pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x4000;
 		} else {
-			if (pSpl_near_em[0]->Life < 0) {
+			if (pNear0->Life < 0) {
 				return;
 			}
-			if ((pSpl_near_em[0]->Type & 1) == 0) {
+			if ((pNear0->Type & 1) == 0) {
 				return;
 			}
-			if ((pSpl_near_em[0]->Be_flg & 0x4000000) == 0) {
+			if ((pNear0->Be_flg & 0x4000000) == 0) {
 				return;
 			}
 			SPL_SET_ROUTINE(pEm, 0x0501);
 			pEm->pEnemy_ptr = (ULONG *)pNear0;
-			status = (pEm->Status_flg & 0x1fff) | 0x2000;
+			pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x2000;
 		}
-		pEm->Status_flg = status;
 	}
 }
 
 /* DS 0x80061654 (Aida_em25_at01) */
 static VOID Aida_em25_at01(register ENEMY_WORK *pEm)
 {
-	USHORT status;
+	USHORT em_l0;
 	ENEMY_WORK *pNear0;
 	UINT dy_u;
 	INT dy;
 
 	pNear0 = pSpl_near_em[0];
-	if ((pSpl_near_em[0] != NULL) && (pSpl_near_em[0]->Life >= 0) &&
-		((pSpl_near_em[0]->Type & 0x2000) == 0) && (Em_l[0] < 0x9c4)) {
-		dy = pSpl_near_em[0]->Pos_y - pEm->Pos_y;
+	em_l0 = Em_l[0];
+	if (pNear0 == NULL) {
+		return;
+	}
+	dy = pNear0->Pos_y - pEm->Pos_y;
+	if ((pNear0->Life >= 0) && ((pNear0->Type & 0x2000) == 0) && (em_l0 < 0x9c4)) {
 		dy_u = (UINT)(dy + 4999) & 0xffff;
 		if (dy_u < 6999) {
-			status = pEm->Status_flg;
 			SPL_SET_ROUTINE(pEm, 0x0501);
 			pEm->pEnemy_ptr = (ULONG *)pNear0;
-			pEm->Status_flg = (status & 0x1fff) | 0x4000;
+			pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x4000;
 			if (dy_u < 2999) {
-				pEm->Status_flg = (status & 0x1fff) | 0x8000;
+				pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x8000;
 			}
 			if (((UINT)(dy + 499) & 0xffff) < 0x9c3) {
 				pEm->Status_flg = (pEm->Status_flg & 0x1fff) | 0x2000;
@@ -750,22 +772,20 @@ turn_ck:
 dist_ck:
 	if (pNear0 != NULL) {
 		if (pEm->D_life_u != 0) {
-			((CODE_PTR)(Aida_em_at01[Aida_em_sel[pNear0->Id]]))(pEm, pEm->Type);
+			((CODE_PTR)(Aida_em_at01[E_A_at_tbl[pNear0->Id - 0x10]]))(pEm, pEm->Type);
 		}
 		if ((em_l0 < 2000) && (em_l0 < pEm->L_pl)) {
-			((CODE_PTR)(Aida_em_at01[Aida_em_sel[pNear0->Id]]))(pEm, pEm->Type);
+			((CODE_PTR)(Aida_em_at01[E_A_at_tbl[pNear0->Id - 0x10]]))(pEm, pEm->Type);
 		}
 	}
 	dist = SPL_FREE(pEm)->Dist;
 	if (dist < 300) {
 		SPL_SET_ROUTINE(pEm, 0x0b01);
 	} else if (dist < 0x1389) {
-		if ((dist < 2000) && (G.Player.Routine_1 == 2) &&
-			(Cdir_ck2(pEm, (ENEMY_WORK *)&G.Player) == 0)) {
+		if ((dist < 2000) && (G.Player.Routine_1 == 2) && (Cdir_ck2(pEm, (ENEMY_WORK *)&G.Player) == 0)) {
 			SPL_SET_ROUTINE(pEm, 0x0301);
 		} else {
-			if ((em_l0 < 0x5dc) && ((tgt_x = Goto00_ck(pEm, pNear0->Pos_x, pNear0->Pos_z, 0x4b0)) == 0) &&
-				((s_work = -0x28) == -0x28) && ((pEm->Sca_info & 1) == 0)) {
+			if ((em_l0 < 0x5dc) && ((tgt_x = Goto00_ck(pEm, pNear0->Pos_x, pNear0->Pos_z, 0x4b0)) == 0) && ((s_work = -0x28) == -0x28) && ((pEm->Sca_info & 1) == 0)) {
 				tgt_x = pNear0->Pos_x;
 				Vec_z = pNear0->Pos_z;
 			} else {
@@ -829,8 +849,7 @@ dist_ck:
 	if (dist < 300) {
 		SPL_SET_ROUTINE(pEm, 0x0b01);
 	} else if (dist < 0x1389) {
-		if ((dist < 2000) && (G.Player.Routine_1 == 2) &&
-			(Cdir_ck2(pEm, (ENEMY_WORK *)&G.Player) == 0)) {
+		if ((dist < 2000) && (G.Player.Routine_1 == 2) && (Cdir_ck2(pEm, (ENEMY_WORK *)&G.Player) == 0)) {
 			SPL_SET_ROUTINE(pEm, 0x0301);
 		} else {
 			Goto00(pEm, pEm->Dest_x, pEm->Dest_z, 0x28);
@@ -941,8 +960,7 @@ dist_ck:
 	if (SPL_FREE(pEm)->Dist < 3000) {
 		SPL_SET_ROUTINE(pEm, 0x0101);
 	} else {
-		if ((em_l0 < 2000) && ((tgt_x = Goto00_ck(pEm, pNear0->Pos_x, pNear0->Pos_z, 0x400)) == 0) &&
-			((s_work = -0x38) == -0x38) && ((pEm->Sca_info & 1) == 0)) {
+		if ((em_l0 < 2000) && ((tgt_x = Goto00_ck(pEm, pNear0->Pos_x, pNear0->Pos_z, 0x400)) == 0) && ((s_work = -0x38) == -0x38) && ((pEm->Sca_info & 1) == 0)) {
 			tgt_x = pNear0->Pos_x;
 			Vec_z = pNear0->Pos_z;
 		} else {
@@ -1011,20 +1029,24 @@ static VOID Aida_mv02(register ENEMY_WORK *pEm, register ULONG Kan, register ULO
 {
 	UCHAR mv_no;
 	SHORT spd_x;
+	USHORT lr;
 	UCHAR Mot[3];
 
 	memcpy(Mot, Spl_mv02_rom, sizeof(Mot));
-	if (pEm->Routine_2 == 0) {
+	switch (pEm->Routine_2) {
+	case 0:
 		mv_no = Mot[(signed char)pEm->D_life_u];
 		pEm->Routine_2 = 1;
 		SPL_SET_MOVE(pEm, (UINT)mv_no + 0x70000);
-	}
-	if (pEm->Routine_2 == 1) {
+		/* fall through */
+	case 1:
 		Spd_get(pEm, (ULONG)pEm->pSub0_kan_t_ptr, (ULONG)pEm->pSub0_seq_t_ptr, 0);
 		Joint_move(pEm, (ULONG)pEm->pSub0_kan_t_ptr, (ULONG)pEm->pSub0_seq_t_ptr, 0x200);
 		if ((*pEm->pNow_seq & 0x4000) != 0) {
-			Snd_se_walk(1, (SHORT)((*pEm->pNow_seq & 0x2000) >> 0xd) * 3 + 4, pEm);
+			lr = ((*pEm->pNow_seq & 0x2000) >> 0xd) * 3 + 4;
+			Snd_se_walk(1, lr, pEm);
 		}
+		break;
 	}
 	if (pEm->Hokan_flg != 0) {
 		pEm->Spd_x >>= 1;
@@ -1040,21 +1062,20 @@ static VOID Aida_mv02(register ENEMY_WORK *pEm, register ULONG Kan, register ULO
 /* DS 0x80062248 (Aida_mv03_br) */
 static VOID Aida_mv03_br(register ENEMY_WORK *pEm)
 {
-	LONG goto_res;
-
+	/* DS has no local here: the Goto00_ck result is scaled straight into Timer1, and the
+	   zero test reads the SHORT just stored (sll 0x15 of the x3 product at DS 0x8006228c,
+	   bne in front of the sh at DS 0x80062290..0x80062294). Timer2 is read signed (lb at
+	   DS 0x800622c0 and 0x800622d8, then slti), so both Timer2 tests cast to signed char. */
 	if (pEm->Routine_2 == 0) {
-		goto_res = Goto00_ck((ENEMY_WORK *)&G.Player, pEm->Pos_x, pEm->Pos_z, 1);
-		pEm->Timer1 = (SHORT)goto_res * 0x60;
-		if ((goto_res * 0x600000) == 0) {
+		if ((pEm->Timer1 = Goto00_ck((ENEMY_WORK *)&G.Player, pEm->Pos_x, pEm->Pos_z, 1) * 0x60) == 0) {
 			pEm->Timer1 = 0x60;
 		}
 		pEm->Timer2 = 0;
 	}
-	goto_res = Goto01_ck(pEm, G.Player.Cdir_y, 0x200);
-	if ((goto_res == 0) && (pEm->Timer2 > 5)) {
+	if ((Goto01_ck(pEm, G.Player.Cdir_y, 0x200) == 0) && ((signed char)pEm->Timer2 > 5)) {
 		SPL_SET_ROUTINE(pEm, 0x0001);
 	}
-	if (pEm->Timer2 > 0x78) {
+	if ((signed char)pEm->Timer2 > 0x78) {
 		SPL_SET_ROUTINE(pEm, 0x0001);
 	}
 	pEm->Cdir_y += pEm->Timer1;
@@ -1064,27 +1085,27 @@ static VOID Aida_mv03_br(register ENEMY_WORK *pEm)
 static VOID Aida_mv03(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
 	UCHAR mv_no;
-	UINT goto_res;
+	USHORT lr;
 	UCHAR Mot[3];
 
 	memcpy(Mot, Spl_mv03_rom, sizeof(Mot));
-	if (pEm->Routine_2 == 0) {
+	switch (pEm->Routine_2) {
+	case 0:
 		mv_no = Mot[(signed char)pEm->D_life_u];
 		pEm->Routine_2 = 1;
 		pEm->Timer2 = 0;
 		SPL_SET_MOVE(pEm, (UINT)mv_no + 0x70000);
-		goto_res = Goto00_ck((ENEMY_WORK *)&G.Player, pEm->Pos_x, pEm->Pos_z, 1);
-		pEm->Timer1 = (SHORT)(goto_res << 7);
-		if ((goto_res & 0x1ff) == 0) {
+		if ((pEm->Timer1 = Goto00_ck((ENEMY_WORK *)&G.Player, pEm->Pos_x, pEm->Pos_z, 1) << 7) == 0) {
 			pEm->Timer1 = 0x80;
 		}
 		pEm->Timer0 = 0x3c;
-	}
-	if (pEm->Routine_2 == 1) {
+		/* falls through to the walk step on the same frame */
+	case 1:
 		Spd_get(pEm, Kan, Seq, 0);
 		Joint_move(pEm, Kan, Seq, 0x200);
 		if ((*pEm->pNow_seq & 0x4000) != 0) {
-			Snd_se_walk(0, (SHORT)((*pEm->pNow_seq & 0x2000) >> 0xd) * 3 + 4, pEm);
+			lr = ((*pEm->pNow_seq & 0x2000) >> 0xd) * 3 + 4;
+			Snd_se_walk(0, lr, pEm);
 		}
 		pEm->Timer2++;
 	}
@@ -1097,10 +1118,10 @@ static VOID Aida_mv03(register ENEMY_WORK *pEm, register ULONG Kan, register ULO
 /* DS 0x80062490 (Aida_mv04_br) */
 static VOID Aida_mv04_br(register ENEMY_WORK *pEm)
 {
-	LONG goto_res;
-
-	goto_res = Goto00_ck(pEm, G.Player.Pos_x, G.Player.Pos_z, 0x50);
-	if (goto_res == 0) {
+	/* G.Player is read directly, not through a pointer local. DS loads &G.Player.Pos_x
+	 * once into s1 (lui/addiu) and reads Pos_x and Pos_z as 0x0(s1) and 0x8(s1) before
+	 * both Goto00_ck and Goto00; a pointer local is folded away to separate absolute loads. */
+	if (Goto00_ck(pEm, G.Player.Pos_x, G.Player.Pos_z, 0x50) == 0) {
 		SPL_SET_ROUTINE(pEm, 0x0001);
 	} else {
 		Goto00(pEm, G.Player.Pos_x, G.Player.Pos_z, 0x50);
@@ -1138,7 +1159,7 @@ static VOID Aida_mv05_br(register ENEMY_WORK *pEm)
 /* DS 0x80062618 (Aida_mv05) */
 static VOID Aida_mv05(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
-	Aida_mv05_w1(pEm, Kan, Seq);
+	Aida_mv05_w1(pEm, (ULONG)pEm->pSub0_kan_t_ptr, (ULONG)pEm->pSub0_seq_t_ptr);
 	if ((pEm->Routine_2 != 0) || (pEm->Hokan_flg == 0)) {
 		Foot_set_pl(pEm, 0, 1);
 	}
@@ -1169,8 +1190,7 @@ static VOID Aida_mv05_w1_t0(register ENEMY_WORK *pEm, register ULONG Kan, regist
 			if (sub_state != 2) {
 				return;
 			}
-			pEm->Routine_2 = 1;
-			pEm->Routine_3 = 0;
+			*(USHORT *)&pEm->Routine_2 = 0x0001;		/* Routine_2 1, Routine_3 0 (DS: one sh at +0x6) */
 			pEm->Hokan_flg = 7;
 			return;
 		}
@@ -1198,76 +1218,70 @@ static VOID Aida_mv05_w1_t0(register ENEMY_WORK *pEm, register ULONG Kan, regist
 /* DS 0x800627dc (Aida_em10_at05) */
 static VOID Aida_em10_at05(register ENEMY_WORK *pEm)
 {
-	UCHAR timer3_next;
-	UCHAR next_r2;
+	signed char timer3_next;
 	ENEMY_WORK *pTarget;
 
 	pTarget = (ENEMY_WORK *)pEm->pEnemy_ptr;
-	next_r2 = 3;
 	if ((pTarget->Damage_cnt == 0) && (pTarget->Life >= 0)) {
 		if ((pTarget->Type & 0x2000) == 0) {
-			timer3_next = (UCHAR)(pEm->Timer3 - 1);
+			timer3_next = (signed char)(pEm->Timer3 - 1);
 			pEm->Timer3 = timer3_next;
-			if (timer3_next < 0x80) {
-				pEm->Routine_2 = 2;
-				pEm->Routine_3 = 0;
+			if (timer3_next >= 0) {
+				*(USHORT *)&pEm->Routine_2 = 0x0002;		/* Routine_2 2, Routine_3 0 (DS: one sh at +0x6) */
 				return;
 			}
 			goto timer3_reset;
 		}
-		if (((pEm->Type & 1) == 0) || ((pEm->Status_flg & 0x2000) == 0)) {
-			next_r2 = 3;
-			if ((pTarget->Life >= 0) && ((pTarget->Type & 0x2000) == 0)) {
+		if (((pEm->Type & 1) != 0) && ((pEm->Status_flg & 0x2000) != 0)) {
+			timer3_next = (signed char)(pEm->Timer3 - 1);
+			pEm->Timer3 = timer3_next;
+			if (timer3_next >= 0) {
+				*(USHORT *)&pEm->Routine_2 = 0x0002;
 				return;
 			}
-		} else {
-			timer3_next = (UCHAR)(pEm->Timer3 - 1);
-			pEm->Timer3 = timer3_next;
-			next_r2 = 2;
-			if (timer3_next >= 0x80) {
-				goto timer3_reset;
-			}
+timer3_reset:
+			*(USHORT *)&pEm->Routine_2 = 0x0002;		/* Routine_2 2, Routine_3 0 (DS: one sh at +0x6) */
+			pEm->Timer3 = 0x0d;
+			return;
+		}
+		if ((pTarget->Life >= 0) && ((pTarget->Type & 0x2000) == 0)) {
+			return;
 		}
 	}
-	pEm->Routine_2 = next_r2;
-	pEm->Routine_3 = 0;
-	return;
-timer3_reset:
-	pEm->Routine_2 = 2;
-	pEm->Routine_3 = 0;
-	pEm->Timer3 = 0x0d;
+	*(USHORT *)&pEm->Routine_2 = 0x0003;		/* Routine_2 3, Routine_3 0 (DS: one sh at +0x6) */
 }
 
 /* DS 0x800628c4 (Aida_mv05_w1_t1_br) */
 static VOID Aida_mv05_w1_t1_br(register ENEMY_WORK *pEm)
 {
 	if ((SPL_FREE(pEm)->Flg & 0x4000) == 0) {
-		pEm->Routine_2 = 3;
-		pEm->Routine_3 = 0;
+		*(USHORT *)&pEm->Routine_2 = 0x0003;		/* Routine_2 3, Routine_3 0 (DS: one sh at +0x6) */
 	} else if (((pEm->Status_flg & 0xa000) == 0) || (pEm->Hokan_flg == 0)) {
-		((CODE_PTR)(Aida_em_at05[Aida_em_sel[((ENEMY_WORK *)pEm->pEnemy_ptr)->Id]]))(pEm, pEm->Type);
+		((CODE_PTR)(Aida_em_at05[E_A_at_tbl[((ENEMY_WORK *)pEm->pEnemy_ptr)->Id - 0x10]]))(pEm, pEm->Type);
 	}
 }
 
 /* DS 0x80062954 (Aida_mv05_w1_t1) */
 static VOID Aida_mv05_w1_t1(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
-	SHORT s_work;
+	LONG s_work;
+	SHORT timer0_new;
+	ULONG mot_idx;
 	SHORT Mot[5];
 
 	memcpy(Mot, Spl_mv05_t1_rom, sizeof(Mot));
+	mot_idx = pEm->Status_flg >> 13;
 	if (pEm->Routine_3 == 0) {
 		pEm->Routine_3 = 1;
-		s_work = Mot[pEm->Status_flg >> 13];
+		s_work = Mot[mot_idx];
 		pEm->Timer0 = 0x1e;
 		SPL_SET_MOVE(pEm, s_work + 0x70000);
 	}
 	Joint_move(pEm, Kan, Seq, 0x200);
-	s_work = pEm->Timer0;
-	pEm->Timer0 = s_work - 1;
-	if (s_work == 1) {
-		pEm->Routine_2 = 3;
-		pEm->Routine_3 = 0;
+	timer0_new = pEm->Timer0 - 1;
+	pEm->Timer0 = timer0_new;
+	if (timer0_new == 0) {
+		*(USHORT *)&pEm->Routine_2 = 0x0003;		/* Routine_2 3, Routine_3 0 (DS: one sh at +0x6) */
 	}
 }
 
@@ -1279,47 +1293,44 @@ static VOID Aida_mv05_w1_t2_br(VOID)
 /* DS 0x80062a28 (Aida_mv05_w1_t2) */
 static VOID Aida_mv05_w1_t2(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
-	UCHAR id_save;
-	SHORT s_work;
-	UCHAR esp_idx;
-	ULONG res;
-	UINT gun_idx;
+	UCHAR Tmp_id;
+	ULONG Ck;
 	MATRIX *pmat;
-	SHORT Mot[5];
-	SVECTOR svec;
+	struct mv_tbl { SHORT w[5]; } Gun_at_mot;
+	SVECTOR Sv;
 
-	memcpy(Mot, Spl_mv05_t2_rom, sizeof(Mot));
+	/* retail copies the ROM table to the stack and indexes the copy */
+	Gun_at_mot = *(struct mv_tbl *)Spl_mv05_t2_rom;
 	if (pEm->Routine_3 == 0) {
-		id_save = pEm->Id;
+		/* local names Gun_at_mot, Tmp_id, Ck and Sv are the mockup's.
+		   DS reads Id, stores Routine_3, loads the table entry with lh and
+		   only then stores Id = 1, so the move number is written before
+		   the Id store here and the entry is not kept in a SHORT local. */
+		Tmp_id = pEm->Id;
 		pEm->Routine_3 = 1;
-		s_work = Mot[pEm->Status_flg >> 13];
+		SPL_SET_MOVE(pEm, Gun_at_mot.w[pEm->Status_flg >> 13] + 0x70000);
 		pEm->Id = 1;
-		SPL_SET_MOVE(pEm, s_work + 0x70000);
 		Hand_ck(pEm, pEm->pSin_parts_ptr[0xe].Workm.t[1], 3);
-		pEm->Id = id_save;
+		pEm->Id = Tmp_id;
 		init_Weapon_at(pEm, Pl_weapon_tbl[2] + Gun_jtg_bit[pEm->Be_flg >> 0x1d]);
-		s_work = pEm->Water;
 		SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg & 0xbfff;
-		if ((s_work != 0) && (s_work < pEm->Ground)) {
+		if ((pEm->Water != 0) && (pEm->Water < pEm->Ground)) {
 			Pl_water(pEm);
 		}
-		svec.vx = 0x8a;
-		svec.vy = 0x267;
-		svec.vz = 8;
+		/* DS loads the part-11 matrix pointer before the three Sv stores */
 		pmat = &pEm->pSin_parts_ptr[0xb].Workm;
-		Esp_call(0x30a0e00, 0, pmat, &svec);
-		esp_idx = Esp_call(0x1000e00, 0, pmat, &svec);
-		Esp[esp_idx].Padd0 = 1;
+		Sv.vx = 0x8a;
+		Sv.vy = 0x267;
+		Sv.vz = 8;
+		Esp_call(0x30a0e00, 0, pmat, &Sv);
+		Esp[Esp_call(0x1000e00, 0, pmat, &Sv)].Padd0 = 1;
 	}
-	gun_idx = pEm->Be_flg >> 0x1d;
-	res = Weapon_at_ck(pEm, gun_idx | 0x20000, Pl_weapon_tbl[2] + Gun_jtg_bit[gun_idx]);
-	if ((res != 0) && (res != 0xff)) {
+	Ck = Weapon_at_ck(pEm, (pEm->Be_flg >> 0x1d) | 0x20000, Pl_weapon_tbl[2] + Gun_jtg_bit[pEm->Be_flg >> 0x1d]);
+	if ((Ck != 0) && (Ck != 0xff)) {
 		SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg | 0x4000;
 	}
-	res = Joint_move(pEm, Kan, Seq, 0x200);
-	if (res != 0) {
-		pEm->Routine_2 = 1;
-		pEm->Routine_3 = 0;
+	if (Joint_move(pEm, Kan, Seq, 0x200) != 0) {
+		*(USHORT *)&pEm->Routine_2 = 1;
 	}
 }
 
@@ -1363,8 +1374,7 @@ static VOID Aida_mv05_w1_t4(register ENEMY_WORK *pEm, register ULONG Kan, regist
 	}
 	res = Joint_move(pEm, Kan, Seq, 0x200);
 	if (res != 0) {
-		pEm->Routine_2 = 1;
-		pEm->Routine_3 = 0;
+		*(USHORT *)&pEm->Routine_2 = 0x0001;		/* Routine_2 1, Routine_3 0 (DS: one sh at +0x6) */
 	}
 }
 
@@ -1376,21 +1386,22 @@ static VOID Aida_mv05_w1_t5_br(VOID)
 /* DS 0x80062d2c (Aida_mv05_w1_t5) */
 static VOID Aida_mv05_w1_t5(register ENEMY_WORK *pEm)
 {
-	LONG goto_res;
-	ENEMY_WORK *pTarget;
-
-	if (pEm->Routine_3 == 0) {
+	switch (pEm->Routine_3) {
+	case 0:
 		pEm->Routine_3 = 1;
 		SPL_SET_MOVE(pEm, 0xf0309);
-	} else if (pEm->Routine_3 != 1) {
-		return;
-	}
-	pTarget = (ENEMY_WORK *)pEm->pEnemy_ptr;
-	Goto00(pEm, pTarget->Pos_x, pTarget->Pos_z, 0xd8);
-	goto_res = Goto00_ck(pEm, pTarget->Pos_x, pTarget->Pos_z, 0x10);
-	if (goto_res == 0) {
-		pEm->Routine_2 = 1;
-		pEm->Routine_3 = 0;
+		/* fall through */
+	case 1:
+		{
+			register ENEMY_WORK *pTa;	/* target enemy (beta local name pTa) */
+
+			pTa = (ENEMY_WORK *)pEm->pEnemy_ptr;
+			Goto00(pEm, pTa->Pos_x, pTa->Pos_z, 0xd8);
+			if (Goto00_ck(pEm, pTa->Pos_x, pTa->Pos_z, 0x10) == 0) {
+				*(USHORT *)&pEm->Routine_2 = 0x0001;		/* Routine_2 1, Routine_3 0 (DS: one sh at +0x6) */
+			}
+		}
+		break;
 	}
 }
 
@@ -1444,10 +1455,11 @@ VOID Aida_mv07(register ENEMY_WORK *pEm)
 	LONG goto_res;
 	ULONG res;
 	UCHAR nfloor_new;
-	UCHAR Mot[2];
+	/* Motion numbers by Timer2 (DS builds the two bytes on the stack). */
+	UCHAR Mot[2] = { 0, 3 };
+	/* Footstep side held in a USHORT local, so the sum keeps DS's sll/addu/addiu shape (as in Spl_sce_mv01). */
+	USHORT lr;
 
-	Mot[0] = 0;
-	Mot[1] = 3;
 	switch (pEm->Routine_2) {
 	case 0:
 		SPL_SET_MOVE(pEm, 0x70000);
@@ -1469,7 +1481,7 @@ VOID Aida_mv07(register ENEMY_WORK *pEm)
 		pEm->Routine_2 = 3;
 		pEm->nFloor = nfloor_new;
 		SPL_SET_MOVE(pEm, (UINT)mv_no + 0x30000);
-		if (pEm->Timer2 != 0) {
+		if ((signed char)pEm->Timer2 != 0) {
 			pEm->nFloor = (UCHAR)(nfloor_new + (CHAR)pEm->Timer1 * -2);
 		}
 		/* fall through */
@@ -1478,14 +1490,13 @@ VOID Aida_mv07(register ENEMY_WORK *pEm)
 		res = Joint_move(pEm, (ULONG)pEm->pRoom_kan_t_ptr, (ULONG)pEm->pRoom_seq_t_ptr, 0x400);
 		if (res != 0) {
 			pEm->Routine_2 = 4;
+			SPL_SET_MOVE(pEm, (UINT)Mot[(signed char)pEm->Timer2] + 1);
 			timer1_cur = pEm->Timer1;
-			mv_no = Mot[(signed char)pEm->Timer2];
-			pEm->Timer1 = timer1_cur - 1;
-			SPL_SET_MOVE(pEm, (UINT)mv_no + 1);
-			if (timer1_cur == 1) {
+			timer1_cur--;
+			pEm->Timer1 = timer1_cur;
+			if (timer1_cur == 0) {
 				pEm->Routine_2 = 5;
-				mv_no = Mot[(signed char)pEm->Timer2];
-				SPL_SET_MOVE(pEm, (UINT)mv_no + 2);
+				SPL_SET_MOVE(pEm, (UINT)Mot[(signed char)pEm->Timer2] + 2);
 			}
 		}
 		Add_speedXYZ(pEm, 0, 0);
@@ -1493,10 +1504,9 @@ VOID Aida_mv07(register ENEMY_WORK *pEm)
 	case 4:
 		Spd_get(pEm, (ULONG)pEm->pRoom_kan_t_ptr, (ULONG)pEm->pRoom_seq_t_ptr, 0);
 		res = Joint_move(pEm, (ULONG)pEm->pRoom_kan_t_ptr, (ULONG)pEm->pRoom_seq_t_ptr, 0x200);
-		if ((res != 0) && ((timer1_cur = pEm->Timer1, pEm->Timer1 = timer1_cur - 1, timer1_cur == 1))) {
+		if ((res != 0) && ((timer1_cur = pEm->Timer1 - 1, pEm->Timer1 = timer1_cur, timer1_cur == 0))) {
 			pEm->Routine_2 = 5;
-			mv_no = Mot[(signed char)pEm->Timer2];
-			SPL_SET_MOVE(pEm, (UINT)mv_no + 2);
+			SPL_SET_MOVE(pEm, (UINT)Mot[(signed char)pEm->Timer2] + 2);
 		}
 		Add_speedXYZ(pEm, 0, 0);
 		break;
@@ -1516,7 +1526,8 @@ VOID Aida_mv07(register ENEMY_WORK *pEm)
 		break;
 	}
 	if ((*pEm->pNow_seq & 0x4000) != 0) {
-		Snd_se_walk(1, (SHORT)((*pEm->pNow_seq & 0x2000) >> 0xd) * 3 + 4, pEm);
+		lr = ((*pEm->pNow_seq & 0x2000) >> 0xd) * 3 + 4;
+		Snd_se_walk(1, lr, pEm);
 		G.Room_player_flg |= 4;
 	}
 }
@@ -1651,8 +1662,7 @@ VOID Aida_mv08(register ENEMY_WORK *pEm)
 		} else {
 			pEm->Routine_1 = 0;
 		}
-		pEm->Routine_2 = 0;
-		pEm->Routine_3 = 0;
+		*(USHORT *)&pEm->Routine_2 = 0x0000;		/* Routine_2 0, Routine_3 0 (DS: one sh at +0x6) */
 		break;
 	}
 }
@@ -1712,7 +1722,7 @@ VOID Aida_mv09(register ENEMY_WORK *pEm)
 		pEm->Old_x = s_work;
 		pEm->Sca_old_z = pos_z_s;
 		pEm->Old_z = pos_z_s;
-		pEm->nFloor += 0xff;
+		pEm->nFloor -= 1;
 		pEm->Old_y = (SHORT)pEm->Pos_y;
 		/* fall through */
 	case 3:
@@ -1764,8 +1774,7 @@ VOID Aida_mv09(register ENEMY_WORK *pEm)
 		} else {
 			pEm->Routine_1 = 0;
 		}
-		pEm->Routine_2 = 0;
-		pEm->Routine_3 = 0;
+		*(USHORT *)&pEm->Routine_2 = 0x0000;		/* Routine_2 0, Routine_3 0 (DS: one sh at +0x6) */
 		break;
 	}
 }
@@ -1783,13 +1792,14 @@ static VOID Aida_mv_nop_br(VOID)
 /* DS 0x800638d0 (Aida_mv0a) */
 static VOID Aida_mv0a(register ENEMY_WORK *pEm)
 {
-	LONG goto_res;
+	/* DS keeps the address of the player's Cdir_y in s1 for the whole routine and reads it with "lh a1,0(s1)"
+	   before each call, so the source holds a pointer to that field rather than reading G.Player.Cdir_y directly. */
+	register SHORT *pCdir = &G.Player.Cdir_y;
 
-	goto_res = Goto01_ck(pEm, G.Player.Cdir_y, 0x50);
-	if (goto_res == 0) {
+	if (Goto01_ck(pEm, *pCdir, 0x50) == 0) {
 		SPL_SET_ROUTINE(pEm, 0x0001);
 	} else {
-		Goto01(pEm, G.Player.Cdir_y, 0xa0);
+		Goto01(pEm, *pCdir, 0xa0);
 	}
 }
 
@@ -1797,12 +1807,16 @@ static VOID Aida_mv0a(register ENEMY_WORK *pEm)
 static VOID Aida_mv0b_br(register ENEMY_WORK *pEm)
 {
 	LONG goto_res;
+	SHORT *pCdir_y = &G.Player.Cdir_y;
 
-	goto_res = Goto01_ck(pEm, G.Player.Cdir_y + 0x800, 0x50);
+	/* DS keeps &G.Player.Cdir_y in s1 and reloads it with lh before each call, then passes
+	 * Cdir_y + 0x800 with no sll/sra narrowing to a halfword, so both calls go through a
+	 * type with LONG direction arguments (Goto01 and Goto01_ck still narrow them themselves). */
+	goto_res = ((LONG (*)(ENEMY_WORK *, LONG, LONG))Goto01_ck)(pEm, *pCdir_y + 0x800, 0x50);
 	if (goto_res == 0) {
 		SPL_SET_ROUTINE(pEm, 0x0001);
 	} else {
-		Goto01(pEm, G.Player.Cdir_y + 0x800, 0xa0);
+		((VOID (*)(ENEMY_WORK *, LONG, LONG))Goto01)(pEm, *pCdir_y + 0x800, 0xa0);
 	}
 }
 
@@ -1817,7 +1831,6 @@ static VOID Aida_mv0b_br_1(register ENEMY_WORK *pEm)
 	SHORT Add_dir;
 	SVECTOR Pad8;
 
-	(void)Pad8;
 	em_l0 = Em_l[0];
 	pNear0 = pSpl_near_em[0];
 	if (pEm->Routine_2 == 0) {
@@ -1856,7 +1869,6 @@ static VOID Aida_mv0b(register ENEMY_WORK *pEm)
 	USHORT dist;
 	SVECTOR Pad8;
 
-	(void)Pad8;
 	if (pEm->Routine_2 == 0) {
 		pEm->Timer0 = 0x3c;
 	}
@@ -2222,32 +2234,27 @@ static VOID Sherry_mv01_br(register ENEMY_WORK *pEm)
 	ULONG flg_copy;
 	ENEMY_WORK *pNear0;
 	USHORT em_l0;
-	UCHAR rnd_a;
-	UCHAR rnd_b;
+	LONG rnd_a;
+	LONG rnd_b;
 	SHORT s_work;
 	LONG tgt_x;
 	LONG Vec_z;
 
-	em_l0 = Em_l[0];
 	pNear0 = pSpl_near_em[0];
-	if ((pEm->Sca_info & 1) == 0) {
-		if ((SPL_FREE(pEm)->Flg & 0x1000) == 0) {
-			SPL_FREE(pEm)->Timer4 = 0;
-		}
-	} else {
+	em_l0 = Em_l[0];
+	if ((pEm->Sca_info & 1) != 0) {
 		if ((SPL_FREE(pEm)->Flg & 0x1000) == 0) {
 			s_work = SPL_FREE(pEm)->Timer4 + 1;
 			SPL_FREE(pEm)->Timer4 = s_work;
 			if (s_work > 0x3c) {
 				SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg | 0x1000;
-				rnd_a = Rnd();
-				rnd_b = Rnd();
-				s_work = pEm->Cdir_y;
+				rnd_a = ((LONG (*)(VOID))Rnd)();
+				rnd_b = ((LONG (*)(VOID))Rnd)();
 				SPL_FREE(pEm)->Timer4 = 0x0f;
-				SPL_FREE(pEm)->Turn_dir = (SHORT)(s_work - ((((UINT)rnd_a >> (rnd_b & 3)) & 1) * 0x100 - 0x880));
+				s_work = ((rnd_a >> (rnd_b & 3)) & 1) * 0x100 - 0x880;
+				SPL_FREE(pEm)->Turn_dir = pEm->Cdir_y - s_work;
 				if ((pNear0 != NULL) && (em_l0 < 3000)) {
-					s_work = Direction_ck((SHORT)pEm->Pos_x, (SHORT)pEm->Pos_z, (SHORT)pNear0->Pos_x,
-										 (SHORT)pNear0->Pos_z);
+					s_work = Direction_ck(pEm->Pos_x, pEm->Pos_z, pNear0->Pos_x, pNear0->Pos_z);
 					SPL_FREE(pEm)->Turn_dir = s_work;
 					SPL_FREE(pEm)->Timer4 = 0x1e;
 				}
@@ -2256,7 +2263,27 @@ static VOID Sherry_mv01_br(register ENEMY_WORK *pEm)
 			}
 		}
 	}
-	if ((SPL_FREE(pEm)->Flg & 0x2000) == 0) {
+	if ((pEm->Sca_info & 1) == 0) {
+		if ((SPL_FREE(pEm)->Flg & 0x1000) == 0) {
+			SPL_FREE(pEm)->Timer4 = 0;
+		}
+	}
+	if ((SPL_FREE(pEm)->Flg & 0x2000) != 0) {
+		if (pNear0 != NULL) {
+			if (em_l0 < 5000) {
+				SPL_SET_ROUTINE(pEm, 0x0201);
+				return;
+			}
+			if (em_l0 > 7000) {
+				SPL_SET_ROUTINE(pEm, 0x0001);
+				return;
+			}
+			Goto00(pEm, pNear0->Pos_x, pNear0->Pos_z, -0x28);
+		}
+		if (SPL_FREE(pEm)->Dist < 4000) {
+			SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg & 0xdfff;
+		}
+	} else {
 		dist = SPL_FREE(pEm)->Dist;
 		if (dist > 8000) {
 			flg_copy = SPL_FREE(pEm)->Flg;
@@ -2272,14 +2299,11 @@ static VOID Sherry_mv01_br(register ENEMY_WORK *pEm)
 			return;
 		}
 		if (dist < 0x7d1) {
-			if ((dist < 2000) && (G.Player.Routine_1 == 2) &&
-				(Cdir_ck2(pEm, (ENEMY_WORK *)&G.Player) == 0)) {
+			if ((dist < 2000) && (G.Player.Routine_1 == 2) && (Cdir_ck2(pEm, (ENEMY_WORK *)&G.Player) == 0)) {
 				SPL_SET_ROUTINE(pEm, 0x0301);
 				return;
 			}
-			if ((pNear0 == NULL) || (em_l0 > 0x5db) ||
-				((tgt_x = Goto00_ck(pEm, pNear0->Pos_x, pNear0->Pos_z, 0x4b0)) != 0) ||
-				((s_work = -0x28) == -0x28 && (pEm->Sca_info & 1) != 0)) {
+			if ((pNear0 == NULL) || (em_l0 > 0x5db) || ((tgt_x = Goto00_ck(pEm, pNear0->Pos_x, pNear0->Pos_z, 0x4b0)) != 0) || ((s_work = -0x28) == -0x28 && (pEm->Sca_info & 1) != 0)) {
 				tgt_x = pEm->Dest_x;
 				Vec_z = pEm->Dest_z;
 				s_work = 0x28;
@@ -2294,21 +2318,6 @@ static VOID Sherry_mv01_br(register ENEMY_WORK *pEm)
 		SPL_SET_ROUTINE(pEm, 0x0201);
 		return;
 	}
-	if (pNear0 != NULL) {
-		if (em_l0 < 5000) {
-			SPL_SET_ROUTINE(pEm, 0x0201);
-			return;
-		}
-		if (em_l0 > 7000) {
-			SPL_SET_ROUTINE(pEm, 0x0001);
-			return;
-		}
-		Goto00(pEm, pNear0->Pos_x, pNear0->Pos_z, -0x28);
-	}
-	if (SPL_FREE(pEm)->Dist > 3999) {
-		return;
-	}
-	SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg & 0xdfff;
 }
 
 /* DS 0x80064acc (Sherry_mv02_br) */
@@ -2318,32 +2327,28 @@ static VOID Sherry_mv02_br(register ENEMY_WORK *pEm)
 	ULONG flg_copy;
 	ENEMY_WORK *pNear0;
 	USHORT em_l0;
-	UCHAR rnd_a;
-	UCHAR rnd_b;
+	LONG rnd_a;
+	LONG rnd_b;
 	SHORT s_work;
 	LONG tgt_x;
 	LONG Vec_z;
+	LONG spd;
 
-	em_l0 = Em_l[0];
 	pNear0 = pSpl_near_em[0];
-	if ((pEm->Sca_info & 1) == 0) {
-		if ((SPL_FREE(pEm)->Flg & 0x1000) == 0) {
-			SPL_FREE(pEm)->Timer4 = 0;
-		}
-	} else {
+	em_l0 = Em_l[0];
+	if ((pEm->Sca_info & 1) != 0) {
 		if ((SPL_FREE(pEm)->Flg & 0x1000) == 0) {
 			s_work = SPL_FREE(pEm)->Timer4 + 1;
 			SPL_FREE(pEm)->Timer4 = s_work;
 			if (s_work > 0x3c) {
 				SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg | 0x1000;
-				rnd_a = Rnd();
-				rnd_b = Rnd();
-				s_work = pEm->Cdir_y;
+				rnd_a = ((LONG (*)(VOID))Rnd)();
+				rnd_b = ((LONG (*)(VOID))Rnd)();
 				SPL_FREE(pEm)->Timer4 = 0x0f;
-				SPL_FREE(pEm)->Turn_dir = (SHORT)(s_work - ((((UINT)rnd_a >> (rnd_b & 3)) & 1) * 0x100 - 0x880));
+				s_work = ((rnd_a >> (rnd_b & 3)) & 1) * 0x100 - 0x880;
+				SPL_FREE(pEm)->Turn_dir = pEm->Cdir_y - s_work;
 				if ((pNear0 != NULL) && (em_l0 < 3000)) {
-					s_work = Direction_ck((SHORT)pEm->Pos_x, (SHORT)pEm->Pos_z, (SHORT)pNear0->Pos_x,
-										 (SHORT)pNear0->Pos_z);
+					s_work = Direction_ck(pEm->Pos_x, pEm->Pos_z, pNear0->Pos_x, pNear0->Pos_z);
 					SPL_FREE(pEm)->Turn_dir = s_work;
 					SPL_FREE(pEm)->Timer4 = 0x1e;
 				}
@@ -2352,58 +2357,58 @@ static VOID Sherry_mv02_br(register ENEMY_WORK *pEm)
 			}
 		}
 	}
-	if ((SPL_FREE(pEm)->Flg & 0x1000) == 0) {
-		goto dist_ck;
+	if ((pEm->Sca_info & 1) == 0) {
+		if ((SPL_FREE(pEm)->Flg & 0x1000) == 0) {
+			SPL_FREE(pEm)->Timer4 = 0;
+		}
 	}
-	if (SPL_FREE(pEm)->Timer4 != 0) {
-		Goto01(pEm, SPL_FREE(pEm)->Turn_dir, 0x50);
-		s_work = SPL_FREE(pEm)->Timer4;
-		SPL_FREE(pEm)->Timer4 = s_work - 1;
-		if (s_work != 1) {
+	if ((SPL_FREE(pEm)->Flg & 0x1000) != 0) {
+		if (SPL_FREE(pEm)->Timer4 != 0) {
+			Goto01(pEm, SPL_FREE(pEm)->Turn_dir, 0x50);
+			if (--SPL_FREE(pEm)->Timer4 != 0) {
+				return;
+			}
+			SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg & 0xefff;
 			return;
 		}
-		SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg & 0xefff;
-		return;
 	}
-dist_ck:
-	if ((SPL_FREE(pEm)->Flg & 0x2000) == 0) {
-		dist = SPL_FREE(pEm)->Dist;
-		if (dist < 0x1f41) {
-			if (dist < 1000) {
-				SPL_SET_ROUTINE(pEm, 0x0101);
-			} else {
-				if ((pNear0 == NULL) || (em_l0 > 1999) ||
-					((tgt_x = Goto00_ck(pEm, pNear0->Pos_x, pNear0->Pos_z, 0x400)) != 0) ||
-					((s_work = -0x48) == -0x48 && (pEm->Sca_info & 1) != 0)) {
-					tgt_x = pEm->Dest_x;
-					Vec_z = pEm->Dest_z;
-					s_work = 0x48;
-				} else {
-					tgt_x = pNear0->Pos_x;
-					Vec_z = pNear0->Pos_z;
-				}
-				Goto00(pEm, tgt_x, Vec_z, s_work);
-				Oma_Spl_updown_ck(pEm);
+	if ((SPL_FREE(pEm)->Flg & 0x2000) != 0) {
+		if (pNear0 != NULL) {
+			if (em_l0 > 7000) {
+				SPL_SET_ROUTINE(pEm, 0x0001);
+				return;
 			}
-		} else {
+			Goto00(pEm, pNear0->Pos_x, pNear0->Pos_z, -0x38);
+		}
+		if (SPL_FREE(pEm)->Dist < 3000) {
+			SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg & 0xdfff;
+		}
+	} else {
+		dist = SPL_FREE(pEm)->Dist;
+		if (dist > 0x1f40) {
 			flg_copy = SPL_FREE(pEm)->Flg;
 			pEm->Timer0 = 0;
 			SPL_FREE(pEm)->Flg = (USHORT)flg_copy | 0x2000;
 			flg_copy = SPL_FREE(pEm)->Flg;
 			SPL_SET_ROUTINE(pEm, 0x0001);
 			SPL_FREE(pEm)->Flg = (USHORT)flg_copy & 0xefff;
+		} else {
+			if (dist < 1000) {
+				SPL_SET_ROUTINE(pEm, 0x0101);
+			} else {
+				if ((pNear0 != NULL) && (em_l0 < 2000) && (Goto00_ck(pEm, pNear0->Pos_x, pNear0->Pos_z, 0x400) == 0) && ((pEm->Sca_info & 1) == 0)) {
+					tgt_x = pNear0->Pos_x;
+					Vec_z = pNear0->Pos_z;
+					spd = -0x48;
+				} else {
+					tgt_x = pEm->Dest_x;
+					Vec_z = pEm->Dest_z;
+					spd = 0x48;
+				}
+				Goto00(pEm, tgt_x, Vec_z, spd);
+				Oma_Spl_updown_ck(pEm);
+			}
 		}
-		return;
-	}
-	if (pNear0 != NULL) {
-		if (em_l0 > 7000) {
-			SPL_SET_ROUTINE(pEm, 0x0001);
-			return;
-		}
-		Goto00(pEm, pNear0->Pos_x, pNear0->Pos_z, -0x38);
-	}
-	if (SPL_FREE(pEm)->Dist < 3000) {
-		SPL_FREE(pEm)->Flg = SPL_FREE(pEm)->Flg & 0xdfff;
 	}
 }
 
@@ -2447,13 +2452,15 @@ static VOID Sherry_mv06_br(register ENEMY_WORK *pEm, register ULONG Kan, registe
 /* DS 0x80064e5c (Sherry_mv06) */
 static VOID Sherry_mv06(register ENEMY_WORK *pEm)
 {
-	LONG goto_res;
+	/* DS keeps the address of G.Player.Cdir_y in s1 (DS 0x80064e6c: lui s1,0x800d; addiu s1,s1,-0x392) and
+	   reads it with lh a1,0x0(s1) before each of the two calls, so the direction is read through a pointer
+	   local. The Oct 97 mockup declares no locals for Sherry_mv06. */
+	register SHORT *pDir = &G.Player.Cdir_y;
 
-	goto_res = Goto01_ck(pEm, G.Player.Cdir_y, 0x50);
-	if (goto_res == 0) {
+	if (Goto01_ck(pEm, *pDir, 0x50) == 0) {
 		SPL_SET_ROUTINE(pEm, 0x0001);
 	} else {
-		Goto01(pEm, G.Player.Cdir_y, 0xa0);
+		Goto01(pEm, *pDir, 0xa0);
 	}
 }
 
@@ -2461,16 +2468,11 @@ static VOID Sherry_mv06(register ENEMY_WORK *pEm)
 static VOID Sherry_mv0b_br(register ENEMY_WORK *pEm)
 {
 	USHORT dist;
-	ENEMY_WORK *pNear0;
 	USHORT em_l0;
-	LONG Vec_x;
-	LONG Vec_z;
-	SHORT Add_dir;
-	SVECTOR Pad8;
+	ENEMY_WORK *pNear0;
 
-	(void)Pad8;
-	em_l0 = Em_l[0];
 	pNear0 = pSpl_near_em[0];
+	em_l0 = Em_l[0];
 	if (pEm->Routine_2 == 0) {
 		pEm->Timer0 = 0x32;
 	}
@@ -2486,38 +2488,24 @@ static VOID Sherry_mv0b_br(register ENEMY_WORK *pEm)
 		if (pEm->Timer0 == 0) {
 			SPL_SET_ROUTINE(pEm, 0x0d01);
 		}
-		if ((em_l0 < 0x5dc) && ((Add_dir = 0x30) == 0x30) && ((pEm->Sca_info & 1) == 0)) {
-			Vec_x = pNear0->Pos_x;
-			Vec_z = pEm->Pos_z;
+		/* Near enemy within 1500 (Em_l[0], read at entry) and Sca_info bit 0 clear: head for the near
+		 * enemy X with own Z, turn step 0x30. Otherwise head for Dest_x/Dest_z with turn step -0x30.
+		 * DS shares one jal for both calls (a3 = 0x30 set in the delay slot of the Sca_info test). */
+		if ((em_l0 < 0x5dc) && ((pEm->Sca_info & 1) == 0)) {
+			Goto00(pEm, pNear0->Pos_x, pEm->Pos_z, 0x30);
 		} else {
-			Vec_x = pEm->Dest_x;
-			Vec_z = pEm->Dest_z;
-			Add_dir = -0x30;
+			Goto00(pEm, pEm->Dest_x, pEm->Dest_z, -0x30);
 		}
-		Goto00(pEm, Vec_x, Vec_z, Add_dir);
 	}
 }
 
 /* DS 0x80064fa8 (Spl_dm00) */
 VOID Spl_dm00(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
-	UCHAR routine2_cur;
 	ULONG res;
 
-	routine2_cur = pEm->Routine_2;
-	if (routine2_cur != 1) {
-		if (routine2_cur > 1) {
-			if (routine2_cur != 2) {
-				return;
-			}
-			SPL_SET_ROUTINE(pEm, 0x0001);
-			pEm->Damage_cnt = 0;
-			pEm->Neck_flg &= 0xed;
-			return;
-		}
-		if (routine2_cur != 0) {
-			return;
-		}
+	switch (pEm->Routine_2) {
+	case 0:
 		SPL_SET_MOVE(pEm, 0x30005);
 		pEm->Routine_2 = 1;
 		*(ULONG *)&pEm->Spd_x = 0;
@@ -2526,9 +2514,16 @@ VOID Spl_dm00(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 		pEm->Neck_flg |= 0x12;
 		Snd_se_enem(0, pEm);
 		pEm->Be_flg &= 0xfffffffb;
+	case 1:
+		res = Joint_move(pEm, Kan, Seq, 0x400);
+		pEm->Routine_2 = pEm->Routine_2 + (CHAR)res;
+		break;
+	case 2:
+		SPL_SET_ROUTINE(pEm, 0x0001);
+		pEm->Damage_cnt = 0;
+		pEm->Neck_flg &= 0xed;
+		break;
 	}
-	res = Joint_move(pEm, Kan, Seq, 0x400);
-	pEm->Routine_2 = pEm->Routine_2 + (CHAR)res;
 }
 
 /* DS 0x800650a8 (Spl_dm01) */
@@ -2560,7 +2555,7 @@ VOID Spl_dm01(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 		pEm->Spd_y = (SHORT)(v >> 16);
 		pEm->Damage_cnt |= 0x80;
 		pEm->Neck_flg |= 0x12;
-		Snd_se_enem(pEm->Routine_2 + 0xff, pEm);
+		Snd_se_enem(pEm->Routine_2 - 1, pEm);
 		pEm->Be_flg &= 0xfffffffb;
 	}
 	if (pEm->Hokan_flg != 0) {
@@ -2687,9 +2682,7 @@ VOID Spl_enemy_ck(register ENEMY_WORK *pEm)
 				dz = pCur->Pos_z - pEm->Pos_z;
 				dist = SquareRoot0(dx * dx + dz * dz);
 				pCur->L_spl = dist;
-				res = Sca_ck_line((VECTOR *)pEm->pSin_parts_ptr[pEm->Neck_no].Workm.t,
-									(VECTOR *)pCur->pSin_parts_ptr[pCur->Neck_no].Workm.t,
-									0x2080, 1);
+				res = Sca_ck_line((VECTOR *)pEm->pSin_parts_ptr[pEm->Neck_no].Workm.t, (VECTOR *)pCur->pSin_parts_ptr[pCur->Neck_no].Workm.t, 0x2080, 1);
 				if ((res == 0) && (pCur->Life >= 0)) {
 					if (dist < d_near0) {
 						pNear[2] = pNear[1];
@@ -2719,20 +2712,17 @@ VOID Spl_enemy_ck(register ENEMY_WORK *pEm)
 		pSpl_near_em[1] = pNear[1];
 		pSpl_near_em[2] = pNear[2];
 		if (pNear[0] != NULL) {
-			Em_dir[0] = Direction_ck((SHORT)pEm->Pos_x, (SHORT)pEm->Pos_z, (SHORT)pNear[0]->Pos_x,
-									 (SHORT)pNear[0]->Pos_z);
+			Em_dir[0] = Direction_ck(pEm->Pos_x, pEm->Pos_z, pNear[0]->Pos_x, pNear[0]->Pos_z);
 			pNear[0]->L_spl |= 0x40000000;
 			pNear[0]->Dir_spl = (SHORT)((Em_dir[0] + 0x800) & 0xfff);
 		}
 		if (pNear[1] != NULL) {
-			Em_dir[1] = Direction_ck((SHORT)pEm->Pos_x, (SHORT)pEm->Pos_z, (SHORT)pNear[1]->Pos_x,
-									 (SHORT)pNear[1]->Pos_z);
+			Em_dir[1] = Direction_ck(pEm->Pos_x, pEm->Pos_z, pNear[1]->Pos_x, pNear[1]->Pos_z);
 			pNear[1]->L_spl |= 0x80000000;
 			pNear[1]->Dir_spl = (SHORT)((Em_dir[1] + 0x800) & 0xfff);
 		}
 		if (pNear[2] != NULL) {
-			Em_dir[2] = Direction_ck((SHORT)pEm->Pos_x, (SHORT)pEm->Pos_z, (SHORT)pNear[2]->Pos_x,
-									 (SHORT)pNear[2]->Pos_z);
+			Em_dir[2] = Direction_ck(pEm->Pos_x, pEm->Pos_z, pNear[2]->Pos_x, pNear[2]->Pos_z);
 			pNear[2]->L_spl |= 0xc0000000;
 			pNear[2]->Dir_spl = (SHORT)((Em_dir[2] + 0x800) & 0xfff);
 		}
@@ -2811,7 +2801,6 @@ ULONG Spl_em_cdir_ck(register ENEMY_WORK *pEm)
 	   with sltu; a literal compare would be folded away by CCPSX. */
 	register UINT Ok_lim = 0x7fffffff;
 	register UINT Ng_lim = 0x7fffffff;
-	UCHAR more;
 	LONG goto_res;
 	ENEMY_WORK *pNear;
 	USHORT *pDist;
@@ -2825,61 +2814,68 @@ ULONG Spl_em_cdir_ck(register ENEMY_WORK *pEm)
 	idx = 2;
 	pDist = Em_l;
 	ppNear = pSpl_near_em;
+	/* Up to three near enemies (idx 2, 1, 0), stopping at the first NULL slot. DS tests the slot at the top
+	   of the loop and the counter at the bottom (move v0,s3 / bne / addiu s3,-1); writing the NULL test
+	   as an if with an else-break keeps CCPSX from rotating the slot load into the loop tail. */
 	do {
 		pNear = *ppNear;
-		if (pNear == NULL) {
+		if (pNear != NULL) {
+			goto_res = Goto00_ck(pEm, pNear->Pos_x, pNear->Pos_z, 0x400);
+			if (goto_res == 0) {
+				if (*pDist < Ok_lim) {
+					pCdirOk = pNear;
+				}
+			} else if (*pDist < Ng_lim) {
+				pCdirNg = pNear;
+			}
+			pDist++;
+			ppNear++;
+		} else {
 			break;
 		}
-		goto_res = Goto00_ck(pEm, pNear->Pos_x, pNear->Pos_z, 0x400);
-		if (goto_res == 0) {
-			if (*pDist < Ok_lim) {
-				pCdirOk = pNear;
-			}
-		} else if (*pDist < Ng_lim) {
-			pCdirNg = pNear;
-		}
-		pDist++;
-		ppNear++;
-		more = idx != 0;
-		idx--;
-	} while (more);
-	if (pCdirOk == NULL) {
-		pCdirOk = pCdirNg;
+	} while (idx-- != 0);
+	/* The clear-path (Ok) enemy wins; otherwise the blocked (Ng) one, which may be NULL. */
+	if (pCdirOk != NULL) {
+		return (ULONG)pCdirOk;
 	}
-	return (ULONG)pCdirOk;
+	return (ULONG)pCdirNg;
 }
 
 /* DS 0x80065b18 (Spl_pllock_get) */
 ULONG Spl_pllock_get(register ENEMY_WORK *pEm, register ENEMY_WORK *pYo)
 {
-	UCHAR more;
-	UCHAR found_pl;
+	ULONG found_pl;
 	ENEMY_WORK *pNear;
 	ENEMY_WORK **ppNear;
 	INT idx;
 	ENEMY_WORK *pRet;
+	ULONG **ppPl;		/* address of G.Player.pEnemy_ptr, kept for the loop (DS holds it in t1) */
 
 	found_pl = 0;
 	pRet = NULL;
 	idx = 2;
+	ppPl = &G.Player.pEnemy_ptr;
 	ppNear = pSpl_near_em;
 	do {
 		pNear = *ppNear;
 		if (pNear != NULL) {
-			if ((ENEMY_WORK *)G.Player.pEnemy_ptr == pNear) {
+			if ((ENEMY_WORK *)*ppPl == pNear) {
+				ppNear++;
 				found_pl = 1;
+				continue;
 			} else if (pYo != pNear) {
 				pRet = pNear;
 			}
 		}
 		ppNear++;
-		more = idx != 0;
-		idx--;
-	} while (more);
-	if ((pRet == NULL) && found_pl) {
-		pRet = (ENEMY_WORK *)G.Player.pEnemy_ptr;
+	} while (idx-- != 0);
+	if (pRet != NULL) {
+		return (ULONG)pRet;
 	}
-	return (ULONG)pRet;
+	if (found_pl == 0) {
+		return 0;
+	}
+	return (ULONG)G.Player.pEnemy_ptr;
 }
 
 /* DS 0x80065b9c (Spl_life_down) */
@@ -2905,11 +2901,16 @@ ULONG Spl_life_down(register ENEMY_WORK *pEm, register LONG Down_life, register 
 		}
 		return 0;
 	}
-	if ((Mode == 0) && (pT->Life < 0)) {
-		SPL_SET_ROUTINE(pT, 0x0003);
-		return 2;
+	/* DS has no return value on the path where Mode is non-zero with bit 0 clear: the branch to the
+	   epilogue (bne s1,zero) carries a nop in its delay slot, so v0 still holds Mode & 1 from the test
+	   above, which is 0 on this path. The function therefore ends here without a return statement. */
+	if (Mode == 0) {
+		if (pT->Life < 0) {
+			SPL_SET_ROUTINE(pT, 0x0003);
+			return 2;
+		}
+		return 0;
 	}
-	return 0;
 }
 
 /* DS 0x8001195c: motion table, 3 entries */
@@ -2949,8 +2950,10 @@ SHORT Spl_r_pos[2][6] = {
 };
 
 /* ---- function-pointer dispatch tables (defined from retail data) ---- */
-/* DS 0x800a863c */
-VOID *Aida_Move_type[16] = {
+/* DS 0x800a863c: 11 handler pointers (0x2c bytes, up to the Aida_St_pos label at 0x800a8668). Aida_move indexes
+ * the table with Type & 0xf without a bound check, and retail has nothing valid after entry 10 (the bytes there
+ * are the 0x02000000 word and the Aida_St_pos data), so the declared extent is 11. */
+VOID *Aida_Move_type[11] = {
 	(VOID *)Aida_Move_type00,	/* 0: DS 0x80060750 */
 	(VOID *)Aida_Move_type01,	/* 1: DS 0x800607d4 */
 	(VOID *)Aida_Move_type02,	/* 2: DS 0x80060858 */
@@ -2964,11 +2967,10 @@ VOID *Aida_Move_type[16] = {
 	(VOID *)Aida_Move_type0a,	/* 10: DS 0x80060c78 */
 };
 
-/* DS 0x800a8668 */
-/* 16 entries: the code indexes [type & 0xf]; entries 6..15 are the retail bytes that follow the 6-entry block */
-USHORT Aida_St_pos[16] = {
-	0x0000, 0x0200, 0x0002, 0x0200, 0x0202, 0x0F02, 0x1150, 0x8006,
-	0x19E4, 0x8006, 0x1F68, 0x8006, 0x2248, 0x8006, 0x2490, 0x8006,
+/* DS 0x800a8668: 11 one-byte start states, read with lbu and OR'd into the sprite flag. Retail has no
+ * valid entry past index 10; the bytes after the table belong to the next data. */
+UCHAR Aida_St_pos[11] = {
+	0x00, 0x00, 0x00, 0x02, 0x02, 0x00, 0x00, 0x02, 0x02, 0x02, 0x02,
 };
 
 static UCHAR Spl_pos_ck_timer;
@@ -3189,9 +3191,10 @@ VOID *Aida_mv_br_type0a[] = {
 	(VOID *)Aida_mv0c_br,	/* 13: DS 0x80063b94 */
 };
 
-/* DS 0x800a8904 (Aida_em_sel) */
-UCHAR Aida_em_sel[] = {
-	0xc0, 0x38, 0x06, 0x80, 0x30, 0x39, 0x06, 0x80, 0xa0, 0x39, 0x06, 0x80, 0x94, 0x3b, 0x06, 0x80,
+/* DS 0x800a8914 (E_A_at_tbl): Aida attack selector per enemy, indexed by enemy Id - 0x10.
+ * 0 = em10 handler, 1 = em25 (Id 0x25), 2 = em26 (Id 0x26). Retail reads it as byte 0x800a8904 + Id,
+ * folding the -0x10 into the address. It sits right after Aida_mv_br_type0a and before Aida_em_at00_pl. */
+UCHAR E_A_at_tbl[48] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -3244,8 +3247,10 @@ VOID *Aida_em_at05[] = {
 	(VOID *)Aida_em10_at05,	/* 1: DS 0x800627dc */
 };
 
-/* DS 0x800a89a0 */
-VOID *Sherry_Move_type[16] = {
+/* DS 0x800a89a0: 11 handler pointers (0x2c bytes, up to the Sherry_St_pos label at 0x800a89cc). Sherry_move
+ * indexes the table with Type & 0xf without a bound check; retail bytes after entry 10 are the 0x00020200
+ * word and then the Sherry_St_pos data, so the declared extent is 11. */
+VOID *Sherry_Move_type[11] = {
 	(VOID *)Sherry_Move_type00,	/* 0: DS 0x80063cec */
 	(VOID *)Sherry_Move_type01,	/* 1: DS 0x80063d8c */
 	(VOID *)Sherry_Move_type02,	/* 2: DS 0x80063e2c */
@@ -3463,14 +3468,10 @@ VOID *Sherry_mv_br_type0a[] = {
 };
 
 /* DS 0x800d4c70 */
-SHORT Em_dir[3] = {
-	0x0000, 0x0000, 0x0000,
-};
+SHORT Em_dir[3];
 
 /* DS 0x800d7648 */
-ENEMY_WORK *pSpl_near_em[3] = { 0, 0, 0 };
+ENEMY_WORK *pSpl_near_em[3];
 
 /* DS 0x800dfad8 */
-USHORT Em_l[3] = {
-	0x0000, 0x0000, 0x0000,
-};
+USHORT Em_l[3];

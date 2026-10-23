@@ -1,12 +1,12 @@
 /*
  * MAIN.C - Main game loop and system module
- * Resident Evil 2 Dual Shock Ver. (SLUS-00748) decompilation
+ * Resident Evil 2 (SLUS-00748) decompilation
+ * Source: D:\Bio2\prog\MAIN.C
  */
 
 #include "TYPES.H"
 #include "CONFIG.H"
 #include "ROOM.H"
-#include <LIBAPI.H>
 #include <LIBETC.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
@@ -34,203 +34,240 @@
 #include "FILECODE.H"
 #include "flag.h"
 
+/* DS 0x80198000 (Bg_img_buf) */
+ULONG *Bg_img_buf = (ULONG *)0x80198000;
+/* DS 0x8011a000 (Tex_tim_buf) */
+ULONG *Tex_tim_buf = (ULONG *)0x8011a000;
+/* DS 0x80190000 (Bs_buf): BS chunk load area. Bg_draw reads CD.Fsize bytes (the Bs_size entry, at most 0xf8e4 in STAGE5.C; a cut owns 0x20 sectors of its ROOMxxx.BSS), so the load runs past Bg_img_buf (0x80198000). The 8-byte BS_INFO entry (ofs, flag) is the last 8 bytes of the chunk, which is why Bs_info_tbl (MAIN.H) is Bs_buf - 8 indexed by the Bs_size entry */
+ULONG *Bs_buf = (ULONG *)0x80190000;
+/* DS 0x801a5800 (Bg_tim_buf): decompressed background TIM images; largest room block 64,020 bytes (ROOM20E.BSS cut 4), measured by decoding the SLD blocks of every ROOMxxx.BSS with the Desld stream format */
+ULONG *Bg_tim_buf = (ULONG *)0x801a5800;
+
 /* BSS file index = RDT file index - 570 */
 #define RDT_BSS_OFS	0x23a
 
-/* DS 0x8009dc10: 2 x RECT initial values from the image */
-RECT Rect[2] = {
-	{ 0x0000, 0x0000, 0x0000, 0x0000 },
-	{ 0x0140, 0x00f0, 0x0000, 0x0000 }
+/* DS 0x8009db64 (LIGHTMATRIX): DS keeps it in .data with zero bytes, so it has an initialiser here. */
+MATRIX LIGHTMATRIX = {
+	{ { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 } },
+	{ 0, 0, 0 }
 };
 
-/* Rect[0] low 32 bits: current background scroll offset (Ghidra Rect[0]._0_4_) */
-#define Scrl_ofs (*(int *)&Rect[0])
+/* DS 0x8009db84 (COLORMATRIX): DS keeps it in .data with zero bytes, so it has an initialiser here. */
+MATRIX COLORMATRIX = {
+	{ { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 } },
+	{ 0, 0, 0 }
+};
+
+/* DS 0x8009dba4 (Pad_act_align): actuator alignment table for PadSetActAlign (PAD.C Pad_set). DS has it in
+ * MAIN's .data directly after COLORMATRIX (0x8009db84-0x8009dba3); the two bytes after the table are alignment
+ * padding before Curtain. */
+UCHAR Pad_act_align[6] = {
+	0x00, 0x01, 0xff, 0xff, 0xff, 0xff,	/* +0x0 */
+};
+
+/* Scroll block at DS 0x8009dc10: the scroll offset word, the RECT Bg_draw sends to LoadImage, and an unused word */
+typedef struct {
+	LONG Ofs_y;
+	RECT Rect;
+	LONG Pad;
+} tagSCRL_BLK;
+extern tagSCRL_BLK Scrl_blk;
 
 /* DS 0x800109e8 (ClearImageRect) */
 const RECT ClearImageRect = { 0x0000, 0x0000, 0x0140, 0x01e0 };
 
-/* DS 0x8009dc20 (Rect_bg) */
-RECT Rect_bg = { 0x0000, 0x0000, 0x0010, 0x00f0 };
+/* DS 0x8009dbac (Curtain) */
+TILE Curtain[2][2] = {
+	{ { 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x0000, 0x0140, 0x0018 }, { 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x0000, 0x0140, 0x0018 } },
+	{ { 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x00d8, 0x0140, 0x0018 }, { 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x00d8, 0x0140, 0x0018 } }
+};
 
-/* DS 0x8011a000 (Tex_tim_buf): TEX.TIM load buffer and free-work base. Size spans to Prim_work_buf (0x8018f040). */
-ULONG Tex_tim_buf[0x1D410] RAM_SECTION(".buf_tex_tim_buf");
+/* DS 0x800dfae0 (Main): main work area (struct tagMAIN, MAIN.H). Zero at start; DS allocates it with the
+ * common symbols in .bss, so it has no initialiser here. */
+tagMAIN Main;
 
-/* DS 0x80190000 (Bs_buf): BS stream load buffer. Size is the largest BS file in Bs_size1..Bs_size7 (0xf8e4 bytes). */
-ULONG Bs_buf[0x3E39] RAM_SECTION(".buf_bs_buf");
-/* DS 0x801a5800 (Bg_tim_buf): background TIM buffer for Desld_init / Mapping_tim (Bg_draw). Size is an upper bound, not measured:
- * the gap up to Die_spr_work (DS 0x801ad000). Retail references: Bg_draw only. */
-ULONG Bg_tim_buf[0x1E00] RAM_SECTION(".buf_bg_tim_buf");
+
 
 /* 8002aee0 */
 /* DS 0x8002aee0 (main) */
+/* DS stack frame: 0x40 bytes. s0..s4 are saved at sp+0x28..sp+0x38 and ra at sp+0x3c. sp+0x10 is the outgoing
+ * fifth argument of two calls: the address of the "Paused" literal (DS 0x800109e0) for Print14 and the null RECT
+ * pointer for SetDrawMode. rect is the only local kept in memory: it sits at sp+0x20..0x27, DS copies the 8 bytes of
+ * ClearImageRect (DS 0x800109e8) into it with an lwl/lwr + swl/swr pair and passes sp+0x20 to ClearImage.
+ * sp+0x14..0x1f is never written. */
 void main(void)
 {
-	USHORT Padoff_prev;
-	ULONG Fade_busy;
+	register tagMAIN *pMain;
+	register tagGLOBAL *pG;
+	RECT rect_unused;
 	RECT rect;
+	ULONG Fade_busy;
 
 	Init_system();
+	pMain = &Main;
+	pG = &G;
+	for (;;) {
 frame_start:
-	while (1) {
-		if (Main.Pollhost_flg != 0) {
+		if (pMain->Pollhost_flg != 0) {
 			trap(0x400);
 		}
-		G.pOt0 = G.Ot0[G.Cbuf_id];
-		G.pOt2 = G.Ot2[G.Cbuf_id];
-		G.pOt1 = G.Ot1[G.Cbuf_id];
-		Main.pDb = Main.Db + G.Cbuf_id;
-		ClearOTagR(G.pOt0, 8);
-		ClearOTagR(G.pOt1, 0x400);
-		ClearOTagR(G.pOt2, 0x10);
-		if (G.Padd_data[0][0] == 0xff) {
-			G.Padd_data[0][3] = 0xff;
-			G.Padd_data[0][2] = 0xff;
-			G.Padd_data[1][3] = 0xff;
-			G.Padd_data[1][2] = 0xff;
+		pG->pOt0 = pG->Ot0[pG->Cbuf_id];
+		pG->pOt1 = pG->Ot1[pG->Cbuf_id];
+		pG->pOt2 = pG->Ot2[pG->Cbuf_id];
+		pMain->pDb = pMain->Db + pG->Cbuf_id;
+		ClearOTagR(pG->pOt0, 8);
+		ClearOTagR(pG->pOt1, 0x400);
+		ClearOTagR(pG->pOt2, 0x10);
+		if (pG->Padd_data[0][0] == 0xff) {
+			pG->Padd_data[0][3] = 0xff;
+			pG->Padd_data[0][2] = 0xff;
+			pG->Padd_data[1][3] = 0xff;
+			pG->Padd_data[1][2] = 0xff;
 		}
-		if ((G.System_flg & SYS_RESET) == 0) break;
-		rect = ClearImageRect;
-		G.Padd1 = 0;
-		DrawSync(0);
-		VSync(0);
-		ResetCallback();
-		CD.Cd_rtn_no = 0;
-		CD.Xa_rtn_no = 0;
-		ClearImage((RECT *)&rect, 0, 0, 0);
-		Bg_set_mode(2, 0);
-		Task_kill(0);
-		Task_kill(1);
-		Task_kill(2);
-		Snd_sys_init2();
-		SsEnd();
-		SsQuit();
-		Snd_sys_init();
-		Init_global();
-		Main.Curtain_kido = 0;
-		ClearOTagR(G.pOt0, 8);
-		ClearOTagR(G.pOt1, 0x400);
-		ClearOTagR(G.pOt2, 0x10);
-		Moji_mode_init();
-		Trans_pointer_set();
-		Task_lexecute(0, 0);
-	}
-	do {
-		Padoff_prev = *(USHORT *)Main.Padoff_stop_flg[2];
-		if ((G.System_flg & SYS_IN_GAME) == 0 || Main.Bg_chg_flg != 0 || Game.Doordemo_flg != 0 ||
-			((CD.Cd_rtn_no | CD.Xa_rtn_no) != 0) || (G.Stop_flg & 0x1000000) != 0 ||
-			(G.System_flg & (SYS_DOOR_PROCESS | SYS_ENDING | SYS_DEMO_MODE | SYS_STR_MOVIE)) != 0 || (G.Status_flg & (STAT_CINESCO | 0x100000)) != 0 ||
-			(Main.Padoff_stop_flg[1][0] == 0 && G.Padd_data[0][0] != 0xff)) {
-			Main.Padoff_stop_flg[0][0] = 0;
-			if (Main.Padoff_stop_flg[1][0] != 0) break;
-		} else {
-			if (1 < Main.Padoff_stop_flg[0][0]) {
-				USHORT now;
-				USHORT edge;
-
-				now = (USHORT)~((G.Padd_data[0][2] << 8) | G.Padd_data[0][3]);
-				if ((now & 0x400) != 0) {
-					now |= 0x800;
+		if ((G.System_flg & SYS_RESET) != 0) goto frame_reset;
+		do {
+			if ((G.System_flg & SYS_IN_GAME) != 0 && Main.Bg_chg_flg == 0 && Game.Doordemo_flg == 0 &&
+				*(USHORT *)&CD.Cd_rtn_no == 0 && (G.Stop_flg & 0x1000000) == 0 &&
+				(G.System_flg & (SYS_DOOR_PROCESS | SYS_ENDING | SYS_DEMO_MODE | SYS_STR_MOVIE)) == 0 &&
+				(G.Status_flg & (STAT_CINESCO | 0x100000)) == 0 &&
+				(Main.Padoff_stop_flg[1][0] != 0 || pG->Padd_data[0][0] == 0xff)) {
+				if (pMain->Padoff_stop_flg[0][0] < 2) {
+					if (pMain->Padoff_stop_flg[0][0] == 0) {
+						AddPrim(pG->pOt0 + 1, Pause + pG->Cbuf_id);
+						AddPrim(pG->pOt0 + 1, &pMain->Db[pG->Cbuf_id].Pause_Dm);
+						Print14(0x87, 0x6b, 0, 0x4000, (UCHAR *)"Paused");
+					}
+					pMain->Padoff_stop_flg[0][0]++;
+					if (Main.Padoff_stop_flg[1][0] != 0) {
+						Snd_bgm_pause(0);
+						goto frame_update;
+					}
+				} else {
+					*(USHORT *)Main.Padoff_stop_flg[3] = *(USHORT *)Main.Padoff_stop_flg[2];
+					*(USHORT *)Main.Padoff_stop_flg[2] = ~((pG->Padd_data[0][2] << 8) | pG->Padd_data[0][3]);
+					if ((*(USHORT *)Main.Padoff_stop_flg[2] & 0x400) != 0) {
+						*(USHORT *)Main.Padoff_stop_flg[2] |= 0x800;
+					}
+					*(USHORT *)Main.Padoff_stop_flg[3] = *(USHORT *)Main.Padoff_stop_flg[2] &
+						(*(USHORT *)Main.Padoff_stop_flg[3] ^ *(USHORT *)Main.Padoff_stop_flg[2]);
+					if ((*(USHORT *)Main.Padoff_stop_flg[3] & 0x800) != 0) {
+						Snd_bgm_pause(1);
+						Main.Padoff_stop_flg[1][0] = 0;
+					}
+					PadActData[1] = 0;
+					PadActData[0] = 0;
+					VSync(0);
+					goto frame_start;
+frame_reset:
+					rect = ClearImageRect;
+					pG->Padd1 = 0;
+					DrawSync(0);
+					VSync(0);
+					ResetCallback();
+					CD.Cd_rtn_no = 0;
+					CD.Xa_rtn_no = 0;
+					ClearImage((RECT *)&rect, 0, 0, 0);
+					Bg_set_mode(2, 0);
+					Task_kill(0);
+					Task_kill(1);
+					Task_kill(2);
+					Snd_sys_init2();
+					SsEnd();
+					SsQuit();
+					Snd_sys_init();
+					Init_global();
+					Main.Curtain_kido = 0;
+					ClearOTagR(pG->pOt0, 8);
+					ClearOTagR(pG->pOt1, 0x400);
+					ClearOTagR(pG->pOt2, 0x10);
+					Moji_mode_init();
+					Trans_pointer_set();
+					Task_lexecute(0, 0);
+					goto frame_start;
 				}
-				*(USHORT *)Main.Padoff_stop_flg[2] = now;
-				edge = now & (Padoff_prev ^ now);
-				*(USHORT *)Main.Padoff_stop_flg[3] = edge;
-				if ((edge & 0x800) != 0) {
-					Snd_bgm_pause(1);
-					Main.Padoff_stop_flg[1][0] = 0;
-				}
-				PadActData[1] = 0;
-				PadActData[0] = 0;
-				VSync(0);
-				goto frame_start;
+			} else {
+				pMain->Padoff_stop_flg[0][0] = 0;
+				if (Main.Padoff_stop_flg[1][0] != 0) break;
 			}
-			if (Main.Padoff_stop_flg[0][0] == 0) {
-				AddPrim(G.pOt0 + 1, Pause + G.Cbuf_id);
-				AddPrim(G.pOt0 + 1, &Main.Db[G.Cbuf_id].Pause_Dm);
-				Print14(0x87, 0x6b, 0, 0x4000, (UCHAR *)"Paused");
-			}
-			Main.Padoff_stop_flg[0][0]++;
-			if (Main.Padoff_stop_flg[1][0] != 0) {
-				Snd_bgm_pause(0);
-				goto frame_update;
-			}
-		}
-		Pad_set();
-		if ((G.Padd_trg & 0x800) == 0) break;
-		Main.Padoff_stop_flg[1][0] = 1;
-		*(USHORT *)Main.Padoff_stop_flg[2] = (USHORT)G.Padd;
-	} while (1);
-	Main.Padoff_stop_flg[1][0] = 0;
+			Pad_set();
+			if ((pG->Padd_trg & 0x800) == 0) break;
+			Main.Padoff_stop_flg[1][0] = 1;
+			*(USHORT *)Main.Padoff_stop_flg[2] = (USHORT)pG->Padd;
+		} while (1);
+		Main.Padoff_stop_flg[1][0] = 0;
 frame_update:
-	Trans_pointer_set();
-	Moji_mode_init();
-	Scheduler();
-	G.Status_flg &= ~(STAT_INSPECT | 0x100000);
-	if ((G.System_flg & SYS_FADE_OUT) == 0) {
-		Moji_trans_main();
-		System_trans();
-		Swap_Cbuff();
-		Cd_system_control();
-	} else {
-		Fade_busy = Fade_status(0);
-		if (Fade_busy != 0) {
+		Trans_pointer_set();
+		Moji_mode_init();
+		Scheduler();
+		pG->Status_flg &= ~(STAT_INSPECT | 0x100000);
+		if ((G.System_flg & SYS_FADE_OUT) != 0) {
+			Fade_busy = Fade_status(0);
+			if (Fade_busy != 0) {
+				DrawSync(0);
+				PutDispEnv((DISPENV *)&(pMain->pDb)->Disp);
+				SetDrawMode((DR_MODE *)&pMain->Fade[0].Dr_mode[pG->Cbuf_id], 1, 0, 0x40, (RECT *)0x0);
+				Fade_adjust(0, 0x1f, 0x80808, (RECT *)0x0);
+			}
+			AddPrim(pG->pOt0, (void *)&pMain->Fade[0].T[pG->Cbuf_id]);
+			AddPrim(pG->pOt0, (void *)&pMain->Fade[0].Dr_mode[pG->Cbuf_id]);
+			pMain->Fade[0].Kido--;
+			if ((int)((UINT)(USHORT)pMain->Fade[0].Kido << 0x10) < 0) {
+				G.System_flg &= ~SYS_FADE_OUT;
+			}
 			DrawSync(0);
-			PutDispEnv((DISPENV *)&(Main.pDb)->Disp);
-			SetDrawMode((DR_MODE *)&Main.Fade[0].Dr_mode[G.Cbuf_id], 1, 0, 0x40, (RECT *)0x0);
-			Fade_adjust(0, 0x1f, 0x80808, (RECT *)0x0);
+			VSync(0);
+			DrawOTag(pG->pOt0 + 7);
+		} else {
+			Moji_trans_main();
+			System_trans();
+			Swap_Cbuff();
+			Cd_system_control();
 		}
-		AddPrim(G.pOt0, (void *)&Main.Fade[0].T[G.Cbuf_id]);
-		AddPrim(G.pOt0, (void *)&Main.Fade[0].Dr_mode[G.Cbuf_id]);
-		Main.Fade[0].Kido--;
-		if ((int)((UINT)(USHORT)Main.Fade[0].Kido << 0x10) < 0) {
-			G.System_flg &= ~SYS_FADE_OUT;
-		}
-		DrawSync(0);
-		VSync(0);
-		DrawOTag(G.pOt0 + 7);
 	}
-	goto frame_start;
 }
 
 /* 8002b48c */
 /* DS 0x8002b48c (Init_system) */
 void Init_system(void)
 {
-	ULONG Frame_pad[8];		/* retail reserves 0x40 bytes; only sp+0x10 (outgoing arg) is used */
+	tagMAIN *pM;
+	volatile UCHAR Rsv[24];
+	/* retail frame is 0x40 (ra, s0, s1 saved); reserve 24 bytes so this frame matches, never read */
 
-	(void)Frame_pad;
+	pM = &Main;
 	Init_scheduler();
 	G.System_flg |= 0x40;
 	ResetCallback();
 	SetGraphDebug(0);
 	InitGeom();
 	Cd_init();
-	SetDefDrawEnv((DRAWENV *)&Main, 0, 0, 0x140, 0xf0);
-	SetDefDrawEnv((DRAWENV *)&Main.Db[1].Draw, 0, 0xf0, 0x140, 0xf0);
-	SetDefDispEnv((DISPENV *)&Main.Db[0].Disp, 0, 0xf0, 0x140, 0xf0);
-	SetDefDispEnv((DISPENV *)&Main.Db[1].Disp, 0, 0, 0x140, 0xf0);
-	Main.Db[1].Draw.dfe = 1;
-	Main.Db[0].Draw.dfe = 1;
-	Main.Db[1].Draw.dtd = 0;
-	Main.Db[0].Draw.dtd = 0;
+	SetDefDrawEnv((DRAWENV *)pM, 0, 0, 0x140, 0xf0);
+	SetDefDrawEnv((DRAWENV *)&pM->Db[1].Draw, 0, 0xf0, 0x140, 0xf0);
+	SetDefDispEnv((DISPENV *)&pM->Db[0].Disp, 0, 0xf0, 0x140, 0xf0);
+	SetDefDispEnv((DISPENV *)&pM->Db[1].Disp, 0, 0, 0x140, 0xf0);
+	pM->Db[1].Draw.dfe = 1;
+	pM->Db[0].Draw.dfe = 1;
+	pM->Db[1].Draw.dtd = 0;
+	pM->Db[0].Draw.dtd = 0;
 	InitCARD(0);
 	StartCARD();
 	_bu_init();
 	PadInitDirect((char *)G.Padd_data, (char *)G.Padd_data[1]);
 	PadStartCom();
-	SetDrawMode((DR_MODE *)&Main.Db[0].Curtain_Dm, 0, 0, 0xc0, (RECT *)0x0);
-	SetDrawMode((DR_MODE *)&Main.Db[1].Curtain_Dm, 0, 0, 0xc0, (RECT *)0x0);
-	SetDrawMode((DR_MODE *)&Main.Db[0].Pause_Dm, 0, 0, 0x80, (RECT *)0x0);
-	SetDrawMode((DR_MODE *)&Main.Db[1].Pause_Dm, 0, 0, 0x80, (RECT *)0x0);
+	SetDrawMode((DR_MODE *)&pM->Db[0].Curtain_Dm, 0, 0, 0xc0, (RECT *)0x0);
+	SetDrawMode((DR_MODE *)&pM->Db[1].Curtain_Dm, 0, 0, 0xc0, (RECT *)0x0);
+	SetDrawMode((DR_MODE *)&pM->Db[0].Pause_Dm, 0, 0, 0x80, (RECT *)0x0);
+	SetDrawMode((DR_MODE *)&pM->Db[1].Pause_Dm, 0, 0, 0x80, (RECT *)0x0);
 	Init_global();
 	G.Cbuf_id = 0;
 	Volume_Se = 100;
 	Volume_Bgm = 100;
 	G.Sound_mode = 0;
-	Main.Key_idx = 0;
-	Main.Rect.x = 0;
-	Main.Rect.y = 0;
-	Main.Rect.w = 0x140;
-	Main.Rect.h = 0xf0;
+	pM->Key_idx = 0;
+	pM->Rect.x = 0;
+	pM->Rect.y = 0;
+	pM->Rect.w = 0x140;
+	pM->Rect.h = 0xf0;
 	Moji_init();
 	Trans_work_init();
 	Line_work_init();
@@ -253,7 +290,8 @@ void InitGeom_func(void)
 void Init_main(void)
 {
 	TILE *p;
-	TILE *pCurtain;
+	/* volatile: keeps pCurtain in a stack slot (retail spills it at 0x10(sp)) so the frame matches retail at 64 bytes. */
+	TILE * volatile pCurtain;
 	int r;
 	int i;
 
@@ -271,9 +309,9 @@ void Init_main(void)
 			p->h = 0xf0;
 			SetTile(p);
 			SetSemiTrans(p, 1);
-			p->r0 = 0;
-			p->g0 = 0;
-			p->b0 = 0;
+			Main.Fade[r].T[i].r0 = 0;
+			Main.Fade[r].T[i].g0 = 0;
+			Main.Fade[r].T[i].b0 = 0;
 		}
 	}
 	Task_sleep(1);
@@ -308,12 +346,19 @@ void Init_main(void)
 
 /* 8002b968 */
 /* DS 0x8002b968 (Swap_Cbuff) */
+/* DS stack frame: 0x38 bytes. s0..s5 are saved at sp+0x18..sp+0x2c and ra at sp+0x30. No local variable lives in
+ * the frame: sp+0x10 only carries the fifth argument (the height 0xf0) of the seven SetDefDrawEnv and
+ * SetDefDispEnv calls. */
 void Swap_Cbuff(void)
 {
+	register tagMAIN *pMain;
+	register tagGLOBAL *pG;
 	int y;
 	ULONG *pScrl_a;
 	ULONG *pScrl_b;
 
+	pMain = &Main;
+	pG = &G;
 	DrawSync(0);
 	VSync((UINT)Main.Vloop);
 	Snd_se_call();
@@ -325,66 +370,67 @@ void Swap_Cbuff(void)
 	if ((G.System_flg & SYS_STR_MOVIE) != 0) {
 		Movie();
 	}
-	if (Main.Bg_mode == 0) {
-		if (Main.Bg_chg_flg == 0) {
-			if ((G.Scrl_flg & 1U) == 0) {
-				pScrl_a = Bg_img_buf;
-				pScrl_b = (G.pRoom)->pScrl;
-			} else {
-				pScrl_a = (G.pRoom)->pScrl;
-				pScrl_b = Bg_img_buf;
-			}
-			if (Main.Scrl_type != 0) {
-				pScrl_a += 5;
-			}
-			if (Scrl_ofs != 0) {
-				Rect[0].h = ((Main.pDb)->Draw).ofs[1];
-				Rect[1].y = (short)Scrl_ofs;
-				LoadImage((RECT *)&Rect[0].w, pScrl_a);
-			}
-			Rect[1].y = G.Scrl_y;
-			Rect[0].h = ((Main.pDb)->Draw).ofs[1] + (short)Scrl_ofs;
-			LoadImage((RECT *)&Rect[0].w, pScrl_b + ((Scrl_ofs + Scrl_h) - (int)G.Scrl_y) * 0xa0);
-			Rect[1].y = (short)Scrl_h - G.Scrl_y;
-			Rect[0].h = G.Scrl_y + ((Main.pDb)->Draw).ofs[1] + (short)Scrl_ofs;
-			LoadImage((RECT *)&Rect[0].w, pScrl_a + Scrl_ofs * 0xa0);
-			if (Scrl_h != 0xf0) {
-				Rect[1].y = 0xf0 - (short)(Scrl_ofs + Scrl_h);
-				Rect[0].h = ((Main.pDb)->Draw).ofs[1] + (short)Scrl_ofs + (short)Scrl_h;
-				LoadImage((RECT *)&Rect[0].w, pScrl_a + (Scrl_ofs + Scrl_h) * 0xa0);
-			}
-		} else {
+	if (pMain->Bg_mode == 0) {
+		if (pMain->Bg_chg_flg != 0) {
 			Bg_draw();
 			G.Status_flg |= 0x100000;
-			if (Main.Db[0].Draw.ofs[1] == 0) {
-				SetDefDrawEnv((DRAWENV *)&Main, 0, 0xf0, 0x140, 0xf0);
-				SetDefDrawEnv((DRAWENV *)&Main.Db[1].Draw, 0, 0, 0x140, 0xf0);
-				SetDefDispEnv((DISPENV *)&Main.Db[0].Disp, 0, 0, 0x140, 0xf0);
-				y = 0xf0;
+			if (pMain->Db[0].Draw.ofs[1] == 0) {
+				SetDefDrawEnv((DRAWENV *)pMain, 0, 0xf0, 0x140, 0xf0);
+				SetDefDrawEnv((DRAWENV *)&pMain->Db[1].Draw, 0, 0, 0x140, 0xf0);
+				SetDefDispEnv((DISPENV *)&pMain->Db[0].Disp, 0, 0, 0x140, 0xf0);
+				SetDefDispEnv((DISPENV *)&pMain->Db[1].Disp, 0, 0xf0, 0x140, 0xf0);
 			} else {
-				SetDefDrawEnv((DRAWENV *)&Main, 0, 0, 0x140, 0xf0);
-				SetDefDrawEnv((DRAWENV *)&Main.Db[1].Draw, 0, 0xf0, 0x140, 0xf0);
-				SetDefDispEnv((DISPENV *)&Main.Db[0].Disp, 0, 0xf0, 0x140, 0xf0);
-				y = 0;
+				SetDefDrawEnv((DRAWENV *)pMain, 0, 0, 0x140, 0xf0);
+				SetDefDrawEnv((DRAWENV *)&pMain->Db[1].Draw, 0, 0xf0, 0x140, 0xf0);
+				SetDefDispEnv((DISPENV *)&pMain->Db[0].Disp, 0, 0xf0, 0x140, 0xf0);
+				SetDefDispEnv((DISPENV *)&pMain->Db[1].Disp, 0, 0, 0x140, 0xf0);
 			}
-			SetDefDispEnv((DISPENV *)&Main.Db[1].Disp, 0, y, 0x140, 0xf0);
-			Main.Db[1].Draw.dfe = 1;
-			Main.Db[0].Draw.dfe = 1;
-			Main.Db[1].Draw.dtd = 0;
-			Main.Db[0].Draw.dtd = 0;
-			if ((G.System_flg & SYS_STR_MOVIE) == 0) goto no_draw;
+			pMain->Db[1].Draw.dfe = 1;
+			pMain->Db[0].Draw.dfe = 1;
+			pMain->Db[1].Draw.dtd = 0;
+			pMain->Db[0].Draw.dtd = 0;
+			if ((G.System_flg & SYS_STR_MOVIE) != 0) goto movie_draw;
+			goto no_draw;
 		}
-	} else if (Main.Bg_mode == 2) {
-		SetTile((TILE *)&(Main.pDb)->Bg_clr);
-		AddPrim(G.pOt2 + 0xf, &(Main.pDb)->Bg_clr);
+		if ((pG->Scrl_flg & 1U) != 0) {
+			pScrl_a = (pG->pRoom)->pScrl;
+			pScrl_b = Bg_img_buf;
+		} else {
+			pScrl_a = Bg_img_buf;
+			pScrl_b = (pG->pRoom)->pScrl;
+		}
+		if (pMain->Scrl_type != 0) {
+			pScrl_a += 5;
+		}
+		if (Scrl_blk.Ofs_y != 0) {
+			Scrl_blk.Rect.y = ((pMain->pDb)->Draw).ofs[1];
+			Scrl_blk.Rect.h = (short)Scrl_blk.Ofs_y;
+			LoadImage((RECT *)&Scrl_blk.Rect, pScrl_a);
+		}
+		Scrl_blk.Rect.y = ((pMain->pDb)->Draw).ofs[1] + (short)Scrl_blk.Ofs_y;
+		Scrl_blk.Rect.h = pG->Scrl_y;
+		LoadImage((RECT *)&Scrl_blk.Rect, pScrl_b + ((Scrl_blk.Ofs_y + Scrl_h) - (int)pG->Scrl_y) * 0xa0);
+		Scrl_blk.Rect.y = pG->Scrl_y + ((pMain->pDb)->Draw).ofs[1] + (short)Scrl_blk.Ofs_y;
+		Scrl_blk.Rect.h = (short)Scrl_h - pG->Scrl_y;
+		LoadImage((RECT *)&Scrl_blk.Rect, pScrl_a + Scrl_blk.Ofs_y * 0xa0);
+		if (Scrl_h != 0xf0) {
+			Scrl_blk.Rect.y = ((pMain->pDb)->Draw).ofs[1] + (short)Scrl_blk.Ofs_y + (short)Scrl_h;
+			Scrl_blk.Rect.h = 0xf0 - (short)(Scrl_blk.Ofs_y + Scrl_h);
+			LoadImage((RECT *)&Scrl_blk.Rect, pScrl_a + (Scrl_blk.Ofs_y + Scrl_h) * 0xa0);
+		}
 	}
-	DrawOTag(G.pOt2 + 0xf);
-	DrawOTag(G.pOt1 + 0x3ff);
-	DrawOTag(G.pOt0 + 7);
+	if (pMain->Bg_mode == 2) {
+		SetTile((TILE *)&(pMain->pDb)->Bg_clr);
+		AddPrim(pG->pOt2 + 0xf, &(pMain->pDb)->Bg_clr);
+	}
+movie_draw:
+	DrawOTag(pG->pOt2 + 0xf);
+	DrawOTag(pG->pOt1 + 0x3ff);
+	DrawOTag(pG->pOt0 + 7);
 no_draw:
-	G.Cbuf_id ^= 1;
+	pG->Cbuf_id ^= 1;
 	if ((G.System_flg & SYS_STR_MOVIE) == 0) {
-		Main.Bg_chg_flg = 0;
+		pMain->Bg_chg_flg = 0;
 	}
 }
 
@@ -395,18 +441,16 @@ void Bg_set_mode(ULONG Mode, ULONG Rgb)
 	tagMAIN *pMain;
 	UINT i;
 
+	/* pMain is loaded before the Bg_mode store: the store then addresses Main directly (lui at, sb) as in DS, and the loop indexes Db[i] from pMain (displacements 0x8c/0x90/0x94, pointer advanced by sizeof(DBUF) in the branch delay slot). */
+	pMain = &Main;
 	Main.Bg_mode = (UCHAR)Mode;
 	if (Mode == 2) {
-		i = 0;
-		pMain = &Main;
-		do {
+		for (i = 0; i < 2; i++) {
 			/* DS fills the TILE with three word stores: r0/g0/b0/code, x0/y0, w/h. */
-			*(ULONG *)&pMain->Db[0].Bg_clr.r0 = Rgb;
-			*(ULONG *)&pMain->Db[0].Bg_clr.x0 = 0;
-			*(ULONG *)&pMain->Db[0].Bg_clr.w  = 0xf00140;
-			i++;
-			pMain = (tagMAIN *)&pMain->Db[1];
-		} while (i < 2);
+			*(ULONG *)&pMain->Db[i].Bg_clr.r0 = Rgb;
+			*(ULONG *)&pMain->Db[i].Bg_clr.x0 = 0;
+			*(ULONG *)&pMain->Db[i].Bg_clr.w  = 0xf00140;
+		}
 	}
 }
 
@@ -414,8 +458,9 @@ void Bg_set_mode(ULONG Mode, ULONG Rgb)
 /* DS 0x8002bdf4 (Bg_draw) */
 void Bg_draw(void)
 {
-	UCHAR pad_save0;
-	UCHAR pad_save1;
+	/* volatile: pad_save0 and pad_save1 live on the stack across the calls, as in retail (0x10 and 0x11(sp)). */
+	volatile UCHAR pad_save0;
+	volatile UCHAR pad_save1;
 	USHORT *pBs_size;
 	USHORT ctpage_save;
 	int done;
@@ -490,6 +535,8 @@ void Bg_draw(void)
 
 /* 8002c1a0 */
 /* DS 0x8002c1a0 (Fade_set) */
+/* DS stack frame: 0x28 bytes. s0 and s1 are saved at sp+0x18 and sp+0x1c and ra at sp+0x20. sp+0x10 carries the
+ * fifth argument of the two SetDrawMode calls (the null RECT pointer); there is no other stack local. */
 void Fade_set(USHORT A0, short Add, ULONG Mask, ULONG Pri)
 {
 	FADE    *pF;
@@ -551,7 +598,7 @@ void Fade_adjust(ULONG No, ULONG Kido, ULONG Rgb, RECT *Rect)
 /* DS 0x8002c324 (Fade_off) */
 void Fade_off(ULONG No)
 {
-	*(USHORT *)&Main.Fade[No].Kido = 0xffff;
+	*(SHORT *)&Main.Fade[No].Kido = -1;
 }
 
 /* 8002c350 */
@@ -572,43 +619,40 @@ void System_trans(void)
 	UCHAR ot_idx;
 	UINT cb;
 	FADE *pF;
-	UCHAR *pPri;
 	int i;
 
 	pF = Main.Fade;
 	i = 4;
-	pPri = &Main.Fade[0].Pri;
 	do {
 		kido_hi = (UINT)(USHORT)pF->Kido << 0x10;
 		if (-1 < kido_hi) {
 			mask = (UCHAR)(kido_hi >> 0x17);
-			pF->T[G.Cbuf_id].r0 = pPri[-3] & mask;
-			pF->T[G.Cbuf_id].g0 = pPri[-2] & mask;
-			pF->T[G.Cbuf_id].b0 = pPri[-1] & mask;
-			pF->Kido = pF->Kido + *(short *)(pPri - 6);
+			pF->T[G.Cbuf_id].r0 = pF->Mask_r & mask;
+			pF->T[G.Cbuf_id].g0 = pF->Mask_g & mask;
+			pF->T[G.Cbuf_id].b0 = pF->Mask_b & mask;
+			pF->Kido = pF->Kido + pF->Add;
 			*(ULONG *)&pF->T[G.Cbuf_id].x0 = *(ULONG *)&pF->Rect;
 			*(ULONG *)&pF->T[G.Cbuf_id].w = *(ULONG *)&pF->Rect.w;
 			if (i < 2) {
-				AddPrim(G.pOt2 + *pPri, (void *)&pF->T[G.Cbuf_id]);
-				ot_idx = *pPri;
+				AddPrim(G.pOt2 + pF->Pri, (void *)&pF->T[G.Cbuf_id]);
+				ot_idx = pF->Pri;
 				pOt = G.pOt2;
 			} else {
-				AddPrim(G.pOt0 + *pPri, (void *)&pF->T[G.Cbuf_id]);
-				ot_idx = *pPri;
+				AddPrim(G.pOt0 + pF->Pri, (void *)&pF->T[G.Cbuf_id]);
+				ot_idx = pF->Pri;
 				pOt = G.pOt0;
 			}
 			AddPrim(pOt + ot_idx, (void *)&pF->Dr_mode[G.Cbuf_id]);
 		}
-		pPri = pPri + sizeof(FADE);
 		i = i + -1;
 		pF++;
 	} while (0 < i);
-	if ((G.Status_flg & STAT_CINESCO) == 0) {
-		if (0xf < Main.Curtain_kido) {
-			Main.Curtain_kido += 0xf0;
+	if ((G.Status_flg & STAT_CINESCO) != 0) {
+		if (Main.Curtain_kido < 0xf0) {
+			Main.Curtain_kido += 16;
 		}
-	} else if (Main.Curtain_kido < 0xf0) {
-		Main.Curtain_kido += 16;
+	} else if (0xf < Main.Curtain_kido) {
+		Main.Curtain_kido -= 16;
 	}
 	curtain_kido8 = Main.Curtain_kido;
 	cb = (UINT)G.Cbuf_id;
@@ -630,20 +674,16 @@ void System_trans(void)
 void Init_global(void)
 {
 	Memclr(&G.Status_flg, 0x1419);
+	/* Every fade level starts at Kido -1; retail loads -1 once into v0 and stores it to the four Fade Kido halves, Cut_no_old and Room_no_old */
 	Main.Fade[0].Kido = -1;
-	*(USHORT *)&Main.Fade[1].Kido = 0xffff;
-	*(USHORT *)&Main.Fade[2].Kido = 0xffff;
-	*(USHORT *)&Main.Fade[3].Kido = 0xffff;
+	Main.Fade[1].Kido = -1;
+	Main.Fade[2].Kido = -1;
+	Main.Fade[3].Kido = -1;
 	G.SaveData.Cut_no_old = -1;
 	G.SaveData.Room_no_old = -1;
-	G.Padd_data[0][0] = 0;
-	G.Padd_data[0][1] = 0;
-	G.Padd_data[0][2] = 0xff;
-	G.Padd_data[0][3] = 0xff;
-	G.Padd_data[1][0] = 0;
-	G.Padd_data[1][1] = 0;
-	G.Padd_data[1][2] = 0xff;
-	G.Padd_data[1][3] = 0xff;
+	/* Each pad table row is {0, 0, 0xff, 0xff}: one word store per row, as in retail */
+	*(ULONG *)&G.Padd_data[0][0] = 0xffff0000;
+	*(ULONG *)&G.Padd_data[1][0] = 0xffff0000;
 	Moji.Mess_flg = 0;
 	G.System_flg &= (SYS_EX_BATTLE | SYS_TIMER | SYS_TOFU_SURVIVOR | 0x8d0);
 	G.SaveData.Key_idx = Main.Key_idx;
@@ -667,9 +707,7 @@ ULONG Cut_check(ULONG Flg)
 		pVcut = pG->Cccut_next;
 		do {
 			cp = pVcut + 1;
-			if ((cp->Be_flg != 0) &&
-			   (((pFcut[-1] == 0xff || (pFcut[-1] == pG->Player.nFloor)) &&
-				(hit_flg = Hit_ck_point4((VECTOR *)&pG->Player.Pos_x, cp), hit_flg != 0)))) {
+			if ((cp->Be_flg != 0) && (((pFcut[-1] == 0xff || (pFcut[-1] == pG->Player.nFloor)) && (hit_flg = Hit_ck_point4((VECTOR *)&pG->Player.Pos_x, cp), hit_flg != 0)))) {
 				next_cut = cp->Tcut;
 				goto apply_cut;
 			}
@@ -699,13 +737,10 @@ void Cut_change(ULONG Fc)
 /* DS 0x8002c7dc (Ccut_search) */
 VCUT *Ccut_search(ULONG Fc)
 {
-	UCHAR Fcut;
 	VCUT *pCcut;
 
-	Fcut = (G.pRoom)->pVcut->Fcut;
 	pCcut = (G.pRoom)->pVcut;
-	while (Fcut != Fc) {
-		Fcut = pCcut[1].Fcut;
+	while (pCcut->Fcut != Fc) {
 		pCcut++;
 	}
 	return pCcut;
@@ -738,8 +773,7 @@ ULONG Hit_ck_point4(VECTOR *p, VCUT *cp)
 		}
 		y = cp->Xz[2][1] - y;
 		x = cp->Xz[2][0] - x;
-		if (((d - y) * (c - x) <= (b - x) * (a - y)) &&
-		   ((e - x) * (a - y) <= (f - y) * (c - x))) {
+		if (((d - y) * (c - x) <= (b - x) * (a - y)) && ((e - x) * (a - y) <= (f - y) * (c - x))) {
 			return 1;
 		}
 	}
@@ -752,10 +786,14 @@ ULONG Hit_ck_box(VECTOR *p, BOX *q)
 {
 	ULONG hit_flg;
 
-	hit_flg = 0;
-	if (((UINT)(p->vx - (int)q->X) <= (UINT)q->W) &&
-	   (hit_flg = 0, (UINT)(p->vz - (int)q->Z) <= (UINT)q->D)) {
-		hit_flg = 1;
+	if ((UINT)(p->vx - (int)q->X) > (UINT)q->W) {
+		hit_flg = 0;
+	} else {
+		if ((UINT)(p->vz - (int)q->Z) > (UINT)q->D) {
+			hit_flg = 0;
+		} else {
+			hit_flg = 1;
+		}
 	}
 	return hit_flg;
 }
@@ -788,7 +826,7 @@ void Logo(void)
 {
 	Main.Scrl_type = 1;
 	Bg_set_mode(0, 0);
-	Cd_read(GWARNING_TIM, Bg_img_buf, 0, (UCHAR *)"Warning");
+	Cd_read(GWARNING_TIM, (unsigned long *)0x80198000, 0, (UCHAR *)"Warning");	/* Bg_img_buf (DS 0x80198000) */
 	Fade_set(0x200, -0x400, 7, 0);
 	while (Fade_status(0) == 0) {
 		Task_sleep(1);
@@ -807,12 +845,6 @@ void Logo(void)
 	Task_exit();
 }
 
-/* DS 0x8009dbac (Curtain) */
-TILE Curtain[2][2] = {
-	{ { 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x0000, 0x0140, 0x0018 }, { 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x0000, 0x0140, 0x0018 } },
-	{ { 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x00d8, 0x0140, 0x0018 }, { 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x00d8, 0x0140, 0x0018 } }
-};
-
 /* DS 0x8009dbec (Pause) */
 TILE Pause[2] = {
 	{ 0x00000000, 0x00, 0x00, 0x00, 0x00, 0x0000, 0x0000, 0x0140, 0x00f0 },
@@ -822,32 +854,32 @@ TILE Pause[2] = {
 /* DS 0x8009dc0c (Scrl_h) */
 LONG Scrl_h = 0x000000f0;
 
-/* DS 0x8009db64 (LIGHTMATRIX) */
-MATRIX LIGHTMATRIX;
+/* DS 0x8009dc10 (Scrl_blk) */
+tagSCRL_BLK Scrl_blk = { 0, { 0x0000, 0x0000, 0x0140, 0x00f0 }, 0 };
 
-/* DS 0x8009db84 (COLORMATRIX) */
-MATRIX COLORMATRIX;
+/* DS 0x8009dc20 (Rect_bg) */
+RECT Rect_bg = { 0x0000, 0x0000, 0x0010, 0x00f0 };
 
 /* DS 0x800cc1e8 (G) */
 tagGLOBAL G;
 
 /* DS 0x800d7698 (Ev0) */
-ULONG Ev0 = 0;
+ULONG Ev0;
 
 /* DS 0x800d7828 (Ev1) */
-ULONG Ev1 = 0;
+ULONG Ev1;
 
 /* DS 0x800d782c (Ev2) */
-ULONG Ev2 = 0;
+ULONG Ev2;
 
 /* DS 0x800d7830 (Ev3) */
-ULONG Ev3 = 0;
+ULONG Ev3;
 
 /* DS 0x800d8cd4 (Ev10) */
-ULONG Ev10 = 0;
+ULONG Ev10;
 
 /* DS 0x800d8cdc (Ev11) */
-ULONG Ev11 = 0;
+ULONG Ev11;
 
 /* DS 0x800d8ce0 (Ev13) */
-ULONG Ev13 = 0;
+ULONG Ev13;

@@ -12,8 +12,8 @@
 
 /* ---- types migrated from data.h ---- */
 struct tagATTACK_WEAPON_EM {
-	ULONG Damage;
-	ULONG SubDamage;
+	ULONG Damage;		/* three 10-bit damage values at bit n * 10; value n applies when attack box n of the weapon (ATTACK_WORK3 Off0_x..Off2_x, box 0 nearest) hit */
+	ULONG SubDamage;	/* three 3-bit part damage values at bit n * 3, and three 7-bit Damage_cnt values at bit 9 + n * 7; n is the attack box as for Damage */
 	SHORT Jyo_ue;
 	SHORT Jyo_ge;
 	SHORT Tyu_ue;
@@ -59,24 +59,11 @@ extern UCHAR Pl_vib_tbl[18][6];	/* DS 0x800a6ed0, row (Type & 0xfff) - 2 */
 /* partial-field access at byte offset 'off' (decompiler _N_M_ form) */
 #define PL_AT(T, p, off)	(*(T *)((char *)(p) + (off)))
 typedef void (*PL_WEP_FN)(ENEMY_WORK *pEm);
-/* Tables already declared in GLOBAL.H (Plw_no, Pl_weapon_kyan, Gun_jtg_bit, W_at_ck,
-   Ghand_len, Mw_ck, Pl_mag, G_rot_data_z, Pl_weapon_tbl) are not repeated here. */
-extern UCHAR  Pl_weapon_at_base[];	/* DS 0x800a68e8, UCHAR base: Type*0x18 + Gun_jtg_bit[..]*8 */
 extern PL_WEP_FN Pl_weapon_init[20];	/* DS 0x800a6d28, index Type & 0xfff */
-extern PL_WEP_FN pl_mv05_w_tbl[19];	/* DS 0x800a6f90, index Type & 0xfff (entry 0 is the word 0x00000002, not a routine) */
-extern PL_WEP_FN pl_mv05_t2_init[];	/* DS 0x800a6f94 base, index (Type & 0xfff) + 0x12 (w0_t2 / w1_t2) */
+extern PL_WEP_FN pl_mv05_t2_init[19];	/* DS 0x800a6f94, index (Type & 0xfff) - 1 */
+extern PL_WEP_FN pl_mv05_t2_spr[19];	/* DS 0x800a6fe0, index (Type & 0xfff) - 1 */
 extern char   s_WEP_DATA_80010fe4[];	/* DS 0x80010fe4, Cd_read file name string */
 
-/* Literal words copied into local structs: 0x80011010.. in pl_mv05_w0_t2 / pl_mv05_w1_t2,
-   0x80011024.. in pl_mv05_w1_t1 */
-extern ULONG  Pl_mvtbl0_w0;	/* DS 0x80011010 */
-extern ULONG  Pl_mvtbl0_w1;	/* DS 0x80011014 */
-extern USHORT Pl_mvtbl0_w2;	/* DS 0x80011018 */
-extern ULONG  Pl_mvtbl1_w0;	/* DS 0x8001101c */
-extern ULONG  Pl_mvtbl1_w1;	/* DS 0x80011020 */
-extern ULONG  Pl_mvtbl2_w0;	/* DS 0x80011024 */
-extern ULONG  Pl_mvtbl2_w1;	/* DS 0x80011028 */
-extern USHORT Pl_mvtbl2_w2;	/* DS 0x8001102c */
 void Pl_view_esp_set(ENEMY_WORK *pEm, PARTS_W *pParts);	/* PLAYER.C 80040350 */
 void Pad_vib_set0(int Time, USHORT Attr);	/* PAD.C 8003947c */
 void Pad_vib_set1(int Time, UCHAR Power, USHORT Attr);	/* PAD.C 80039514 */
@@ -86,11 +73,57 @@ void Pl_weapon_vib(ENEMY_WORK *pEm);
 
 
 /* Globals defined in PL_WEP.C */
+	extern ATTACK_WEAPON_EM Em10_damage_tbl[19];			// 0x800a412c
+	extern ATTACK_WEAPON_EM Em15_damage_tbl[19];			// 0x800a42a8
+	extern ATTACK_WEAPON_EM Em20_damage_tbl[19];			// 0x800a4424
+	extern ATTACK_WEAPON_EM Em21_damage_tbl[19];			// 0x800a45a0
+	extern ATTACK_WEAPON_EM Em22_damage_tbl[19];			// 0x800a471c
+	extern ATTACK_WEAPON_EM Em24_damage_tbl[19];			// 0x800a4898
+	extern ATTACK_WEAPON_EM Em23_damage_tbl[19];			// 0x800a4a14
+	extern ATTACK_WEAPON_EM Em25_damage_tbl[19];			// 0x800a4b90
+	extern ATTACK_WEAPON_EM Em27_damage_tbl[19];			// 0x800a4d0c
+	extern ATTACK_WEAPON_EM Em28_damage_tbl[19];			// 0x800a4e88
+	extern ATTACK_WEAPON_EM Em29_damage_tbl[19];			// 0x800a5004
+	extern ATTACK_WEAPON_EM Em2d_damage_tbl[19];			// 0x800a5180
+	extern ATTACK_WEAPON_EM Em2a_damage_tbl[19];			// 0x800a52fc
+	extern ATTACK_WEAPON_EM Em2b_damage_tbl[19];			// 0x800a5478
+	extern ATTACK_WEAPON_EM Em2e_damage_tbl[19];			// 0x800a55f4
+	extern ATTACK_WEAPON_EM Em30_damage_tbl[19];			// 0x800a5770
+	extern ATTACK_WEAPON_EM Em31_damage_tbl[19];			// 0x800a58ec
+	extern ATTACK_WEAPON_EM Em33_damage_tbl[19];			// 0x800a5a68
+	extern ATTACK_WEAPON_EM Em34_damage_tbl0[19];			// 0x800a5be4
+	extern ATTACK_WEAPON_EM Em34_damage_tbl1[19];			// 0x800a5d60
+	extern ATTACK_WEAPON_EM Em36_damage_tbl[19];			// 0x800a5edc
+	extern ATTACK_WEAPON_EM Em3a_damage_tbl[19];			// 0x800a6058
+	extern ATTACK_WEAPON_EM Em3b_damage_tbl[19];			// 0x800a61d4
+	extern ATTACK_WORK3 PLW00_W[3];						// 0x800a6350
+	extern ATTACK_SEQ PLW00_S[2];						// 0x800a63a4
+	extern ATTACK_WORK3 Pl_w0111[5];					// 0x800a6444
+	extern ATTACK_SEQ Pl_w0111_s1[7];					// 0x800a64d0
+	extern ATTACK_WORK3 PLW02_W[3];						// 0x800a6618
+	extern ATTACK_SEQ PLW02_S[2];						// 0x800a666c
+	extern ATTACK_WORK3 PLW05_W[3];						// 0x800a6670
+	extern ATTACK_SEQ PLW05_S[2];						// 0x800a66c4
+	extern ATTACK_WORK3 PLW13_W[3];						// 0x800a66c8
+	extern ATTACK_SEQ PLW13_S[4];						// 0x800a671c
+	extern ATTACK_WORK3 PLW07_W[3];						// 0x800a6724
+	extern ATTACK_SEQ PLW07_S[7];						// 0x800a6778
+	extern ATTACK_WORK3 PLW08_W[3];						// 0x800a6788
+	extern ATTACK_SEQ PLW08_S[9];						// 0x800a67dc
+	extern ATTACK_WORK3 PLW0E_W[3];						// 0x800a67f0
+	extern ATTACK_SEQ PLW0E_S[2];						// 0x800a6844
+	extern ATTACK_WORK3 PLW0F_W[3];						// 0x800a6848
+	extern ATTACK_SEQ PLW0F_S[3];						// 0x800a689c
+	extern ATTACK_WORK3 PLW12_W[3];						// 0x800a68a4
+	extern ATTACK_SEQ PLW12_S[3];						// 0x800a68f8
+	extern ATTACK_WEAPON_TBL Pl_weapon_tbl[19][3];		// 0x800a6900	// index (Type & 0xfff) - 1, then Gun_jtg_bit[..]
+	extern ATTACK_WEAPON_EM *pEnemy_damage_tbl[48];		// 0x800a6ac8	// index Id - 0x10
 	extern ATTACK_WORK3 Pl_w010[5];						// 0x800a64e0
 	extern USHORT Plw_no[16];							// 0x800a6d08	// PLxxWxx_PLW names (FILECODE.H), by enemy Id
 	extern UCHAR W_at_ck[3][9];							// 0x800a6db4
 	extern SHORT Ghand_len[19][4];						// 0x800a6dd0
 	extern CHAR Mw_ck[16];								// 0x800a6e68
+	extern UCHAR Pl_wep_mag_type[21];					// 0x800a6e78	// magazine kind per weapon, index (Type & 0xfff) - 1
 	extern PL_MAG_TBL Pl_mag[4];						// 0x800a6e90
 	extern SHORT G_rot_data_z[20];						// 0x800a6ea8
 #endif /* PL_WEP_H_H */

@@ -22,6 +22,10 @@ void Pad_vib_fade_set(int Time, int Pow_st, int Pow_ed, USHORT Attr);	/* PAD.C 8
 
 /* --------------------------------------------------------------------------
  *	Prototypes (DS address order)
+ *	Opcode handlers for effects (ESP and 3D sprites), player and enemy control, sound, lights, items,
+ *	screen effects, and vibration. The trailing addresses are the retail SLUS-00748 locations.
+ * ------------------------------------------------------------------------ */
+/* --------------------------------------------------------------------------
  * ------------------------------------------------------------------------ */
 ULONG   Se_on(SCE_TASK *pSce);				/* 80056428 */
 ULONG   Sca_id_set(SCE_TASK *pSce);			/* 8005655c */

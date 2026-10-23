@@ -30,13 +30,10 @@
 #include "TYPES.H"
 #include <GTEMAC.H>
 #include <INLINE_C.H>
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
-#include <MCGUI.H>
 #include <STRINGS.H>
 #include "game.h"
 #include "CD.H"
@@ -48,6 +45,9 @@
 #include "SELECT.H"
 #include "SCE2.H"
 #include "FILECODE.H"
+
+/* DS 0x801fc400: CORE00.ESP load buffer */
+#define ESP_CORE_BUF ((UCHAR *)0x801fc400)
 
 
 /* DS 0x8009d868 */
@@ -81,10 +81,10 @@ VOID *Esp_tblj[96] = {
 /* pEspdt / pEspmv: 64 entries each. Esp_init_C (DS 0x8001bb08-0x8001bb34) clears 0x40 words of
  * each table, counting down from 0x800d4dd8 and 0x800d4f18 (the end of each table). */
 /* DS 0x800d4cd8 */
-ULONG *pEspdt[64] = { 0 };
+ULONG *pEspdt[64];
 
 /* DS 0x800d4e18 */
-ULONG *pEspmv[64] = { 0 };
+ULONG *pEspmv[64];
 
 /* Local to ESP.C (static in the beta ESP.C); declared here because Esp_init_C and Esp_init_R call them first. */
 UCHAR Esp_data_set0(UCHAR *ptr8, ULONG *ptr32, ULONG addr, ULONG type);
@@ -95,16 +95,12 @@ void Esp_data_set1(ULONG *plong, ULONG *ptr);
 ESP_WORK Esp[96];
 
 /* DS 0x800dcbd0 (pESP) */
-ESP_WORK *pESP = 0;
+ESP_WORK *pESP;
 
-/* DS 0x801fc400 (Esp_core_buf) */
-UCHAR Esp_core_buf[0x217C] RAM_SECTION(".buf_esp_core_buf");	/* 0x217C bytes: CD file CORE00_ESP (floc size) */
 
 
 /* DS 0x800eae48 */
-UCHAR Espid[16] = {
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
+UCHAR Espid[16];
 
 /* Dispatch through the routine table (same as ESP_R.H ESP_TBLJ_CALL). */
 #ifndef ESP_TBLJ_CALL
@@ -121,30 +117,33 @@ UCHAR Esp_init_C(void)
 {
 	ULONG D0;
 	UCHAR *pCore_end;
-	int cnt;
+	int cnt0;
+	int cnt1;
 
-	for (cnt = 96; cnt != 0; ) {
-		Esp[--cnt].Be_flg = 0;
+	for (cnt0 = 96; cnt0 != 0; ) {
+		Esp[--cnt0].Be_flg = 0;
 	}
 
-	for (cnt = 15; cnt >= 0; cnt--) {
-		Espid[cnt] = 0xff;
+	for (cnt1 = 16; cnt1 != 0; ) {
+		Espid[--cnt1] = 0xff;
 	}
 
 	/* DS clears all 64 entries of both tables, from the last entry down */
-	for (cnt = 64; cnt != 0; ) {
-		cnt--;
-		pEspdt[cnt] = (ULONG *)0xffffffff;
-		pEspmv[cnt] = (ULONG *)0xffffffff;
+	for (cnt0 = 64; cnt0 != 0; ) {
+		cnt0--;
+		pEspdt[cnt0] = (ULONG *)0xffffffff;
+		pEspmv[cnt0] = (ULONG *)0xffffffff;
 	}
 
-	D0 = Cd_read(CORE00_ESP, (ULONG *)Esp_core_buf, 1, (UCHAR *)"CORE00.ESP");
-	pCore_end = Esp_core_buf + (D0 & 0xfffffffc);
+	/* Cd_read returns the byte count; the end pointer is rounded up to a whole word, and the
+	 * table walk in Esp_data_set0 starts at the last word and goes backward. */
+	D0 = Cd_read(CORE00_ESP, (ULONG *)ESP_CORE_BUF, 1, (UCHAR *)"CORE00.ESP");
+	pCore_end = ESP_CORE_BUF + ((D0 >> 2) << 2);
 	if ((D0 & 3) != 0) {
 		pCore_end += 4;
 	}
 
-	return Esp_data_set0(Esp_core_buf, (ULONG *)(pCore_end + -4), (ULONG)Esp_core_buf, 0);
+	return Esp_data_set0(ESP_CORE_BUF, (ULONG *)(pCore_end + -4), (ULONG)ESP_CORE_BUF, 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -158,11 +157,13 @@ UCHAR Esp_init_R(void)
 	UCHAR cnt0;
 	UINT cnt1;
 	UCHAR Ret;
-	int idx;
 	ULONG *ptr8;
 
-	for (idx = 0; idx < 96; idx++) {
-		Esp[idx].Be_flg = 0;
+	/* DS clears Be_flg of all 96 Esp entries from the last one down, counting in the same register
+	 * (a0) that the Espid walk below reuses, so one counter serves both loops. */
+	for (cnt1 = 96; cnt1 != 0; ) {
+		cnt1--;
+		Esp[cnt1].Be_flg = 0;
 	}
 
 	cnt1 = 8;
@@ -179,23 +180,15 @@ UCHAR Esp_init_R(void)
 		Ret = cnt1 < 0x10;
 	} while ((BOOL)Ret);
 
+	/* Load the room ESP tables only when the room has a head (pEsp_hed != 0) and its first word is not
+	 * the -1 end mark. DS has no return statement here: v0 is whatever is left in it (0 from the loop
+	 * test when the head is 0, -1 when the first word is -1, otherwise what Esp_data_set1 leaves).
+	 * The only caller (ROOM.C) discards the value. */
 	ptr8 = (G.pRoom)->pEsp_hed;
-	if (ptr8 == (ULONG *)0x0) {
-		return 0;
+	if (ptr8 != (ULONG *)0x0 && *ptr8 != 0xffffffff) {
+		Esp_data_set0((UCHAR *)ptr8, (G.pRoom)->pEsp_end, (ULONG)ptr8, 8);
+		Esp_data_set1((G.pRoom)->pEsp_tim_end, (G.pRoom)->pEsp_tim);
 	}
-	if (*ptr8 == 0xffffffff) {
-		return 0xff;
-	}
-	Esp_data_set0((UCHAR *)ptr8, (G.pRoom)->pEsp_end, (ULONG)ptr8, 8);
-	Esp_data_set1((G.pRoom)->pEsp_tim_end, (G.pRoom)->pEsp_tim);
-	/* Return: retail returns 0 on this path (the loop exit in Esp_data_set1 leaves v0 = 0) and 0xff
-	 * only when the head is -1. The slot-index value below is this port's choice, not retail's; the
-	 * only caller (ROOM.C) discards it. */
-	cnt1 = 0;
-	while (cnt1 < 8 && Espid[8 + cnt1] != 0xff) {
-		cnt1++;
-	}
-	return (cnt1 < 8) ? (UCHAR)(cnt1 * 4) : 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -211,20 +204,24 @@ UCHAR Esp_data_set0(UCHAR *ptr8, ULONG *ptr32, ULONG addr, ULONG type)
 	ULONG *addres;
 	UINT id;
 	UINT cnt0;
+	UINT nwords;
 
-	cnt0 = 0;
-	do {
+	/* Each pass reads one id byte from the list at ptr8 (0xff ends it), records it in Espid, and
+	 * stores the entry's data and move pointers at pEspdt[id] / pEspmv[id], relative to addr. */
+	for (cnt0 = 0; cnt0 < 8; cnt0++) {
 		id = (UINT)*ptr8;
 		Espid[cnt0 + type] = *ptr8;
-		if (id == 0xff) break;
+		if (id == 0xff) {
+			break;
+		}
 		D0 = *ptr32;
 		ptr32 = ptr32 + -1;
 		ptr8++;
-		cnt0++;
 		addres = (ULONG *)(D0 + addr);
 		pEspdt[id] = addres;
-		pEspmv[id] = addres + (*addres & 0xffff) * 2 + (*addres >> 0x10) + 2;
-	} while (cnt0 < 8);
+		nwords = (*addres >> 0x10) + (*addres & 0xffff) * 2 + 2;
+		pEspmv[id] = addres + nwords;
+	}
 
 	return (UCHAR)cnt0;
 }
@@ -260,8 +257,6 @@ void Esp_data_set1(ULONG *plong, ULONG *ptr)
 	TIM_IMAGE Tim;
 	RECT *pTimadr[8];
 	UINT D0;
-	UINT D1;
-	int yPacked;
 	char *pVcoord;
 	UINT cnt;
 	UCHAR *pSlot;
@@ -278,19 +273,18 @@ void Esp_data_set1(ULONG *plong, ULONG *ptr)
 	vramy = 0;
 	cluty = 0x1e0;
 	pSlot = Espid + 8;
-	for (D1 = 0; D1 < 8; D1++) {
+	for (D0 = 0; D0 < 8; D0++) {
 		if (*pSlot == 0xff) {
 			return;
 		}
-		OpenTIM((ULONG *)pTimadr[D1]);
+		OpenTIM((ULONG *)pTimadr[D0]);
 		ReadTIM(&Tim);
-		yPacked = vramy << 0x10;
+		/* when this TIM would run past the 256-line column, start the next column to the left */
 		if (0x100 < (UINT)(vramy + (Tim.prect)->h)) {
 			colSlot = colSlot + -1;
 			vramy = 0;
-			yPacked = 0;
 		}
-		*(int *)Tim.prect = yPacked + colSlot * 0x40;
+		*(int *)Tim.prect = (vramy << 0x10) + colSlot * 0x40;
 		LoadImage(Tim.prect, Tim.paddr);
 		DrawSync(0);
 		if (Tim.caddr != (ULONG *)0x0) {
@@ -323,12 +317,14 @@ void Esp_data_set1(ULONG *plong, ULONG *ptr)
 /*            bit = Id << 24 | Type << 16 | Mag                         */
 /* ------------------------------------------------------------------ */
 /* DS writes ESP_WORK with word stores and word copies; ESP_WORD() views the named member and the next one as one
- * ULONG (the DS stores Id/Id2/Type/Mov_cnt, Mov_x/Mov_y, Hot_x/Hot_y ... as single sw). ESP_MSEQ_W is the 24-byte
- * MSEQUENCE copied as six words (DS reloads pMoveseq for every word), ESP_BODY_W the part of ESP_WORK after the
- * MSEQUENCE (Be_flg on), copied as one 0x64-byte block when a child is made from its parent. */
+ * ULONG (the DS stores Id/Id2/Type/Mov_cnt, Mov_x/Mov_y, Hot_x/Hot_y ... as single sw). ESP_BODY_W is the part of
+ * ESP_WORK after the MSEQUENCE (Be_flg on); assigning it copies the 0x64 bytes as one block, which is how a child
+ * slot is made from its parent. The MATRIX at ESP_WORK+0x4c (m and t) is likewise copied by structure assignment. */
 #define ESP_WORD(m) (*(ULONG *)&(m))
-typedef struct { ULONG w[sizeof(MSEQUENCE) / 4]; } ESP_MSEQ_W;
 typedef struct { ULONG w[(sizeof(ESP_WORK) - sizeof(MSEQUENCE)) / 4]; } ESP_BODY_W;
+
+/* Copies the 24-byte move entry at pMoveseq into the slot word by word; DS reloads pMoveseq for every word. */
+#define ESP_MSEQ_COPY(e) do { ((ULONG *)(e))[0] = ((ULONG *)(e)->pMoveseq)[0]; ((ULONG *)(e))[1] = ((ULONG *)(e)->pMoveseq)[1]; ((ULONG *)(e))[2] = ((ULONG *)(e)->pMoveseq)[2]; ((ULONG *)(e))[3] = ((ULONG *)(e)->pMoveseq)[3]; ((ULONG *)(e))[4] = ((ULONG *)(e)->pMoveseq)[4]; ((ULONG *)(e))[5] = ((ULONG *)(e)->pMoveseq)[5]; } while (0)
 
 /* DS 0x8001bf10 (Esp_call) */
 UCHAR Esp_call(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec)
@@ -338,31 +334,33 @@ UCHAR Esp_call(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec)
 	ULONG *pData;
 	ULONG *pMove;
 	ULONG nseq;
-	ULONG ndat;
+	ULONG sprg_ofs;
 	ESP_WORK *pParent;
 	ESP_WORK *pChild;
 	ULONG *pGrp;
 	LONG slot;
-	LONG cur;
-	ULONG rem;
+	LONG n;
 	ULONG j;
 
 	pData = pEspdt[id];
-	pMove = (ULONG *)((UCHAR *)pEspmv[id] + 4 * (*(USHORT *)((UCHAR *)pEspmv[id] + 2 * (tp & 7))));
+	pMove = pEspmv[id];
+	pMove = (ULONG *)((UCHAR *)pMove + 4 * (*(USHORT *)((UCHAR *)pMove + 2 * (tp & 7))));
 	nseq = *pMove & 0xffff;
 	pMove = pMove + 1;				/* DS steps past the group count word at once */
-	ndat = *pData & 0xffff;
+	sprg_ofs = (*pData & 0xffff) * 4 + 4;	/* the sprite group list follows the header at pData + sprg_ofs halfwords */
 
-	/* DS counts the free-slot search down from 96 and stops at the first free one. */
-	slot = 96;
-	while (Esp[--slot].Be_flg != 0) {
-		if (slot == 0) {
-			return 0xff;
+	/* Free-slot search from the top: n counts down from 96 and the first slot with Be_flg 0 is taken (0xff when none). */
+	n = 96;
+	while (n != 0) {
+		n--;
+		if (Esp[n].Be_flg == 0) {
+			goto found;
 		}
 	}
-
+	return 0xff;
+found:
+	slot = n;
 	pParent = &Esp[slot];
-	cur = slot;
 	pParent->Be_flg = 0xa003;
 	pParent->Wk_no = 0;
 	pParent->Padd0 = 0;
@@ -388,36 +386,35 @@ UCHAR Esp_call(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec)
 	*(MATRIX *)pParent->m = *pmat;
 	pParent->pMat = pmat;
 	pParent->pAnmseq = (SSEQUENCE *)((ESP_DATA_HDR *)pData)->Anmseq;
-	pParent->pSprg = (SPRITEGp *)(pData + ndat * 2 + 2);
+	pParent->pSprg = (SPRITEGp *)((UCHAR *)pData + sprg_ofs * 2);
 	pParent->pMoveseq = (MSEQUENCE *)(pMove + 1);
-	*(ESP_MSEQ_W *)pParent = *(ESP_MSEQ_W *)pParent->pMoveseq;
+	ESP_MSEQ_COPY(pParent);
 
-	/* Children: one per remaining move group, placed downward from the parent. */
-	if (nseq - 1 != 0) {
-		rem = nseq - 1;
+	/* Children: one per remaining move group; the free-slot search continues downward from the parent's slot (0xfe when
+	 * the pool runs out). Be_flg and Padd0 are stored first and overwritten by the body copy, as in DS. */
+	while (--nseq != 0) {
+		while (n != 0) {
+			n--;
+			if (Esp[n].Be_flg == 0) {
+				goto found_child;
+			}
+		}
+		return 0xfe;
+found_child:
+		pChild = &Esp[n];
+		pChild->Be_flg = 0xa003;
+		pChild->Padd0 = 0;
+		*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&Esp[slot].Be_flg;
+		pChild->Wk_no = (UCHAR)slot;
+		pGrp = pMove;
+		j = nseq;
 		do {
-			/* free-slot search continues downward from the last slot used */
-			do {
-				if (cur == 0) {
-					return 0xfe;
-				}
-			} while (Esp[--cur].Be_flg != 0);
-			pChild = &Esp[cur];
-			pChild->Be_flg = 0xa003;	/* dead stores: DS performs them before the body copy */
-			pChild->Padd0 = 0;
-			*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&pParent->Be_flg;
-			pChild->Wk_no = (UCHAR)slot;
-			/* Skip rem groups from the first group header (pMove). */
-			pGrp = pMove;
-			j = rem;
-			do {
-				j--;
-				pGrp = pGrp + (*pGrp & 0xffff) * 6 + 1;
-			} while (j != 0);
-			pChild->pMoveseq = (MSEQUENCE *)(pGrp + 1);
-			*(ESP_MSEQ_W *)pChild = *(ESP_MSEQ_W *)pChild->pMoveseq;
-			rem--;
-		} while (rem != 0);
+			j--;
+			pGrp += (*pGrp & 0xffff) * 6 + 1;
+		} while (j != 0);
+		pGrp++;
+		pChild->pMoveseq = (MSEQUENCE *)pGrp;
+		ESP_MSEQ_COPY(pChild);
 	}
 	return (UCHAR)slot;
 }
@@ -433,31 +430,33 @@ UCHAR Esp_call3D(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec, SVECTOR *ds
 	ULONG *pData;
 	ULONG *pMove;
 	ULONG nseq;
-	ULONG ndat;
+	ULONG sprg_ofs;
 	ESP_WORK *pParent;
 	ESP_WORK *pChild;
 	ULONG *pGrp;
 	LONG slot;
-	LONG cur;
-	ULONG rem;
+	LONG n;
 	ULONG j;
 
 	pData = pEspdt[id];
-	pMove = (ULONG *)((UCHAR *)pEspmv[id] + 4 * (*(USHORT *)((UCHAR *)pEspmv[id] + 2 * (tp & 7))));
+	pMove = pEspmv[id];
+	pMove = (ULONG *)((UCHAR *)pMove + 4 * (*(USHORT *)((UCHAR *)pMove + 2 * (tp & 7))));
 	nseq = *pMove & 0xffff;
 	pMove = pMove + 1;				/* DS steps past the group count word at once */
-	ndat = *pData & 0xffff;
+	sprg_ofs = (*pData & 0xffff) * 4 + 4;	/* the sprite group list follows the header at pData + sprg_ofs halfwords */
 
-	/* DS counts the free-slot search down from 96 and stops at the first free one. */
-	slot = 96;
-	while (Esp[--slot].Be_flg != 0) {
-		if (slot == 0) {
-			return 0xff;
+	/* Free-slot search from the top: n counts down from 96 and the first slot with Be_flg 0 is taken (0xff when none). */
+	n = 96;
+	while (n != 0) {
+		n--;
+		if (Esp[n].Be_flg == 0) {
+			goto found;
 		}
 	}
-
+	return 0xff;
+found:
+	slot = n;
 	pParent = &Esp[slot];
-	cur = slot;
 	pParent->Be_flg = 0xa003;
 	pParent->Wk_no = 0;
 	pParent->Padd0 = 0;
@@ -483,38 +482,39 @@ UCHAR Esp_call3D(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec, SVECTOR *ds
 	*(MATRIX *)pParent->m = *pmat;
 	pParent->pMat = pmat;
 	pParent->pAnmseq = (SSEQUENCE *)((ESP_DATA_HDR *)pData)->Anmseq;
-	pParent->pSprg = (SPRITEGp *)(pData + ndat * 2 + 2);
+	pParent->pSprg = (SPRITEGp *)((UCHAR *)pData + sprg_ofs * 2);
 	pParent->pMoveseq = (MSEQUENCE *)(pMove + 1);
-	*(ESP_MSEQ_W *)pParent = *(ESP_MSEQ_W *)pParent->pMoveseq;
-	ESP_WORD(pParent->Cdir_x) = ((ULONG *)dsv)[0];	/* Cdir_x, Cdir_y */
-	pParent->Cdir_z = dsv->vz;
+	ESP_MSEQ_COPY(pParent);
+	ESP_WORD(pParent->Cdir_x) = *(ULONG *)dsv;
+	pParent->Cdir_z = ((USHORT *)dsv)[2];
 
-	/* Children: one per remaining move group, placed downward from the parent. */
-	if (nseq - 1 != 0) {
-		rem = nseq - 1;
+	/* Children: one per remaining move group; the free-slot search continues downward from the parent's slot (0xfe when
+	 * the pool runs out). Be_flg and Padd0 are stored first and overwritten by the body copy, as in DS. */
+	while (--nseq != 0) {
+		while (n != 0) {
+			n--;
+			if (Esp[n].Be_flg == 0) {
+				goto found_child;
+			}
+		}
+		return 0xfe;
+found_child:
+		pChild = &Esp[n];
+		pChild->Be_flg = 0xa003;
+		pChild->Padd0 = 0;
+		*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&Esp[slot].Be_flg;
+		pChild->Wk_no = (UCHAR)slot;
+		pGrp = pMove;
+		j = nseq;
 		do {
-			/* free-slot search continues downward from the last slot used */
-			do {
-				if (cur == 0) {
-					return 0xfe;
-				}
-			} while (Esp[--cur].Be_flg != 0);
-			pChild = &Esp[cur];
-			pChild->Be_flg = 0xa003;	/* dead stores: DS performs them before the body copy */
-			pChild->Padd0 = 0;
-			*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&pParent->Be_flg;
-			pChild->Wk_no = (UCHAR)slot;
-			/* Skip rem groups from the first group header (pMove). */
-			pGrp = pMove;
-			j = rem;
-			do {
-				j--;
-				pGrp = pGrp + (*pGrp & 0xffff) * 6 + 1;
-			} while (j != 0);
-			pChild->pMoveseq = (MSEQUENCE *)(pGrp + 1);
-			*(ESP_MSEQ_W *)pChild = *(ESP_MSEQ_W *)pChild->pMoveseq;
-			rem--;
-		} while (rem != 0);
+			j--;
+			pGrp += (*pGrp & 0xffff) * 6 + 1;
+		} while (j != 0);
+		pGrp++;
+		pChild->pMoveseq = (MSEQUENCE *)pGrp;
+		ESP_MSEQ_COPY(pChild);
+		ESP_WORD(pChild->Cdir_x) = *(ULONG *)dsv;
+		pChild->Cdir_z = ((USHORT *)dsv)[2];
 	}
 	return (UCHAR)slot;
 }
@@ -532,31 +532,33 @@ UCHAR Esp_call3D2(ULONG bit, ULONG dir_y_id2, MATRIX *pmat, SVECTOR *svec, SVECT
 	ULONG *pData;
 	ULONG *pMove;
 	ULONG nseq;
-	ULONG ndat;
+	ULONG sprg_ofs;
 	ESP_WORK *pParent;
 	ESP_WORK *pChild;
 	ULONG *pGrp;
 	LONG slot;
-	LONG cur;
-	ULONG rem;
+	LONG n;
 	ULONG j;
 
 	pData = pEspdt[id];
-	pMove = (ULONG *)((UCHAR *)pEspmv[id] + 4 * (*(USHORT *)((UCHAR *)pEspmv[id] + 2 * (tp & 7))));
+	pMove = pEspmv[id];
+	pMove = (ULONG *)((UCHAR *)pMove + 4 * (*(USHORT *)((UCHAR *)pMove + 2 * (tp & 7))));
 	nseq = *pMove & 0xffff;
 	pMove = pMove + 1;				/* DS steps past the group count word at once */
-	ndat = *pData & 0xffff;
+	sprg_ofs = (*pData & 0xffff) * 4 + 4;	/* the sprite group list follows the header at pData + sprg_ofs halfwords */
 
-	/* DS counts the free-slot search down from 96 and stops at the first free one. */
-	slot = 96;
-	while (Esp[--slot].Be_flg != 0) {
-		if (slot == 0) {
-			return 0xff;
+	/* Free-slot search from the top: n counts down from 96 and the first slot with Be_flg 0 is taken (0xff when none). */
+	n = 96;
+	while (n != 0) {
+		n--;
+		if (Esp[n].Be_flg == 0) {
+			goto found;
 		}
 	}
-
+	return 0xff;
+found:
+	slot = n;
 	pParent = &Esp[slot];
-	cur = slot;
 	pParent->Be_flg = 0xa003;
 	pParent->Wk_no = 0;
 	pParent->Padd0 = 0;
@@ -582,38 +584,39 @@ UCHAR Esp_call3D2(ULONG bit, ULONG dir_y_id2, MATRIX *pmat, SVECTOR *svec, SVECT
 	*(MATRIX *)pParent->m = *pmat;
 	pParent->pMat = pmat;
 	pParent->pAnmseq = (SSEQUENCE *)((ESP_DATA_HDR *)pData)->Anmseq;
-	pParent->pSprg = (SPRITEGp *)(pData + ndat * 2 + 2);
+	pParent->pSprg = (SPRITEGp *)((UCHAR *)pData + sprg_ofs * 2);
 	pParent->pMoveseq = (MSEQUENCE *)(pMove + 1);
-	*(ESP_MSEQ_W *)pParent = *(ESP_MSEQ_W *)pParent->pMoveseq;
-	ESP_WORD(pParent->Cdir_x) = ((ULONG *)dsv)[0];	/* Cdir_x, Cdir_y */
-	pParent->Cdir_z = dsv->vz;
+	ESP_MSEQ_COPY(pParent);
+	ESP_WORD(pParent->Cdir_x) = *(ULONG *)dsv;
+	pParent->Cdir_z = ((USHORT *)dsv)[2];
 
-	/* Children: one per remaining move group, placed downward from the parent. */
-	if (nseq - 1 != 0) {
-		rem = nseq - 1;
+	/* Children: one per remaining move group; the free-slot search continues downward from the parent's slot (0xfe when
+	 * the pool runs out). Be_flg and Padd0 are stored first and overwritten by the body copy, as in DS. */
+	while (--nseq != 0) {
+		while (n != 0) {
+			n--;
+			if (Esp[n].Be_flg == 0) {
+				goto found_child;
+			}
+		}
+		return 0xfe;
+found_child:
+		pChild = &Esp[n];
+		pChild->Be_flg = 0xa003;
+		pChild->Padd0 = 0;
+		*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&Esp[slot].Be_flg;
+		pChild->Wk_no = (UCHAR)slot;
+		pGrp = pMove;
+		j = nseq;
 		do {
-			/* free-slot search continues downward from the last slot used */
-			do {
-				if (cur == 0) {
-					return 0xfe;
-				}
-			} while (Esp[--cur].Be_flg != 0);
-			pChild = &Esp[cur];
-			pChild->Be_flg = 0xa003;	/* dead stores: DS performs them before the body copy */
-			pChild->Padd0 = 0;
-			*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&pParent->Be_flg;
-			pChild->Wk_no = (UCHAR)slot;
-			/* Skip rem groups from the first group header (pMove). */
-			pGrp = pMove;
-			j = rem;
-			do {
-				j--;
-				pGrp = pGrp + (*pGrp & 0xffff) * 6 + 1;
-			} while (j != 0);
-			pChild->pMoveseq = (MSEQUENCE *)(pGrp + 1);
-			*(ESP_MSEQ_W *)pChild = *(ESP_MSEQ_W *)pChild->pMoveseq;
-			rem--;
-		} while (rem != 0);
+			j--;
+			pGrp += (*pGrp & 0xffff) * 6 + 1;
+		} while (j != 0);
+		pGrp++;
+		pChild->pMoveseq = (MSEQUENCE *)pGrp;
+		ESP_MSEQ_COPY(pChild);
+		ESP_WORD(pChild->Cdir_x) = *(ULONG *)dsv;
+		pChild->Cdir_z = ((USHORT *)dsv)[2];
 	}
 	return (UCHAR)slot;
 }
@@ -630,31 +633,33 @@ UCHAR Esp_call2(ULONG bit, ULONG dir_y_id2, MATRIX *pmat, SVECTOR *svec)
 	ULONG *pData;
 	ULONG *pMove;
 	ULONG nseq;
-	ULONG ndat;
+	ULONG sprg_ofs;
 	ESP_WORK *pParent;
 	ESP_WORK *pChild;
 	ULONG *pGrp;
 	LONG slot;
-	LONG cur;
-	ULONG rem;
+	LONG n;
 	ULONG j;
 
 	pData = pEspdt[id];
-	pMove = (ULONG *)((UCHAR *)pEspmv[id] + 4 * (*(USHORT *)((UCHAR *)pEspmv[id] + 2 * (tp & 7))));
+	pMove = pEspmv[id];
+	pMove = (ULONG *)((UCHAR *)pMove + 4 * (*(USHORT *)((UCHAR *)pMove + 2 * (tp & 7))));
 	nseq = *pMove & 0xffff;
 	pMove = pMove + 1;				/* DS steps past the group count word at once */
-	ndat = *pData & 0xffff;
+	sprg_ofs = (*pData & 0xffff) * 4 + 4;	/* the sprite group list follows the header at pData + sprg_ofs halfwords */
 
-	/* DS counts the free-slot search down from 96 and stops at the first free one. */
-	slot = 96;
-	while (Esp[--slot].Be_flg != 0) {
-		if (slot == 0) {
-			return 0xff;
+	/* Free-slot search from the top: n counts down from 96 and the first slot with Be_flg 0 is taken (0xff when none). */
+	n = 96;
+	while (n != 0) {
+		n--;
+		if (Esp[n].Be_flg == 0) {
+			goto found;
 		}
 	}
-
+	return 0xff;
+found:
+	slot = n;
 	pParent = &Esp[slot];
-	cur = slot;
 	pParent->Be_flg = 0xa003;
 	pParent->Wk_no = 0;
 	pParent->Padd0 = 0;
@@ -680,36 +685,35 @@ UCHAR Esp_call2(ULONG bit, ULONG dir_y_id2, MATRIX *pmat, SVECTOR *svec)
 	*(MATRIX *)pParent->m = *pmat;
 	pParent->pMat = pmat;
 	pParent->pAnmseq = (SSEQUENCE *)((ESP_DATA_HDR *)pData)->Anmseq;
-	pParent->pSprg = (SPRITEGp *)(pData + ndat * 2 + 2);
+	pParent->pSprg = (SPRITEGp *)((UCHAR *)pData + sprg_ofs * 2);
 	pParent->pMoveseq = (MSEQUENCE *)(pMove + 1);
-	*(ESP_MSEQ_W *)pParent = *(ESP_MSEQ_W *)pParent->pMoveseq;
+	ESP_MSEQ_COPY(pParent);
 
-	/* Children: one per remaining move group, placed downward from the parent. */
-	if (nseq - 1 != 0) {
-		rem = nseq - 1;
+	/* Children: one per remaining move group; the free-slot search continues downward from the parent's slot (0xfe when
+	 * the pool runs out). Be_flg and Padd0 are stored first and overwritten by the body copy, as in DS. */
+	while (--nseq != 0) {
+		while (n != 0) {
+			n--;
+			if (Esp[n].Be_flg == 0) {
+				goto found_child;
+			}
+		}
+		return 0xfe;
+found_child:
+		pChild = &Esp[n];
+		pChild->Be_flg = 0xa003;
+		pChild->Padd0 = 0;
+		*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&Esp[slot].Be_flg;
+		pChild->Wk_no = (UCHAR)slot;
+		pGrp = pMove;
+		j = nseq;
 		do {
-			/* free-slot search continues downward from the last slot used */
-			do {
-				if (cur == 0) {
-					return 0xfe;
-				}
-			} while (Esp[--cur].Be_flg != 0);
-			pChild = &Esp[cur];
-			pChild->Be_flg = 0xa003;	/* dead stores: DS performs them before the body copy */
-			pChild->Padd0 = 0;
-			*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&pParent->Be_flg;
-			pChild->Wk_no = (UCHAR)slot;
-			/* Skip rem groups from the first group header (pMove). */
-			pGrp = pMove;
-			j = rem;
-			do {
-				j--;
-				pGrp = pGrp + (*pGrp & 0xffff) * 6 + 1;
-			} while (j != 0);
-			pChild->pMoveseq = (MSEQUENCE *)(pGrp + 1);
-			*(ESP_MSEQ_W *)pChild = *(ESP_MSEQ_W *)pChild->pMoveseq;
-			rem--;
-		} while (rem != 0);
+			j--;
+			pGrp += (*pGrp & 0xffff) * 6 + 1;
+		} while (j != 0);
+		pGrp++;
+		pChild->pMoveseq = (MSEQUENCE *)pGrp;
+		ESP_MSEQ_COPY(pChild);
 	}
 	return (UCHAR)slot;
 }
@@ -726,31 +730,33 @@ UCHAR Esp_call3(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec)
 	ULONG *pData;
 	ULONG *pMove;
 	ULONG nseq;
-	ULONG ndat;
+	ULONG sprg_ofs;
 	ESP_WORK *pParent;
 	ESP_WORK *pChild;
 	ULONG *pGrp;
 	LONG slot;
-	LONG cur;
-	ULONG rem;
+	LONG n;
 	ULONG j;
 
 	pData = pEspdt[id];
-	pMove = (ULONG *)((UCHAR *)pEspmv[id] + 4 * (*(USHORT *)((UCHAR *)pEspmv[id] + 2 * (tp & 7))));
+	pMove = pEspmv[id];
+	pMove = (ULONG *)((UCHAR *)pMove + 4 * (*(USHORT *)((UCHAR *)pMove + 2 * (tp & 7))));
 	nseq = *pMove & 0xffff;
 	pMove = pMove + 1;				/* DS steps past the group count word at once */
-	ndat = *pData & 0xffff;
+	sprg_ofs = (*pData & 0xffff) * 4 + 4;	/* the sprite group list follows the header at pData + sprg_ofs halfwords */
 
-	/* DS counts the free-slot search down from 96 and stops at the first free one. */
-	slot = 96;
-	while (Esp[--slot].Be_flg != 0) {
-		if (slot == 0) {
-			return 0xff;
+	/* Free-slot search from the top: n counts down from 96 and the first slot with Be_flg 0 is taken (0xff when none). */
+	n = 96;
+	while (n != 0) {
+		n--;
+		if (Esp[n].Be_flg == 0) {
+			goto found;
 		}
 	}
-
+	return 0xff;
+found:
+	slot = n;
 	pParent = &Esp[slot];
-	cur = slot;
 	pParent->Be_flg = 0x4000;
 	pParent->Wk_no = 0;
 	pParent->Padd0 = 0;
@@ -776,36 +782,35 @@ UCHAR Esp_call3(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec)
 	*(MATRIX *)pParent->m = *pmat;
 	pParent->pMat = pmat;
 	pParent->pAnmseq = (SSEQUENCE *)((ESP_DATA_HDR *)pData)->Anmseq;
-	pParent->pSprg = (SPRITEGp *)(pData + ndat * 2 + 2);
+	pParent->pSprg = (SPRITEGp *)((UCHAR *)pData + sprg_ofs * 2);
 	pParent->pMoveseq = (MSEQUENCE *)(pMove + 1);
-	*(ESP_MSEQ_W *)pParent = *(ESP_MSEQ_W *)pParent->pMoveseq;
+	ESP_MSEQ_COPY(pParent);
 
-	/* Children: one per remaining move group, placed downward from the parent. */
-	if (nseq - 1 != 0) {
-		rem = nseq - 1;
+	/* Children: one per remaining move group; the free-slot search continues downward from the parent's slot (0xfe when
+	 * the pool runs out). Be_flg and Padd0 are stored first and overwritten by the body copy, as in DS. */
+	while (--nseq != 0) {
+		while (n != 0) {
+			n--;
+			if (Esp[n].Be_flg == 0) {
+				goto found_child;
+			}
+		}
+		return 0xfe;
+found_child:
+		pChild = &Esp[n];
+		pChild->Be_flg = 0x4000;
+		pChild->Padd0 = 0;
+		*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&Esp[slot].Be_flg;
+		pChild->Wk_no = (UCHAR)slot;
+		pGrp = pMove;
+		j = nseq;
 		do {
-			/* free-slot search continues downward from the last slot used */
-			do {
-				if (cur == 0) {
-					return 0xfe;
-				}
-			} while (Esp[--cur].Be_flg != 0);
-			pChild = &Esp[cur];
-			pChild->Be_flg = 0x4000;	/* dead stores: DS performs them before the body copy */
-			pChild->Padd0 = 0;
-			*(ESP_BODY_W *)&pChild->Be_flg = *(ESP_BODY_W *)&pParent->Be_flg;
-			pChild->Wk_no = (UCHAR)slot;
-			/* Skip rem groups from the first group header (pMove). */
-			pGrp = pMove;
-			j = rem;
-			do {
-				j--;
-				pGrp = pGrp + (*pGrp & 0xffff) * 6 + 1;
-			} while (j != 0);
-			pChild->pMoveseq = (MSEQUENCE *)(pGrp + 1);
-			*(ESP_MSEQ_W *)pChild = *(ESP_MSEQ_W *)pChild->pMoveseq;
-			rem--;
-		} while (rem != 0);
+			j--;
+			pGrp += (*pGrp & 0xffff) * 6 + 1;
+		} while (j != 0);
+		pGrp++;
+		pChild->pMoveseq = (MSEQUENCE *)pGrp;
+		ESP_MSEQ_COPY(pChild);
 	}
 	return (UCHAR)slot;
 }
@@ -820,37 +825,30 @@ UCHAR Esp_call3(ULONG bit, LONG dir_y, MATRIX *pmat, SVECTOR *svec)
 /* DS 0x8001cefc (Esp_kill) */
 UCHAR Esp_kill(UCHAR id, UCHAR tp, MATRIX *pmat)
 {
-	BOOL moreSlots;
+	ULONG i;
 	ESP_WORK *pEsp;
-	UINT idx;
 
-	idx = 0;
-	if (pmat == (MATRIX *)0x0) {
-		pEsp = Esp;
-		do {
-			if ((pEsp->Id == id) && (pEsp->Type == tp)) {
+	/* pEsp is taken as &Esp[i] each pass, as in DS. DS has no return statement: v0 holds the last loop test (0), and no
+	 * caller uses the value. */
+	if (pmat != NULL) {
+		for (i = 0; i < 96; i++) {
+			pEsp = &Esp[i];
+			if (pEsp->Id == id && pEsp->Type == tp && pEsp->pMat == pmat) {
 				pEsp->Routine1 = 0;
 				pEsp->Routine0 = 0;
 				pEsp->Be_flg = 0;
 			}
-			idx++;
-			moreSlots = idx < 0x60;
-			pEsp++;
-		} while (moreSlots);
+		}
 	} else {
-		pEsp = Esp;
-		do {
-			if (((pEsp->Id == id) && (pEsp->Type == tp)) && (pEsp->pMat == pmat)) {
+		for (i = 0; i < 96; i++) {
+			pEsp = &Esp[i];
+			if (pEsp->Id == id && pEsp->Type == tp) {
 				pEsp->Routine1 = 0;
 				pEsp->Routine0 = 0;
 				pEsp->Be_flg = 0;
 			}
-			idx++;
-			moreSlots = idx < 0x60;
-			pEsp++;
-		} while (moreSlots);
+		}
 	}
-	return moreSlots;
 }
 
 /* ------------------------------------------------------------------ */
@@ -862,15 +860,17 @@ UCHAR Esp_kill(UCHAR id, UCHAR tp, MATRIX *pmat)
 UCHAR Esp_kill2(ULONG id2)
 {
 	UCHAR last;
-	int i;
+	ULONG i;
+	ESP_WORK *pEsp;
 
-	last = 0;
+	/* The return value is the last Id2 read (DS leaves it in v0). */
 	for (i = 0; i < 96; i++) {
-		last = Esp[i].Id2;
+		pEsp = &Esp[i];
+		last = pEsp->Id2;
 		if (last == id2) {
-			Esp[i].Routine1 = 0;
-			Esp[i].Routine0 = 0;
-			Esp[i].Be_flg = 0;
+			pEsp->Routine1 = 0;
+			pEsp->Routine0 = 0;
+			pEsp->Be_flg = 0;
 		}
 	}
 	return last;
@@ -883,21 +883,28 @@ UCHAR Esp_kill2(ULONG id2)
 /* DS 0x8001cffc (Esp_die) */
 void Esp_die(void)
 {
-	int i;
+	ULONG i;
+	ESP_WORK *pEsp;
 	BOOL kill;
 
 	for (i = 0; i < 96; i++) {
+		pEsp = &Esp[i];
 		/* Id 0 is never killed; Id 5 keeps Type 2 and Type 3 alive. */
 		kill = 1;
-		if (Esp[i].Id == 0) {
+		if (pEsp->Id == 0) {
 			kill = 0;
-		} else if (Esp[i].Id == 5) {
-			kill = (Esp[i].Type != 2) && (Esp[i].Type != 3);
+		} else if (pEsp->Id == 5) {
+			if (pEsp->Type == 2) {
+				kill = 0;
+			}
+			if (pEsp->Type == 3) {
+				kill = 0;
+			}
 		}
 		if (kill) {
-			Esp[i].Routine1 = 0;
-			Esp[i].Routine0 = 0;
-			Esp[i].Be_flg = 0;
+			pEsp->Routine1 = 0;
+			pEsp->Routine0 = 0;
+			pEsp->Be_flg = 0;
 		}
 	}
 }
@@ -909,12 +916,14 @@ void Esp_die(void)
 /* DS 0x8001d07c (Esp_kill_all) */
 void Esp_kill_all(void)
 {
-	int i;
+	ESP_WORK *pEsp = Esp;
+	LONG i;
 
 	for (i = 0; i < 96; i++) {
-		Esp[i].Routine0 = 0;
-		Esp[i].Routine1 = 0;
-		Esp[i].Be_flg = 0;
+		pEsp->Routine1 = 0;
+		pEsp->Routine0 = 0;
+		pEsp->Be_flg = 0;
+		pEsp++;
 	}
 }
 
@@ -927,33 +936,26 @@ void Esp_kill_all(void)
 /* DS 0x8001d0ac (Esp_ctrl) */
 UCHAR Esp_ctrl(UCHAR id, UCHAR tp, USHORT rtn, MATRIX *pmat)
 {
-	BOOL moreSlots;
+	ULONG i;
 	ESP_WORK *pEsp;
-	UINT idx;
 
-	idx = 0;
-	if (pmat == (MATRIX *)0x0) {
-		pEsp = Esp;
-		do {
-			if ((pEsp->Id == id) && (pEsp->Type == tp)) {
+	/* pEsp is taken as &Esp[i] each pass, as in DS. DS has no return statement: v0 holds the last loop test (0), and no
+	 * caller uses the value. */
+	if (pmat != NULL) {
+		for (i = 0; i < 96; i++) {
+			pEsp = &Esp[i];
+			if (pEsp->Id == id && pEsp->Type == tp && pEsp->pMat == pmat) {
 				pEsp->Routine0 = (UCHAR)rtn;
 			}
-			idx++;
-			moreSlots = idx < 0x60;
-			pEsp++;
-		} while (moreSlots);
+		}
 	} else {
-		pEsp = Esp;
-		do {
-			if (((pEsp->Id == id) && (pEsp->Type == tp)) && (pEsp->pMat == pmat)) {
+		for (i = 0; i < 96; i++) {
+			pEsp = &Esp[i];
+			if (pEsp->Id == id && pEsp->Type == tp) {
 				pEsp->Routine0 = (UCHAR)rtn;
 			}
-			idx++;
-			moreSlots = idx < 0x60;
-			pEsp++;
-		} while (moreSlots);
+		}
 	}
-	return moreSlots;
 }
 
 /* ------------------------------------------------------------------ */
@@ -962,10 +964,10 @@ UCHAR Esp_ctrl(UCHAR id, UCHAR tp, USHORT rtn, MATRIX *pmat)
 /* params: wk_no, rtn                                                  */
 /* ------------------------------------------------------------------ */
 /* DS 0x8001d15c (Esp_ctrl2) */
-UCHAR Esp_ctrl2(USHORT wk_no, USHORT rtn)
+ULONG Esp_ctrl2(USHORT wk_no, USHORT rtn)
 {
 	Esp[wk_no].Routine0 = (UCHAR)rtn;
-	return (UCHAR)(wk_no * sizeof(ESP_WORK));	/* DS leaves wk_no * 0x7c in v0; the caller sees its low byte */
+	return wk_no * sizeof(ESP_WORK);	/* DS leaves wk_no * 0x7c in v0 without truncation (no caller in the project) */
 }
 
 /* ------------------------------------------------------------------ */
@@ -981,10 +983,10 @@ UCHAR Esp_ctrl3(UCHAR id, UCHAR tp, USHORT magx, USHORT sinx, MATRIX *pmat)
 	UINT idx;
 
 	idx = 0;
-	if (pmat == (MATRIX *)0x0) {
+	if (pmat != (MATRIX *)0x0) {
 		pEsp = Esp;
 		do {
-			if ((pEsp->Id == id) && (pEsp->Type == tp)) {
+			if (((pEsp->Id == id) && (pEsp->Type == tp)) && (pEsp->pMat == pmat)) {
 				pEsp->Transx = magx;
 				pEsp->Free2 = (UCHAR)sinx;
 			}
@@ -995,7 +997,7 @@ UCHAR Esp_ctrl3(UCHAR id, UCHAR tp, USHORT magx, USHORT sinx, MATRIX *pmat)
 	} else {
 		pEsp = Esp;
 		do {
-			if (((pEsp->Id == id) && (pEsp->Type == tp)) && (pEsp->pMat == pmat)) {
+			if ((pEsp->Id == id) && (pEsp->Type == tp)) {
 				pEsp->Transx = magx;
 				pEsp->Free2 = (UCHAR)sinx;
 			}
@@ -1020,10 +1022,10 @@ UCHAR Esp_ctrl4(UCHAR id, UCHAR tp, USHORT magy, USHORT siny, MATRIX *pmat)
 	UINT idx;
 
 	idx = 0;
-	if (pmat == (MATRIX *)0x0) {
+	if (pmat != (MATRIX *)0x0) {
 		pEsp = Esp;
 		do {
-			if ((pEsp->Id == id) && (pEsp->Type == tp)) {
+			if (((pEsp->Id == id) && (pEsp->Type == tp)) && (pEsp->pMat == pmat)) {
 				pEsp->Transy = magy;
 				pEsp->Free3 = siny;
 			}
@@ -1034,7 +1036,7 @@ UCHAR Esp_ctrl4(UCHAR id, UCHAR tp, USHORT magy, USHORT siny, MATRIX *pmat)
 	} else {
 		pEsp = Esp;
 		do {
-			if (((pEsp->Id == id) && (pEsp->Type == tp)) && (pEsp->pMat == pmat)) {
+			if ((pEsp->Id == id) && (pEsp->Type == tp)) {
 				pEsp->Transy = magy;
 				pEsp->Free3 = siny;
 			}
@@ -1055,59 +1057,66 @@ UCHAR Esp_ctrl4(UCHAR id, UCHAR tp, USHORT magy, USHORT siny, MATRIX *pmat)
 /* DS 0x8001d300 (Esp_move) */
 void Esp_move(void)
 {
-	UCHAR rt;
+	/* DS keeps &Esp[0] and &Esp[96] in saved registers for the four slot loops (do-while loops, no entry test), and
+	 * uses pEsp as a slot pointer read once, so stores through it do not make DS reload pESP. */
+	ESP_WORK *pEsp;
+	ESP_WORK *pBeg = Esp;
+	ESP_WORK *pEnd = &Esp[96];
 
-	if ((G.Stop_flg & 0x10000000) == 0) {
-		/* Pass 1: slots with Be_flg bit 15 run Routine0 (clear if the parent is dead). */
-		for (pESP = Esp; pESP < &Esp[96]; pESP++) {
-			if ((pESP->Be_flg & 0x8000) != 0) {
-				if (pESP->Wk_no != 0 && Esp[pESP->Wk_no].Be_flg == 0) {
-					pESP->Routine1 = 0;
-					pESP->Routine0 = 0;
-					pESP->Be_flg = 0;
-				}
-				ESP_TBLJ_CALL(pESP->Routine0);
-			}
-		}
-		/* Pass 2: bit 14 runs Routine0 with Be_flg = 0xa003; bit 15 runs Esp_pos. */
-		for (pESP = Esp; pESP < &Esp[96]; pESP++) {
-			if ((pESP->Be_flg & 0x4000) != 0) {
-				rt = pESP->Routine0;
-				pESP->Be_flg = 0xa003;
-				ESP_TBLJ_CALL(rt);
-			}
-			if ((pESP->Be_flg & 0x8000) != 0) {
-				Esp_pos(0);
-			}
-		}
-	} else {
+	if (G.Stop_flg & 0x10000000) {
 		/* Paused: only the Id classes 0x1a, 0x1c, 0x28, 0x15, 0x16 (and 1 in pass 1) run. */
-		for (pESP = Esp; pESP < &Esp[96]; pESP++) {
-			if (pESP->Id == 0x1a || pESP->Id == 0x1c || pESP->Id == 0x28 ||
-				pESP->Id == 0x15 || pESP->Id == 0x16 || pESP->Id == 1) {
-				if ((pESP->Be_flg & 0x8000) != 0) {
-					if (pESP->Wk_no != 0 && Esp[pESP->Wk_no].Be_flg == 0) {
-						pESP->Routine1 = 0;
-						pESP->Routine0 = 0;
-						pESP->Be_flg = 0;
+		pESP = pBeg;
+		do {
+			if (pESP->Id == 0x1a || pESP->Id == 0x1c || pESP->Id == 0x28 || pESP->Id == 0x15 || pESP->Id == 0x16 || pESP->Id == 1) {
+				pEsp = pESP;
+				if ((pEsp->Be_flg & 0x8000) != 0) {
+					if (pEsp->Wk_no != 0 && Esp[pEsp->Wk_no].Be_flg == 0) {
+						pEsp->Routine1 = 0;
+						pEsp->Routine0 = 0;
+						pEsp->Be_flg = 0;
 					}
 					ESP_TBLJ_CALL(pESP->Routine0);
 				}
 			}
-		}
-		for (pESP = Esp; pESP < &Esp[96]; pESP++) {
-			if (pESP->Id == 0x1a || pESP->Id == 0x1c || pESP->Id == 0x28 ||
-				pESP->Id == 0x15 || pESP->Id == 0x16) {
-				if ((pESP->Be_flg & 0x4000) != 0) {
-					rt = pESP->Routine0;
-					pESP->Be_flg = 0xa003;
-					ESP_TBLJ_CALL(rt);
+		} while (++pESP < pEnd);
+		pESP = pBeg;
+		do {
+			if (pESP->Id == 0x1a || pESP->Id == 0x1c || pESP->Id == 0x28 || pESP->Id == 0x15 || pESP->Id == 0x16) {
+				pEsp = pESP;
+				if ((pEsp->Be_flg & 0x4000) != 0) {
+					pEsp->Be_flg = 0xa003;
+					ESP_TBLJ_CALL(pEsp->Routine0);
 				}
 				if ((pESP->Be_flg & 0x8000) != 0) {
 					Esp_pos(0);
 				}
 			}
-		}
+		} while (++pESP < pEnd);
+	} else {
+		/* Pass 1: slots with Be_flg bit 15 run Routine0 (clear if the parent is dead). */
+		pESP = pBeg;
+		do {
+			pEsp = pESP;
+			if ((pEsp->Be_flg & 0x8000) != 0) {
+				if (pEsp->Wk_no != 0 && Esp[pEsp->Wk_no].Be_flg == 0) {
+					pEsp->Routine1 = 0;
+					pEsp->Routine0 = 0;
+					pEsp->Be_flg = 0;
+				}
+				ESP_TBLJ_CALL(pESP->Routine0);
+			}
+		} while (++pESP < pEnd);
+		/* Pass 2: bit 14 runs Routine0 with Be_flg = 0xa003; bit 15 runs Esp_pos. */
+		pESP = pBeg;
+		do {
+			if ((pESP->Be_flg & 0x4000) != 0) {
+				pESP->Be_flg = 0xa003;
+				ESP_TBLJ_CALL(pESP->Routine0);
+			}
+			if ((pESP->Be_flg & 0x8000) != 0) {
+				Esp_pos(0);
+			}
+		} while (++pESP < pEnd);
 	}
 }
 
@@ -1120,6 +1129,7 @@ void Esp_move(void)
 /* DS 0x8001d68c (Esp_pos) */
 void Esp_pos(LONG Run_rtn0)
 {
+	ESP_WORK *pEsp;
 	SSEQUENCE *ent;
 
 	if (Run_rtn0 != 0) {
@@ -1140,12 +1150,13 @@ void Esp_pos(LONG Run_rtn0)
 	if ((pESP->Be_flg & 1) != 0) {
 		if (pESP->Anm_time == 0) {
 			pESP->Anm_cnt = (UCHAR)(pESP->Anm_cnt + (pESP->Be_flg & 1));
-			ent = &pESP->pAnmseq[pESP->Anm_cnt];
+			pEsp = pESP;
+			ent = &pEsp->pAnmseq[pEsp->Anm_cnt];
 			if (ent->Time == 0) {
 				if (ent->pGp == 0) {
-					pESP->Routine1 = 0;
-					pESP->Routine0 = 0;
-					pESP->Be_flg = 0;
+					pEsp->Routine1 = 0;
+					pEsp->Routine0 = 0;
+					pEsp->Be_flg = 0;
 				}
 			} else if (ent->Time == 0xff) {
 				pESP->Anm_cnt = ent->pGp;
@@ -1171,11 +1182,27 @@ void Esp_pos_matrix(void)
 		*(MATRIX *)pESP->m = *pESP->pMat;
 	}
 
-	pESP->Old_x = pESP->Pos_x;
-	pESP->Old_y = pESP->Pos_y;
+	ESP_WORD(pESP->Old_x) = ESP_WORD(pESP->Pos_x);
 	pESP->Old_z = pESP->Pos_z;
 
-	if ((pESP->Be_flg & 0x400) == 0) {
+	if (pESP->Be_flg & 0x400) {
+		*ESP_PM_MATW = GsIDMATRIX;
+		gte_SetRotMatrix(ESP_PM_MATW);
+		gte_ldv0((SVECTOR *)&pESP->Mov_x);
+		gte_rtv0();
+		gte_stlvnl(ESP_PM_VRES);
+		ESP_PM_TMP->vx = (SHORT)(pESP->Hot_x + ESP_PM_VRES->vx);
+		ESP_PM_TMP->vy = (SHORT)(pESP->Hot_y + ESP_PM_VRES->vy);
+		ESP_PM_TMP->vz = (SHORT)(pESP->Hot_z + ESP_PM_VRES->vz);
+
+		gte_SetRotMatrix((MATRIX *)pESP->m);
+		gte_ldv0(ESP_PM_TMP);
+		gte_rtv0();
+		gte_stlvnl(ESP_PM_VRES);
+		pESP->Pos_x = (SHORT)(pESP->t[0] + ESP_PM_VRES->vx);
+		pESP->Pos_y = (SHORT)(pESP->t[1] + ESP_PM_VRES->vy);
+		pESP->Pos_z = (SHORT)(pESP->t[2] + ESP_PM_VRES->vz);
+	} else {
 		RotMatrixY(pESP->DirY, ESP_PM_MATW);
 		gte_SetRotMatrix(ESP_PM_MATW);
 		gte_ldv0((SVECTOR *)&pESP->Mov_x);
@@ -1187,25 +1214,8 @@ void Esp_pos_matrix(void)
 
 		gte_SetRotMatrix((MATRIX *)pESP->m);
 		gte_ApplyRotMatrix((SVECTOR *)&pESP->Hot_x, ESP_PM_VRES);
-		pESP->Pos_x = (SHORT)(pESP->Pos_x + (SHORT)pESP->t[0] + (SHORT)ESP_PM_VRES->vx);
-		pESP->Pos_y = (SHORT)(pESP->Pos_y + (SHORT)pESP->t[1] + (SHORT)ESP_PM_VRES->vy);
-		pESP->Pos_z = (SHORT)(pESP->Pos_z + (SHORT)pESP->t[2] + (SHORT)ESP_PM_VRES->vz);
-	} else {
-		*ESP_PM_MATW = GsIDMATRIX;
-		gte_SetRotMatrix(ESP_PM_MATW);
-		gte_ldv0((SVECTOR *)&pESP->Mov_x);
-		gte_rtv0();
-		gte_stlvnl(ESP_PM_VRES);
-		ESP_PM_TMP->vx = (SHORT)(pESP->Hot_x + (SHORT)ESP_PM_VRES->vx);
-		ESP_PM_TMP->vy = (SHORT)(pESP->Hot_y + (SHORT)ESP_PM_VRES->vy);
-		ESP_PM_TMP->vz = (SHORT)(pESP->Hot_z + (SHORT)ESP_PM_VRES->vz);
-
-		gte_SetRotMatrix((MATRIX *)pESP->m);
-		gte_ldv0(ESP_PM_TMP);
-		gte_rtv0();
-		gte_stlvnl(ESP_PM_VRES);
-		pESP->Pos_x = (SHORT)((SHORT)pESP->t[0] + (SHORT)ESP_PM_VRES->vx);
-		pESP->Pos_y = (SHORT)((SHORT)pESP->t[1] + (SHORT)ESP_PM_VRES->vy);
-		pESP->Pos_z = (SHORT)((SHORT)pESP->t[2] + (SHORT)ESP_PM_VRES->vz);
+		pESP->Pos_x = (SHORT)(pESP->Pos_x + (pESP->t[0] + ESP_PM_VRES->vx));
+		pESP->Pos_y = (SHORT)(pESP->Pos_y + (pESP->t[1] + ESP_PM_VRES->vy));
+		pESP->Pos_z = (SHORT)(pESP->Pos_z + (pESP->t[2] + ESP_PM_VRES->vz));
 	}
 }

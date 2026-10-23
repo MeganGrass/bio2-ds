@@ -21,6 +21,7 @@
 #include "PLAYER.H"
 #include "SUB.H"
 #include "flag.h"
+#include "SPL_TBL.H"
 
 /* file-local prototypes */
 static VOID Spl_mv40(register ENEMY_WORK *pEm);
@@ -54,10 +55,11 @@ static VOID Spl_Damage(register ENEMY_WORK *pEm, register ULONG Kan, register UL
 static VOID Spl_Die(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq);
 static VOID Spl_Dead(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq);
 static VOID Spl_dead00(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq);
-static VOID Spl_chenge00(register ENEMY_WORK *pEm);
-static VOID Spl_chenge01(register ENEMY_WORK *pEm);
+static VOID Spl_chenge00(ENEMY_WORK *pEm);
+static VOID Spl_chenge01(ENEMY_WORK *pEm);
 static VOID Spl_kizu00(register ENEMY_WORK *pEm);
 static VOID Spl_chenge02(register ENEMY_WORK *pEm);
+static VOID Spl_chenge03(ENEMY_WORK *pEm);
 static VOID Spl_chenge04(register ENEMY_WORK *pEm);
 static VOID Spl_chenge05(register ENEMY_WORK *pEm);
 static VOID Spl_chenge06(register ENEMY_WORK *pEm);
@@ -65,194 +67,6 @@ static VOID Spl_chenge07(register ENEMY_WORK *pEm);
 static VOID Spl_chenge08(register ENEMY_WORK *pEm);
 static VOID Spl_chenge09(register ENEMY_WORK *pEm);
 static VOID Spl_chenge10(register ENEMY_WORK *pEm);
-
-/* Per-kind speed / walk tables, DS addresses in SPL.H */
-/* DS 0x800a8268 */
-UCHAR Subpl_walk[32][2] = {
-	{ 0x14, 0x10 },	/* [0] */
-	{ 0x46, 0x30 },	/* [1] */
-	{ 0x14, 0x10 },	/* [2] */
-	{ 0x46, 0x30 },	/* [3] */
-	{ 0x3c, 0x30 },	/* [4] */
-	{ 0x32, 0x30 },	/* [5] */
-	{ 0x3c, 0x30 },	/* [6] */
-	{ 0x41, 0x30 },	/* [7] */
-	{ 0x3c, 0x30 },	/* [8] */
-	{ 0x41, 0x30 },	/* [9] */
-	{ 0x1e, 0x10 },	/* [10] */
-	{ 0x00, 0x00 },	/* [11] */
-	{ 0x00, 0x00 },	/* [12] */
-	{ 0x00, 0x00 },	/* [13] */
-	{ 0x00, 0x00 },	/* [14] */
-	{ 0x32, 0x30 },	/* [15] */
-	{ 0x4b, 0x30 },	/* [16] */
-	{ 0x46, 0x30 },	/* [17] */
-	{ 0x4b, 0x30 },	/* [18] */
-	{ 0x46, 0x30 },	/* [19] */
-	{ 0x4b, 0x30 },	/* [20] */
-	{ 0x46, 0x30 },	/* [21] */
-	{ 0x4b, 0x30 },	/* [22] */
-	{ 0x46, 0x30 },	/* [23] */
-	{ 0x4b, 0x30 },	/* [24] */
-	{ 0x46, 0x30 },	/* [25] */
-	{ 0x4b, 0x30 },	/* [26] */
-	{ 0x4b, 0x30 },	/* [27] */
-	{ 0x4b, 0x30 },	/* [28] */
-	{ 0x4b, 0x30 },	/* [29] */
-	{ 0x46, 0x30 },	/* [30] */
-	{ 0x32, 0x30 },	/* [31] */
-};
-/* DS 0x800a82a8 */
-UCHAR Subpl_back[32][2] = {
-	{ 0x19, 0x10 },	/* [0] */
-	{ 0x37, 0x30 },	/* [1] */
-	{ 0x19, 0x10 },	/* [2] */
-	{ 0x37, 0x30 },	/* [3] */
-	{ 0x37, 0x30 },	/* [4] */
-	{ 0x23, 0x30 },	/* [5] */
-	{ 0x37, 0x30 },	/* [6] */
-	{ 0x37, 0x30 },	/* [7] */
-	{ 0x37, 0x30 },	/* [8] */
-	{ 0x37, 0x30 },	/* [9] */
-	{ 0x19, 0x10 },	/* [10] */
-	{ 0x00, 0x00 },	/* [11] */
-	{ 0x00, 0x00 },	/* [12] */
-	{ 0x00, 0x00 },	/* [13] */
-	{ 0x00, 0x00 },	/* [14] */
-	{ 0x23, 0x30 },	/* [15] */
-	{ 0x46, 0x30 },	/* [16] */
-	{ 0x41, 0x30 },	/* [17] */
-	{ 0x46, 0x30 },	/* [18] */
-	{ 0x41, 0x30 },	/* [19] */
-	{ 0x46, 0x30 },	/* [20] */
-	{ 0x41, 0x30 },	/* [21] */
-	{ 0x46, 0x30 },	/* [22] */
-	{ 0x41, 0x30 },	/* [23] */
-	{ 0x46, 0x30 },	/* [24] */
-	{ 0x41, 0x30 },	/* [25] */
-	{ 0x46, 0x30 },	/* [26] */
-	{ 0x46, 0x30 },	/* [27] */
-	{ 0x46, 0x30 },	/* [28] */
-	{ 0x46, 0x30 },	/* [29] */
-	{ 0x37, 0x30 },	/* [30] */
-	{ 0x23, 0x30 },	/* [31] */
-};
-/* DS 0x800a82e8 */
-UCHAR Subpl_dir[32][2] = {
-	{ 0x00, 0x20 },	/* [0] */
-	{ 0x00, 0x58 },	/* [1] */
-	{ 0x00, 0x20 },	/* [2] */
-	{ 0x00, 0x58 },	/* [3] */
-	{ 0x00, 0x58 },	/* [4] */
-	{ 0x00, 0x50 },	/* [5] */
-	{ 0x00, 0x58 },	/* [6] */
-	{ 0x00, 0x58 },	/* [7] */
-	{ 0x00, 0x58 },	/* [8] */
-	{ 0x00, 0x58 },	/* [9] */
-	{ 0x00, 0x20 },	/* [10] */
-	{ 0x00, 0x00 },	/* [11] */
-	{ 0x00, 0x00 },	/* [12] */
-	{ 0x00, 0x00 },	/* [13] */
-	{ 0x00, 0x00 },	/* [14] */
-	{ 0x00, 0x50 },	/* [15] */
-	{ 0x00, 0x60 },	/* [16] */
-	{ 0x00, 0x60 },	/* [17] */
-	{ 0x00, 0x60 },	/* [18] */
-	{ 0x00, 0x60 },	/* [19] */
-	{ 0x00, 0x60 },	/* [20] */
-	{ 0x00, 0x60 },	/* [21] */
-	{ 0x00, 0x60 },	/* [22] */
-	{ 0x00, 0x60 },	/* [23] */
-	{ 0x00, 0x60 },	/* [24] */
-	{ 0x00, 0x60 },	/* [25] */
-	{ 0x00, 0x60 },	/* [26] */
-	{ 0x00, 0x60 },	/* [27] */
-	{ 0x00, 0x60 },	/* [28] */
-	{ 0x00, 0x60 },	/* [29] */
-	{ 0x00, 0x58 },	/* [30] */
-	{ 0x00, 0x50 },	/* [31] */
-};
-/* DS 0x800a8328 */
-UCHAR Subpl_ato[32][2] = {
-	{ 0x0a, 0x08 },	/* [0] */
-	{ 0x2d, 0x30 },	/* [1] */
-	{ 0x0a, 0x08 },	/* [2] */
-	{ 0x2d, 0x30 },	/* [3] */
-	{ 0x28, 0x30 },	/* [4] */
-	{ 0x1e, 0x28 },	/* [5] */
-	{ 0x28, 0x30 },	/* [6] */
-	{ 0x28, 0x28 },	/* [7] */
-	{ 0x28, 0x28 },	/* [8] */
-	{ 0x28, 0x28 },	/* [9] */
-	{ 0x0a, 0x08 },	/* [10] */
-	{ 0x00, 0x00 },	/* [11] */
-	{ 0x00, 0x00 },	/* [12] */
-	{ 0x00, 0x00 },	/* [13] */
-	{ 0x00, 0x00 },	/* [14] */
-	{ 0x1e, 0x28 },	/* [15] */
-	{ 0x28, 0x30 },	/* [16] */
-	{ 0x2d, 0x30 },	/* [17] */
-	{ 0x28, 0x30 },	/* [18] */
-	{ 0x2d, 0x30 },	/* [19] */
-	{ 0x28, 0x30 },	/* [20] */
-	{ 0x2d, 0x30 },	/* [21] */
-	{ 0x28, 0x30 },	/* [22] */
-	{ 0x2d, 0x30 },	/* [23] */
-	{ 0x28, 0x30 },	/* [24] */
-	{ 0x2d, 0x30 },	/* [25] */
-	{ 0x28, 0x30 },	/* [26] */
-	{ 0x28, 0x30 },	/* [27] */
-	{ 0x28, 0x30 },	/* [28] */
-	{ 0x28, 0x30 },	/* [29] */
-	{ 0x2d, 0x30 },	/* [30] */
-	{ 0x1e, 0x28 },	/* [31] */
-};
-/* DS 0x800a8368 */
-UCHAR Subpl_run[32][2] = {
-	{ 0x1e, 0x1e },	/* [0] */
-	{ 0xdc, 0x48 },	/* [1] */
-	{ 0x1e, 0x1e },	/* [2] */
-	{ 0xdc, 0x48 },	/* [3] */
-	{ 0xbe, 0x48 },	/* [4] */
-	{ 0x78, 0x40 },	/* [5] */
-	{ 0xbe, 0x48 },	/* [6] */
-	{ 0xaa, 0x48 },	/* [7] */
-	{ 0xa0, 0x3c },	/* [8] */
-	{ 0xaa, 0x48 },	/* [9] */
-	{ 0x1e, 0x1e },	/* [10] */
-	{ 0x00, 0x00 },	/* [11] */
-	{ 0x00, 0x00 },	/* [12] */
-	{ 0x00, 0x00 },	/* [13] */
-	{ 0x00, 0x00 },	/* [14] */
-	{ 0x78, 0x40 },	/* [15] */
-	{ 0xc8, 0x48 },	/* [16] */
-	{ 0xd2, 0x48 },	/* [17] */
-	{ 0xc8, 0x48 },	/* [18] */
-	{ 0xd2, 0x48 },	/* [19] */
-	{ 0xc8, 0x48 },	/* [20] */
-	{ 0xd2, 0x48 },	/* [21] */
-	{ 0xc8, 0x48 },	/* [22] */
-	{ 0xd2, 0x48 },	/* [23] */
-	{ 0xc8, 0x48 },	/* [24] */
-	{ 0xd2, 0x48 },	/* [25] */
-	{ 0xc8, 0x48 },	/* [26] */
-	{ 0xc8, 0x48 },	/* [27] */
-	{ 0xc8, 0x48 },	/* [28] */
-	{ 0xc8, 0x48 },	/* [29] */
-	{ 0xdc, 0x48 },	/* [30] */
-	{ 0x78, 0x40 },	/* [31] */
-};
-
-/* DS 0x800a83a8 - UCHAR[7][2] (the 2 bytes after the table are padding before Spl_routine_0) */
-UCHAR Em4a_zobiparts_tbl[7][2] = {
-	{ 0x08, 0x11 },	/* +0x0 */
-	{ 0x0c, 0x12 },	/* +0x2 */
-	{ 0x0d, 0x0f },	/* +0x4 */
-	{ 0x0e, 0x13 },	/* +0x6 */
-	{ 0x09, 0x14 },	/* +0x8 */
-	{ 0x0a, 0x15 },	/* +0xa */
-	{ 0x0b, 0x16 },	/* +0xc */
-};
 
 /* Dispatch tables: initialised data in SLUS_007.48, one DS address per table */
 /* DS 0x800a83b8 (Spl_routine_0) */
@@ -341,32 +155,40 @@ VOID *Spl_dead[1] = {
 	(VOID *)Spl_dead00,
 };
 
+/* Per-frame sub-player update: route and root check first, then (unless the stop mask is set) the
+ * routine for Routine_0, the neck rotation, the motion for Id (Spl_mv indexed from 0x40), the object
+ * hit check, and the enemy-vs-stage check. Sherry (Ids 0x45, 0x4f) passes check id 0x800 to Sca_ck_em;
+ * the others pass 0x1000. The stop mask is 0x40000000 for the sub-player and 0x20000000 for the rest.
+ * DS reads G.Stop_flg separately in each arm of the sub-player test and calls Sca_ck_em from each arm
+ * of the Sherry test (the compiler then merges the common tails). */
 /* DS 0x8005cfc8 (Spl) */
 VOID Spl(register ENEMY_WORK *pEm)
 {
 	ULONG stop_mask;
-	ULONG Sc_id;
+	ULONG flg;
 	ULONG Tv0[4];
 	SVECTOR Sv0;
 
 	(void)Tv0;
 	(void)Sv0;
 	Spl_Root_ck_sys(pEm);
-	stop_mask = 0x20000000;
 	if (pEm == G.pEnemy[1]) {
+		flg = G.Stop_flg;
 		stop_mask = 0x40000000;
+	} else {
+		flg = G.Stop_flg;
+		stop_mask = 0x20000000;
 	}
-	if ((G.Stop_flg & stop_mask) == 0) {
+	if ((flg & stop_mask) == 0) {
 		((CODE_PTR)(Spl_routine_0[pEm->Routine_0]))(pEm, pEm->pKan_t_ptr, pEm->pSeq_t_ptr);
 		Rot_neck(pEm, pEm->Cdir_y);
 		((CODE_PTR)(Spl_mv[pEm->Id - 0x40]))(pEm);
 		Oba_ck_em(pEm);
 		if ((pEm->Id == 0x45) || (pEm->Id == 0x4f)) {
-			Sc_id = 0x800;
+			Sca_ck_em(pEm, 0x800);
 		} else {
-			Sc_id = 0x1000;
+			Sca_ck_em(pEm, 0x1000);
 		}
-		Sca_ck_em(pEm, Sc_id);
 	}
 }
 
@@ -376,10 +198,8 @@ static VOID Spl_mv40(register ENEMY_WORK *pEm)
 	PARTS_W *pParts;
 
 	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0x10].M, pParts->M, sizeof(pParts->M));
-	pParts[0x10].Pos_x = pParts->Pos_x;
-	pParts[0x10].Pos_y = pParts->Pos_y;
-	pParts[0x10].Pos_z = pParts->Pos_z;
+	/* M and Pos_x..Pos_z are one 32-byte MATRIX block in PARTS_W (M at +0x18, Pos_x at +0x2c); DS copies it as a whole */
+	*(MATRIX *)pParts[0x10].M = *(MATRIX *)pParts->M;
 }
 
 /* DS 0x8005d10c (Spl_mv42) */
@@ -427,10 +247,8 @@ static VOID Spl_mv44(register ENEMY_WORK *pEm)
 	PARTS_W *pParts;
 
 	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0xf].M, pParts->M, sizeof(pParts->M));
-	pParts[0xf].Pos_x = pParts->Pos_x;
-	pParts[0xf].Pos_y = pParts->Pos_y;
-	pParts[0xf].Pos_z = pParts->Pos_z;
+	/* M and Pos_x..Pos_z are one 32-byte MATRIX block in PARTS_W (M at +0x18, Pos_x at +0x2c); DS copies it as a whole */
+	*(MATRIX *)pParts[0xf].M = *(MATRIX *)pParts->M;
 	Spl_chenge05(pEm);
 }
 
@@ -475,8 +293,7 @@ static VOID Spl_mv4b(register ENEMY_WORK *pEm)
 /* DS 0x8005d314 (Spl_mv50) */
 static VOID Spl_mv50(register ENEMY_WORK *pEm)
 {
-	if ((Flg_ck(G.SaveData.Zapping_flg, 5) == 0) && (Flg_ck(G.SaveData.Zapping_flg, 0xf) == 0) &&
-		((pEm->Type & 0x100) != 0)) {
+	if ((Flg_ck(G.SaveData.Zapping_flg, 5) == 0) && (Flg_ck(G.SaveData.Zapping_flg, 0xf) == 0) && ((pEm->Type & 0x100) != 0)) {
 		pEm->Type &= 0xfeff;
 		Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr->Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2);
 	}
@@ -497,52 +314,54 @@ static VOID Spl_mv00(register ENEMY_WORK *pEm)
 static VOID Spl_Init(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq)
 {
 	PARTS_W *pParts;
-	SHORT parts0_pos_y;
-	UCHAR id_a;
-	UCHAR id_b;
-	UCHAR id_c;
-	USHORT Type;
+	USHORT parts0_pos_y;
+	ULONG id_a;
 	/* DS 0x80011620 (56 bytes): parts0 y (Parts0_pos_y), index Id - 0x40 */
-	SHORT parts0_y_tbl[28] = {
+	USHORT parts0_y_tbl[28] = {
 		4219, 4178, 4219, 4178, 4506, 4096, 4506, 4096,
 		4342, 4096, 3927, 4096, 0, 0, 0, 4096,
 		4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096,
 		4096, 4096, 4096, 4096
 	};
-	/* DS 0x80011658 (56 bytes): ofs y (Atd Ofs_y, At_h), index Id - 0x40 */
-	SHORT ofs_y_tbl[28] = {
-		85, 75, 85, 75, 86, 45, 86, 75,
-		85, 75, 85, 75, 0, 75, 0, 45,
-		85, 75, 85, 75, 85, 75, 85, 75,
-		85, 75, 85, 85
+	/* DS 0x80011658 (112 bytes): ofs y (Atd Ofs_y, At_h) then at (Atd At_w, At_d, W, D); retail copies both as one block, index Id - 0x40 */
+	struct {
+		USHORT ofs_y[28];
+		USHORT at[28];
+	} atd_tbl = {
+		{
+			85, 75, 85, 75, 86, 45, 86, 75,
+			85, 75, 85, 75, 0, 75, 0, 45,
+			85, 75, 85, 75, 85, 75, 85, 75,
+			85, 75, 85, 85
+		},
+		{
+			500, 350, 500, 350, 86, 250, 86, 350,
+			450, 350, 450, 350, 0, 0, 0, 250,
+			450, 350, 450, 350, 450, 350, 450, 350,
+			450, 350, 450, 450
+		}
 	};
-	/* DS 0x80011690 (56 bytes): at (Atd At_w, At_d, W, D), index Id - 0x40 */
-	USHORT at_tbl[28] = {
-		500, 350, 500, 350, 86, 250, 86, 350,
-		450, 350, 450, 350, 0, 0, 0, 250,
-		450, 350, 450, 350, 450, 350, 450, 350,
-		450, 350, 450, 450
-	};
-	/* DS 0x800116c8 (56 bytes): kage lo (Kage_work_set), index Id - 0x40 */
-	SHORT kage_lo_tbl[28] = {
-		500, 420, 500, 420, 500, 370, 500, 420,
-		500, 420, 500, 420, 500, 500, 500, 370,
-		500, 420, 500, 420, 500, 420, 500, 420,
-		500, 420, 500, 420
-	};
-	/* DS 0x80011700 (56 bytes): kage hi (Kage_work_set), index Id - 0x40 */
-	SHORT kage_hi_tbl[28] = {
-		600, 520, 600, 520, 600, 460, 600, 520,
-		600, 520, 600, 520, 600, 600, 600, 460,
-		600, 520, 600, 520, 600, 520, 600, 520,
-		600, 520, 600, 520
+	/* DS 0x800116c8 (112 bytes): kage lo then kage hi (Kage_work_set), one block, index Id - 0x40 */
+	struct {
+		SHORT lo[28];
+		SHORT hi[28];
+	} kage_tbl = {
+		{
+			500, 420, 500, 420, 500, 370, 500, 420,
+			500, 420, 500, 420, 500, 500, 500, 370,
+			500, 420, 500, 420, 500, 420, 500, 420,
+			500, 420, 500, 420
+		},
+		{
+			600, 520, 600, 520, 600, 460, 600, 520,
+			600, 520, 600, 520, 600, 600, 600, 460,
+			600, 520, 600, 520, 600, 520, 600, 520,
+			600, 520, 600, 520
+		}
 	};
 
-	pEm->Routine_0 = 1;
-	pEm->Routine_1 = 0;
-	pEm->Routine_2 = 0;
-	pEm->Routine_3 = 0;
-	parts0_pos_y = parts0_y_tbl[pEm->Id - 0x40];
+	*(UINT *)&pEm->Routine_0 = 0x1;		/* Routine_0 1, Routine_1 0, Routine_2 0, Routine_3 0 (DS: one sw at +0x4) */
+	parts0_pos_y = (parts0_y_tbl - 0x40)[pEm->Id];
 	pEm->Damage_flg = 0;
 	pEm->Sce_flg = 0;
 	pEm->Spl_flg = 0;
@@ -550,10 +369,7 @@ static VOID Spl_Init(register ENEMY_WORK *pEm, register ULONG Kan, register ULON
 	pEm->Damage_cnt = 0;
 	pEm->pEnemy_ptr = (ULONG *)pEm;
 	pEm->pEnemy_neck = &pEm->Be_flg;
-	pEm->Move_no = 0;
-	pEm->Move_cnt = 0;
-	pEm->Hokan_flg = 0;
-	pEm->Mplay_flg = 0;
+	*(UINT *)&pEm->Move_no = 0x0;		/* Move_no 0, Move_cnt 0, Hokan_flg 0, Mplay_flg 0 (DS: one sw at +0x14c) */
 	pEm->Parts0_pos_y = parts0_pos_y;
 	Joint_move(pEm, Kan, Seq, 0x100);
 	if (pEm->Id != 0x4b) {
@@ -568,38 +384,32 @@ static VOID Spl_Init(register ENEMY_WORK *pEm, register ULONG Kan, register ULON
 		pParts[8].Free[5] = 0x138;
 		pEm->Neck_flg |= 0x92;
 	}
-	id_a = pEm->Id;
 	pEm->nOba = 1;
 	pEm->Atd[0].Ofs_x = 0;
-	pEm->Atd[0].Ofs_y = ofs_y_tbl[id_a - 0x40] * -0x12;
-	id_a = pEm->Id;
+	/* DS negates the table value before the multiply (subu, then sll 3, addu, sll 1): Ofs_y is -(value) * 18. */
+	pEm->Atd[0].Ofs_y = -(atd_tbl.ofs_y - 0x40)[pEm->Id] * 0x12;
 	pEm->Atd[0].Ofs_z = 0;
-	id_b = pEm->Id;
-	pEm->Atd[0].At_w = at_tbl[id_a - 0x40];
-	id_a = pEm->Id;
-	pEm->Atd[0].At_h = ofs_y_tbl[id_b - 0x40] * 0x12;
-	id_b = pEm->Id;
-	pEm->Atd[0].At_d = at_tbl[id_a - 0x40];
-	id_a = pEm->Id;
-	id_c = pEm->Id;
-	pEm->Atd[0].W = at_tbl[id_b - 0x40];
-	pEm->Atd[0].D = at_tbl[id_a - 0x40];
-	Kage_work_set((ULONG *)&pEm->pKage_work, 0,
-				  (INT)kage_lo_tbl[id_c - 0x40] | ((INT)kage_hi_tbl[id_c - 0x40] << 16), 0,
-				  (VECTOR *)pEm->pSin_parts_ptr->Workm.t);
-	Type = pEm->Type;
-	pEm->Type = Type | 0x1000;
-	if ((Type & 0x400) == 0) {
+	pEm->Atd[0].At_w = (atd_tbl.at - 0x40)[pEm->Id];
+	pEm->Atd[0].At_h = (atd_tbl.ofs_y - 0x40)[pEm->Id] * 0x12;
+	pEm->Atd[0].At_d = (atd_tbl.at - 0x40)[pEm->Id];
+	pEm->Atd[0].W = (atd_tbl.at - 0x40)[pEm->Id];
+	pEm->Atd[0].D = (atd_tbl.at - 0x40)[pEm->Id];
+	Kage_work_set((ULONG *)&pEm->pKage_work, 0, (INT)(kage_tbl.lo - 0x40)[pEm->Id] | ((INT)(kage_tbl.hi - 0x40)[pEm->Id] << 16), 0, (VECTOR *)pEm->pSin_parts_ptr->Workm.t);
+	/* DS stores Type | 0x1000 and tests 0x400 on that stored value; the else branch's 0x4000 is folded with the
+	   0x1000 into one ori 0x5000 of the Type loaded here. */
+	pEm->Type |= 0x1000;
+	if ((pEm->Type & 0x400) != 0) {
+		G.Status_flg |= STAT_SUB_PLAYER;
+		pEm->Type &= 0xefff;
+	} else {
+		/* DS loads Id once (lbu) before the Life stores and compares it without a further mask. */
 		id_a = pEm->Id;
-		pEm->Type = Type | 0x5000;
+		pEm->Type |= 0x4000;
 		pEm->Life = -1;
 		pEm->Max_life = -1;
 		if ((id_a == 65) || (id_a == 67) || (id_a == 69) || (id_a == 79)) {
 			G.Status_flg &= ~STAT_SUB_PLAYER;
 		}
-	} else {
-		G.Status_flg |= STAT_SUB_PLAYER;
-		pEm->Type &= 0xefff;
 	}
 	if ((pEm->Type & 0x4000) != 0) {
 		pEm->Routine_0 = 4;
@@ -776,6 +586,7 @@ static VOID Spl_in41(register ENEMY_WORK *pEm)
 /* DS 0x8005dc74 (Spl_in44) */
 static VOID Spl_in44(register ENEMY_WORK *pEm)
 {
+	PARTS_W *pBase;
 	PARTS_W *pParts;
 	ULONG *pSuperSave;
 	ULONG *pOyaSave;
@@ -783,23 +594,24 @@ static VOID Spl_in44(register ENEMY_WORK *pEm)
 	LONG pos_y;
 	LONG pos_z;
 
+	pBase = pEm->pSin_parts_ptr;
+	pSuperSave = pBase->pSuper;
+	pOyaSave = pBase->pOya_parts;
+	pos_x = pBase->Pos_x;
+	pos_y = pBase->Pos_y;
+	pos_z = pBase->Pos_z;
+	pBase[0xf].Be_flg = 0;
+	pBase[0xf].Cdir_x = 0;
+	pBase[0xf].Cdir_y = 0;
+	pBase[0xf].Cdir_z = 0;
+	pBase[0xf].pSuper = pSuperSave;
+	pBase[0xf].pOya_parts = pOyaSave;
+	pBase[0xf].Pos_x = pos_x;
+	pBase[0xf].Pos_y = pos_y;
+	pBase[0xf].Pos_z = pos_z;
+	RotMatrix((SVECTOR *)&pBase[0xf].Cdir_x, (MATRIX *)pBase[0xf].M);
 	pParts = pEm->pSin_parts_ptr;
-	pSuperSave = pParts->pSuper;
-	pOyaSave = pParts->pOya_parts;
-	pos_x = pParts->Pos_x;
-	pos_y = pParts->Pos_y;
-	pos_z = pParts->Pos_z;
-	pParts[0xf].Be_flg = 0;
-	pParts[0xf].Cdir_x = 0;
-	pParts[0xf].Cdir_y = 0;
-	pParts[0xf].Cdir_z = 0;
-	pParts[0xf].pSuper = pSuperSave;
-	pParts[0xf].pOya_parts = pOyaSave;
-	pParts[0xf].Pos_x = pos_x;
-	pParts[0xf].Pos_y = pos_y;
-	pParts[0xf].Pos_z = pos_z;
-	RotMatrix((SVECTOR *)&pParts[0xf].Cdir_x, (MATRIX *)pParts[0xf].M);
-	Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr->Attribute, pEm->Tpage + 1, 0, pEm->Clut + 0x1e1);
+	Texture_Move((MODEL_WORK *)&pParts->Attribute, pEm->Tpage + 1, 0, pEm->Clut + 0x1e1);
 	Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr[9].Attribute, pEm->Tpage + 1, 0, pEm->Clut + 0x1e1);
 	Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr[0xc].Attribute, pEm->Tpage + 1, 0, pEm->Clut + 0x1e1);
 	pParts = pEm->pSin_parts_ptr;
@@ -898,9 +710,10 @@ static VOID Spl_in48(register ENEMY_WORK *pEm)
 static VOID Spl_in4a(register ENEMY_WORK *pEm)
 {
 	UCHAR part_a;
-	UCHAR part_b;
 	PARTS_W *pParts;
 	PARTS_W *pPartner;
+	PARTS_W *pPartA;
+	UCHAR *pRow;
 	ULONG attr;
 	ULONG *pSwap;
 	ULONG *pSwap2;
@@ -927,51 +740,52 @@ static VOID Spl_in4a(register ENEMY_WORK *pEm)
 	if ((pEm->Type & 0x300) == 0) {
 		do {
 			idx--;
-			part_a = Em4a_zobiparts_tbl[idx][0];
-			pParts = pEm->pSin_parts_ptr;
-			part_b = Em4a_zobiparts_tbl[idx][1];
-			Late_set((MODEL_WORK *)&pParts[part_a].Attribute, 1);
-			Late_set((MODEL_WORK *)&pParts[part_b].Attribute, 1);
-			pSwap2 = pParts[part_a].pTmd;
-			pParts[part_a].pTmd = pParts[part_b].pTmd;
-			pSwap = pParts[part_b].pTmd2;
-			pParts[part_b].pTmd = pSwap2;
-			pSwap2 = pParts[part_a].pTmd2;
-			pParts[part_a].pTmd2 = pSwap;
-			pSwap = pParts[part_b].pPacket;
-			pParts[part_b].pTmd2 = pSwap2;
-			pSwap2 = pParts[part_a].pPacket;
-			pParts[part_a].pPacket = pSwap;
-			pSwap = pParts[part_b].pPacket2;
-			pParts[part_b].pPacket = pSwap2;
-			pSwap2 = pParts[part_a].pPacket2;
-			pParts[part_a].pPacket2 = pSwap;
-			pParts[part_b].pPacket2 = pSwap2;
-			pParts[part_b].pSuper = pParts[part_a].pSuper;
-			pParts[part_b].pOya_parts = pParts[part_a].pOya_parts;
-			memcpy(pParts[part_b].M, pParts[part_a].M, sizeof(pParts[part_a].M));
-			pParts[part_b].Pos_x = pParts[part_a].Pos_x;
-			pParts[part_b].Pos_y = pParts[part_a].Pos_y;
-			pParts[part_b].Pos_z = pParts[part_a].Pos_z;
-			attr = pParts[part_a].Attribute;
-			pParts[part_a].Timer0 = 0;
-			pParts[part_a].Poly_rgb = 0;
-			pParts[part_a].Attribute = attr | 2;
+			pRow = Em4a_zobiparts_tbl[idx];
+			pPartA = &pEm->pSin_parts_ptr[pRow[0]];
+			pPartner = &pEm->pSin_parts_ptr[pRow[1]];
+			Late_set((MODEL_WORK *)&pPartA->Attribute, 1);
+			Late_set((MODEL_WORK *)&pPartner->Attribute, 1);
+			pSwap2 = pPartA->pTmd;
+			pPartA->pTmd = pPartner->pTmd;
+			pSwap = pPartner->pTmd2;
+			pPartner->pTmd = pSwap2;
+			pSwap2 = pPartA->pTmd2;
+			pPartA->pTmd2 = pSwap;
+			pSwap = pPartner->pPacket;
+			pPartner->pTmd2 = pSwap2;
+			pSwap2 = pPartA->pPacket;
+			pPartA->pPacket = pSwap;
+			pSwap = pPartner->pPacket2;
+			pPartner->pPacket = pSwap2;
+			pSwap2 = pPartA->pPacket2;
+			pPartA->pPacket2 = pSwap;
+			pPartner->pPacket2 = pSwap2;
+			pPartner->pSuper = pPartA->pSuper;
+			pPartner->pOya_parts = pPartA->pOya_parts;
+			memcpy(pPartner->M, pPartA->M, sizeof(pPartA->M));
+			pPartner->Pos_x = pPartA->Pos_x;
+			pPartner->Pos_y = pPartA->Pos_y;
+			pPartner->Pos_z = pPartA->Pos_z;
+			attr = pPartA->Attribute;
+			pPartA->Timer0 = 0;
+			pPartA->Poly_rgb = 0;
+			pPartA->Attribute = attr | 2;
 		} while (idx != 0);
 	} else {
 		do {
 			idx--;
-			pParts = pEm->pSin_parts_ptr;
-			part_a = Em4a_zobiparts_tbl[idx][0];
-			pPartner = pParts + Em4a_zobiparts_tbl[idx][1];
-			pParts[part_a].pTmd = pPartner->pTmd;
-			pParts[part_a].pTmd2 = pPartner->pTmd2;
-			pParts[part_a].pPacket = pPartner->pPacket;
-			pParts[part_a].pPacket2 = pPartner->pPacket2;
+			pRow = Em4a_zobiparts_tbl[idx];
+			pPartner = &pEm->pSin_parts_ptr[pRow[1]];
+			pPartA = &pEm->pSin_parts_ptr[pRow[0]];
+			pPartA->pTmd = pPartner->pTmd;
+			pPartA->pTmd2 = pPartner->pTmd2;
+			pPartA->pPacket = pPartner->pPacket;
+			pPartA->pPacket2 = pPartner->pPacket2;
 			pPartner->Be_flg = 0;
 		} while (idx != 0);
 		pEm->Type &= 0xfcff;
 	}
+
 }
 
 /* DS 0x8005e1c0 (Spl_in4b) */
@@ -993,21 +807,18 @@ static VOID Spl_in50(register ENEMY_WORK *pEm)
 /* DS 0x8005e200 (Spl_in_jelly_hair): marks the body part as jelly-hair and hooks Pl_jh_move / Aida_after */
 static VOID Spl_in_jelly_hair(register ENEMY_WORK *pEm)
 {
-	USHORT Type;
-
 	pEm->pSin_parts_ptr->Be_flg |= 0x4000;
 	pEm->pTbefore_func = Pl_jh_move;
 	pEm->pTafter_func = Aida_after;
 	if ((pEm->Type & 0x80) == 0) {
 		G.pFree_work = (UCHAR *)Pl_jh_init(pEm, (ULONG)G.pFree_work);
 	}
-	Type = pEm->Type;
 	SPL_FREE(pEm)->Flg = 0;
 	SPL_FREE(pEm)->Timer4 = 0;
 	SPL_FREE(pEm)->Turn_dir = 0;
 	SPL_FREE(pEm)->Blink = 0;
 	pEm->D_life_u = 0;
-	pEm->Type = Type | 0x80;
+	pEm->Type |= 0x80;
 }
 
 /* DS 0x8005e2a0 (Spl_in51) */
@@ -1081,18 +892,41 @@ static VOID Spl_dead00(register ENEMY_WORK *pEm, register ULONG Kan, register UL
 /* DS 0x8005e41c (Spl_set) */
 VOID Spl_set(VOID)
 {
-	INT i;
-
-	for (i = 0x30; i <= 0x4b; i++) {
-		G.Em_move_tbl[i] = Spl;
-	}
+	G.Em_move_tbl[0x30] = Spl;
+	G.Em_move_tbl[0x31] = Spl;
+	G.Em_move_tbl[0x32] = Spl;
+	G.Em_move_tbl[0x33] = Spl;
+	G.Em_move_tbl[0x34] = Spl;
+	G.Em_move_tbl[0x35] = Spl;
+	G.Em_move_tbl[0x36] = Spl;
+	G.Em_move_tbl[0x37] = Spl;
+	G.Em_move_tbl[0x38] = Spl;
+	G.Em_move_tbl[0x39] = Spl;
+	G.Em_move_tbl[0x3a] = Spl;
+	G.Em_move_tbl[0x3b] = Spl;
+	G.Em_move_tbl[0x3c] = Spl;
+	G.Em_move_tbl[0x3d] = Spl;
+	G.Em_move_tbl[0x3e] = Spl;
+	G.Em_move_tbl[0x3f] = Spl;
+	G.Em_move_tbl[0x40] = Spl;
+	G.Em_move_tbl[0x41] = Spl;
+	G.Em_move_tbl[0x42] = Spl;
+	G.Em_move_tbl[0x43] = Spl;
+	G.Em_move_tbl[0x44] = Spl;
+	G.Em_move_tbl[0x45] = Spl;
+	G.Em_move_tbl[0x46] = Spl;
+	G.Em_move_tbl[0x47] = Spl;
+	G.Em_move_tbl[0x48] = Spl;
+	G.Em_move_tbl[0x49] = Spl;
+	G.Em_move_tbl[0x4a] = Spl;
+	G.Em_move_tbl[0x4b] = Spl;
 }
 
 
 /* DS 0x8005e50c (Spl_chenge00) */
-static VOID Spl_chenge00(register ENEMY_WORK *pEm)
+static VOID Spl_chenge00(ENEMY_WORK *pEm)
 {
-	UCHAR part_a;
+	PARTS_W *pPart;
 	ULONG *pSwap;
 	ULONG poly_rgb;
 	PARTS_W *pParts;
@@ -1100,51 +934,51 @@ static VOID Spl_chenge00(register ENEMY_WORK *pEm)
 	INT k;
 
 	if ((pEm->Type & 0x200) != 0) {
-		for (k = 6; k >= 0; k--) {
-			part_a = Em4a_zobiparts_tbl[k][0];
+		for (k = 7; k != 0; k--) {
 			pParts = pEm->pSin_parts_ptr;
-			pPartner = pParts + Em4a_zobiparts_tbl[k][1];
-			if (pParts[part_a].Timer0 == 0) {
-				pParts[part_a].Poly_rgb += 0x10101;
+			pPart = pParts + Em4a_zobiparts_tbl[k - 1][0];
+			pPartner = pParts + Em4a_zobiparts_tbl[k - 1][1];
+			if ((*pPart).Timer0 == 0) {
+				(*pPart).Poly_rgb += 0x10101;
 				pPartner->Poly_rgb -= 0x10101;
-				if ((pParts[part_a].Poly_rgb & 0xffffff) == 0x404040) {
-					pParts[part_a].Timer0 = 1;
-					pSwap = pParts[part_a].pTmd;
-					pParts[part_a].pTmd = pPartner->pTmd;
+				if (((*pPart).Poly_rgb & 0xffffff) == 0x404040) {
+					(*pPart).Timer0 = 1;
+					pSwap = (*pPart).pTmd;
+					(*pPart).pTmd = pPartner->pTmd;
 					pPartner->pTmd = pSwap;
-					pSwap = pParts[part_a].pTmd2;
-					pParts[part_a].pTmd2 = pPartner->pTmd2;
+					pSwap = (*pPart).pTmd2;
+					(*pPart).pTmd2 = pPartner->pTmd2;
 					pPartner->pTmd2 = pSwap;
-					pSwap = pParts[part_a].pPacket;
-					pParts[part_a].pPacket = pPartner->pPacket;
+					pSwap = (*pPart).pPacket;
+					(*pPart).pPacket = pPartner->pPacket;
 					pPartner->pPacket = pSwap;
-					pSwap = pParts[part_a].pPacket2;
-					pParts[part_a].pPacket2 = pPartner->pPacket2;
+					pSwap = (*pPart).pPacket2;
+					(*pPart).pPacket2 = pPartner->pPacket2;
 					pPartner->pPacket2 = pSwap;
 				}
 			}
-			if (pParts[part_a].Timer0 == 1) {
-				pParts[part_a].Poly_rgb -= 0x10101;
+			if ((*pPart).Timer0 == 1) {
+				(*pPart).Poly_rgb -= 0x10101;
 				pPartner->Poly_rgb += 0x10101;
-				if ((pParts[part_a].Poly_rgb & 0xffffff) == 0) {
-					pParts[part_a].Timer0 = 2;
+				if (((*pPart).Poly_rgb & 0xffffff) == 0) {
+					(*pPart).Timer0 = 2;
 					pEm->Type &= 0xfdff;
-					pSwap = pParts[part_a].pTmd;
-					pParts[part_a].pTmd = pPartner->pTmd;
+					pSwap = (*pPart).pTmd;
+					(*pPart).pTmd = pPartner->pTmd;
 					pPartner->pTmd = pSwap;
-					pSwap = pParts[part_a].pTmd2;
-					pParts[part_a].pTmd2 = pPartner->pTmd2;
+					pSwap = (*pPart).pTmd2;
+					(*pPart).pTmd2 = pPartner->pTmd2;
 					pPartner->pTmd2 = pSwap;
-					pSwap = pParts[part_a].pPacket;
-					pParts[part_a].pPacket = pPartner->pPacket;
+					pSwap = (*pPart).pPacket;
+					(*pPart).pPacket = pPartner->pPacket;
 					pPartner->pPacket = pSwap;
-					pSwap = pParts[part_a].pPacket2;
-					pParts[part_a].pPacket2 = pPartner->pPacket2;
+					pSwap = (*pPart).pPacket2;
+					(*pPart).pPacket2 = pPartner->pPacket2;
 					pPartner->pPacket2 = pSwap;
-					poly_rgb = pParts[part_a].Poly_rgb;
-					pParts[part_a].Poly_rgb = pPartner->Poly_rgb;
+					poly_rgb = (*pPart).Poly_rgb;
+					(*pPart).Poly_rgb = pPartner->Poly_rgb;
 					pPartner->Poly_rgb = poly_rgb;
-					pParts[part_a].Attribute &= 0xfffffffd;
+					(*pPart).Attribute &= 0xfffffffd;
 					pPartner->Be_flg = 0;
 				}
 			}
@@ -1153,45 +987,79 @@ static VOID Spl_chenge00(register ENEMY_WORK *pEm)
 }
 
 /* DS 0x8005e6f0 (Spl_chenge01) */
-static VOID Spl_chenge01(register ENEMY_WORK *pEm)
+static VOID Spl_chenge01(ENEMY_WORK *pEm)
 {
-	PARTS_W *pParts;
+	*(MATRIX *)pEm->pSin_parts_ptr[0x11].M = *(MATRIX *)pEm->pSin_parts_ptr[8].M;
+	*(MATRIX *)pEm->pSin_parts_ptr[0x12].M = *(MATRIX *)pEm->pSin_parts_ptr[0xc].M;
+	*(MATRIX *)pEm->pSin_parts_ptr[0xf].M = *(MATRIX *)pEm->pSin_parts_ptr[0xd].M;
+	*(MATRIX *)pEm->pSin_parts_ptr[0x13].M = *(MATRIX *)pEm->pSin_parts_ptr[0xe].M;
+	*(MATRIX *)pEm->pSin_parts_ptr[0x14].M = *(MATRIX *)pEm->pSin_parts_ptr[9].M;
+	*(MATRIX *)pEm->pSin_parts_ptr[0x15].M = *(MATRIX *)pEm->pSin_parts_ptr[10].M;
+	*(MATRIX *)pEm->pSin_parts_ptr[0x16].M = *(MATRIX *)pEm->pSin_parts_ptr[0xb].M;
+}
 
-	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0x11].M, pParts[8].M, sizeof(pParts[8].M));
-	pParts[0x11].Pos_x = pParts[8].Pos_x;
-	pParts[0x11].Pos_y = pParts[8].Pos_y;
-	pParts[0x11].Pos_z = pParts[8].Pos_z;
-	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0x12].M, pParts[0xc].M, sizeof(pParts[0xc].M));
-	pParts[0x12].Pos_x = pParts[0xc].Pos_x;
-	pParts[0x12].Pos_y = pParts[0xc].Pos_y;
-	pParts[0x12].Pos_z = pParts[0xc].Pos_z;
-	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0xf].M, pParts[0xd].M, sizeof(pParts[0xd].M));
-	pParts[0xf].Pos_x = pParts[0xd].Pos_x;
-	pParts[0xf].Pos_y = pParts[0xd].Pos_y;
-	pParts[0xf].Pos_z = pParts[0xd].Pos_z;
-	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0x13].M, pParts[0xe].M, sizeof(pParts[0xe].M));
-	pParts[0x13].Pos_x = pParts[0xe].Pos_x;
-	pParts[0x13].Pos_y = pParts[0xe].Pos_y;
-	pParts[0x13].Pos_z = pParts[0xe].Pos_z;
-	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0x14].M, pParts[9].M, sizeof(pParts[9].M));
-	pParts[0x14].Pos_x = pParts[9].Pos_x;
-	pParts[0x14].Pos_y = pParts[9].Pos_y;
-	pParts[0x14].Pos_z = pParts[9].Pos_z;
-	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0x15].M, pParts[10].M, sizeof(pParts[10].M));
-	pParts[0x15].Pos_x = pParts[10].Pos_x;
-	pParts[0x15].Pos_y = pParts[10].Pos_y;
-	pParts[0x15].Pos_z = pParts[10].Pos_z;
-	pParts = pEm->pSin_parts_ptr;
-	memcpy(pParts[0x16].M, pParts[0xb].M, sizeof(pParts[0xb].M));
-	pParts[0x16].Pos_x = pParts[0xb].Pos_x;
-	pParts[0x16].Pos_y = pParts[0xb].Pos_y;
-	pParts[0x16].Pos_z = pParts[0xb].Pos_z;
+/* DS 0x8005e8f0 (Spl_chenge03) */
+static VOID Spl_chenge03(ENEMY_WORK *pEm)
+{
+	PARTS_W *pPart;
+	ULONG *pSwap;
+	ULONG poly_rgb;
+	PARTS_W *pParts;
+	PARTS_W *pPartner;
+	INT k;
+
+	if ((pEm->Type & 0x100) != 0) {
+		pEm->Type &= 0xfeff;
+		for (k = 7; k != 0; k--) {
+			pParts = pEm->pSin_parts_ptr;
+			pPart = pParts + Em4a_zobiparts_tbl[k - 1][0];
+			pPartner = pParts + Em4a_zobiparts_tbl[k - 1][1];
+			if ((*pPart).Timer0 == 0) {
+				(*pPart).Poly_rgb = 0x404040;
+				pPartner->Poly_rgb = 0x404040;
+				if (((*pPart).Poly_rgb & 0xffffff) == 0x404040) {
+					(*pPart).Timer0 = 1;
+					pSwap = (*pPart).pTmd;
+					(*pPart).pTmd = pPartner->pTmd;
+					pPartner->pTmd = pSwap;
+					pSwap = (*pPart).pTmd2;
+					(*pPart).pTmd2 = pPartner->pTmd2;
+					pPartner->pTmd2 = pSwap;
+					pSwap = (*pPart).pPacket;
+					(*pPart).pPacket = pPartner->pPacket;
+					pPartner->pPacket = pSwap;
+					pSwap = (*pPart).pPacket2;
+					(*pPart).pPacket2 = pPartner->pPacket2;
+					pPartner->pPacket2 = pSwap;
+				}
+			}
+			if ((*pPart).Timer0 == 1) {
+				(*pPart).Poly_rgb = 0;
+				pPartner->Poly_rgb = 0x808080;
+				if (((*pPart).Poly_rgb & 0xffffff) == 0) {
+					(*pPart).Timer0 = 2;
+					pEm->Type &= 0xfeff;
+					pSwap = (*pPart).pTmd;
+					(*pPart).pTmd = pPartner->pTmd;
+					pPartner->pTmd = pSwap;
+					pSwap = (*pPart).pTmd2;
+					(*pPart).pTmd2 = pPartner->pTmd2;
+					pPartner->pTmd2 = pSwap;
+					pSwap = (*pPart).pPacket;
+					(*pPart).pPacket = pPartner->pPacket;
+					pPartner->pPacket = pSwap;
+					pSwap = (*pPart).pPacket2;
+					(*pPart).pPacket2 = pPartner->pPacket2;
+					pPartner->pPacket2 = pSwap;
+					poly_rgb = (*pPart).Poly_rgb;
+					(*pPart).Poly_rgb = pPartner->Poly_rgb;
+					pPartner->Poly_rgb = poly_rgb;
+					(*pPart).Attribute &= 0xfffffffd;
+					pPartner->Be_flg = 0;
+				}
+			}
+		}
+	}
 }
 
 /* DS 0x8005eaac (Spl_kizu00) */
@@ -1248,6 +1116,7 @@ static VOID Spl_chenge04(register ENEMY_WORK *pEm)
 	ULONG *pTmd2Save;
 	ULONG *pPacketSave;
 	ULONG *pPacket2Save;
+	ULONG *pTmdSave;
 	ULONG *pMw;
 	/* DS 0x80011738: count 0x20, then 32 poly ids (Texture_Move_GT3) */
 	UCHAR kuchi3[] = {
@@ -1275,11 +1144,12 @@ static VOID Spl_chenge04(register ENEMY_WORK *pEm)
 	if ((pEm->Type & 0x100) != 0) {
 		pParts = pEm->pSin_parts_ptr;
 		pEm->Type &= 0xfeff;
+		pTmdSave = pParts[0x10].pTmd;
 		pTmd2Save = pParts[0x10].pTmd2;
 		pPacketSave = pParts[0x10].pPacket;
 		pPacket2Save = pParts[0x10].pPacket2;
 		pParts[0x10].Be_flg = 0;
-		pParts[1].pTmd = pParts[0x10].pTmd;
+		pParts[1].pTmd = pTmdSave;
 		pParts[1].pTmd2 = pTmd2Save;
 		pParts[1].pPacket = pPacketSave;
 		pParts[1].pPacket2 = pPacket2Save;
@@ -1437,22 +1307,34 @@ static VOID Spl_chenge07(register ENEMY_WORK *pEm)
 		pEm->Type &= 0xfeff;
 		Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr[0xc].Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2);
 		Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr[9].Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2);
-		pMw = &pEm->pSin_parts_ptr->Attribute;
+		/*
+		 * Each model pointer is set in two steps: the parts base goes into pMw,
+		 * then pMw is moved to the part's Attribute word. DS loads
+		 * pSin_parts_ptr straight into the saved register that holds pMw and adds
+		 * the part offset in place (lw s0,0x198(s1); addiu s0,s0,N), which a
+		 * single &pEm->pSin_parts_ptr[n].Attribute expression does not give.
+		 */
+		pMw = (ULONG *)pEm->pSin_parts_ptr;
+		pMw = &((PARTS_W *)pMw)->Attribute;
 		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, body3);
 		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, body4);
 		Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr[1].Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2);
-		pMw = &pEm->pSin_parts_ptr[2].Attribute;
+		pMw = (ULONG *)pEm->pSin_parts_ptr;
+		pMw = &((PARTS_W *)pMw)[2].Attribute;
 		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, mune3);
 		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, mune4);
-		pMw = &pEm->pSin_parts_ptr[5].Attribute;
+		pMw = (ULONG *)pEm->pSin_parts_ptr;
+		pMw = &((PARTS_W *)pMw)[5].Attribute;
 		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, mune3);
 		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, mune4);
 		Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr[10].Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2);
 		Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr[0xd].Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2);
-		pMw = &pEm->pSin_parts_ptr[8].Attribute;
+		pMw = (ULONG *)pEm->pSin_parts_ptr;
+		pMw = &((PARTS_W *)pMw)[8].Attribute;
 		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0xac0046, pEm->Clut + 0x1e2, kao3);
 		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0xac0046, pEm->Clut + 0x1e2, kao4);
-		pMw = &pEm->pSin_parts_ptr->Attribute;
+		pMw = (ULONG *)pEm->pSin_parts_ptr;
+		pMw = &((PARTS_W *)pMw)->Attribute;
 		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, sub3);
 		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, sub4);
 	}
@@ -1481,9 +1363,7 @@ static VOID Spl_chenge08(register ENEMY_WORK *pEm)
 		0x24, 0x36, 0x37, 0x3d, 0x3e, 0x42
 	};
 	/* DS 0x80011774: count 0x04, then 4 poly ids (Texture_Move_GT4) */
-	UCHAR kubi4[] = {
-		0x04, 0x03, 0x05, 0x0f, 0x23
-	};
+	UCHAR kubi4[] = { 0x04, 0x03, 0x05, 0x0f, 0x23 };
 
 	Texture_Move((MODEL_WORK *)&pEm->pSin_parts_ptr->Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2);
 	pMw = &pEm->pSin_parts_ptr[8].Attribute;
@@ -1500,7 +1380,7 @@ static VOID Spl_chenge08(register ENEMY_WORK *pEm)
 /* DS 0x8005fe6c (Spl_chenge09) */
 static VOID Spl_chenge09(register ENEMY_WORK *pEm)
 {
-	ULONG *pMw;
+	register PARTS_W *pP_ptr;
 	/* DS 0x800118e0: count 0x12, then 18 poly ids (Texture_Move_GT3) */
 	UCHAR body3[] = {
 		0x12, 0x01, 0x02, 0x03, 0x06, 0x08, 0x09, 0x0f,
@@ -1526,19 +1406,19 @@ static VOID Spl_chenge09(register ENEMY_WORK *pEm)
 
 	if ((pEm->Type & 0x100) != 0) {
 		pEm->Type &= 0xfeff;
-		pMw = &pEm->pSin_parts_ptr->Attribute;
-		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, body3);
-		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, body4);
-		pMw = &pEm->pSin_parts_ptr[8].Attribute;
-		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0x34004e, pEm->Clut + 0x1e2, kao3);
-		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0x34004e, pEm->Clut + 0x1e2, kao4);
+		pP_ptr = pEm->pSin_parts_ptr;
+		Texture_Move_GT3((MODEL_WORK *)&pP_ptr->Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, body3);
+		Texture_Move_GT4((MODEL_WORK *)&pP_ptr->Attribute, pEm->Tpage + 2, 0, pEm->Clut + 0x1e2, body4);
+		pP_ptr = &pEm->pSin_parts_ptr[8];
+		Texture_Move_GT3((MODEL_WORK *)&pP_ptr->Attribute, pEm->Tpage + 2, 0x34004e, pEm->Clut + 0x1e2, kao3);
+		Texture_Move_GT4((MODEL_WORK *)&pP_ptr->Attribute, pEm->Tpage + 2, 0x34004e, pEm->Clut + 0x1e2, kao4);
 	}
 }
 
 /* DS 0x800600b8 (Spl_chenge10) */
 static VOID Spl_chenge10(register ENEMY_WORK *pEm)
 {
-	ULONG *pMw;
+	register PARTS_W *pP_ptr;
 	/* DS 0x80011924: count 0x21, then 33 poly ids (Texture_Move_GT3) */
 	UCHAR body3[] = {
 		0x21, 0x01, 0x02, 0x03, 0x05, 0x06, 0x07, 0x08,
@@ -1568,12 +1448,12 @@ static VOID Spl_chenge10(register ENEMY_WORK *pEm)
 
 	if ((pEm->Type & 0x200) != 0) {
 		pEm->Type &= 0xfdff;
-		pMw = &pEm->pSin_parts_ptr->Attribute;
-		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0x800000, pEm->Clut + 0x1e2, body3);
-		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0x800000, pEm->Clut + 0x1e2, body4);
-		pMw = &pEm->pSin_parts_ptr[8].Attribute;
-		Texture_Move_GT3((MODEL_WORK *)pMw, pEm->Tpage + 2, 0x34004e, pEm->Clut + 0x1e2, kao3);
-		Texture_Move_GT4((MODEL_WORK *)pMw, pEm->Tpage + 2, 0x34004e, pEm->Clut + 0x1e2, kao4);
+		pP_ptr = pEm->pSin_parts_ptr;
+		Texture_Move_GT3((MODEL_WORK *)&pP_ptr->Attribute, pEm->Tpage + 2, 0x800000, pEm->Clut + 0x1e2, body3);
+		Texture_Move_GT4((MODEL_WORK *)&pP_ptr->Attribute, pEm->Tpage + 2, 0x800000, pEm->Clut + 0x1e2, body4);
+		pP_ptr = &pEm->pSin_parts_ptr[8];
+		Texture_Move_GT3((MODEL_WORK *)&pP_ptr->Attribute, pEm->Tpage + 2, 0x34004e, pEm->Clut + 0x1e2, kao3);
+		Texture_Move_GT4((MODEL_WORK *)&pP_ptr->Attribute, pEm->Tpage + 2, 0x34004e, pEm->Clut + 0x1e2, kao4);
 	}
 }
 

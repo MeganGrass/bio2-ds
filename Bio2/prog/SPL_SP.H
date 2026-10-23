@@ -13,7 +13,8 @@ extern VOID Spl_Sp_Move(register ENEMY_WORK *pEm, register ULONG Kan, register U
 
 /* Spl_sp[24][8] (DS 0x800a8f64) is defined in SPL_SP.C, the only file that uses it. */
 
-/* ROM texture-coordinate tables copied into the local arrays of Spl_sp40_00 / Spl_sp44_00 */
+/* ROM texture-coordinate tables copied into the local arrays of Spl_sp40_00 / Spl_sp44_00. The kuchi
+ * (mouth), kubi (neck) and me (eye) names give the body part. */
 extern const UCHAR Spl_sp40_kuchi3_rom[33];	/* DS 0x80011a58 */
 extern const UCHAR Spl_sp40_kuchi4_rom[12];	/* DS 0x80011a7c */
 extern const UCHAR Spl_sp40_kubi3_rom[14];	/* DS 0x80011a88 */

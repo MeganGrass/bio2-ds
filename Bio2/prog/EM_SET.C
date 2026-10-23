@@ -9,10 +9,8 @@
 #include "TYPES.H"
 #include "MAIN.H"
 #include "SLD.H"
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBGS.H>
-#include <LIBHMD.H>
 #include <LIBSND.H>
 #include <LIBSPU.H>
 #include <MALLOC.H>
@@ -27,8 +25,6 @@
 #include "DOOR.H"
 #include "FILECODE.H"
 
-/* DS 0x80100000 (Em_ov_bank) */
-UCHAR Em_ov_bank[2][0xd000] RAM_SECTION(".buf_em_ov_bank");
 
 /* DS 0x8009adf4 */
 DATA_POS cdemd0_pos[300] = {
@@ -234,6 +230,336 @@ UCHAR cdemd1_sum[300] = {
 	0, 0, 90, 201, 0, 0, 81, 252, 0, 0, 131, 246
 };
 
+/* DS 0x8009c30c (cdemd2_pos) */
+DATA_POS cdemd2_pos[300] = {
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x10420 }, { 0x21, 0x23f60 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x69, 0x20820 }, { 0xab, 0x23cf0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0xf3, 0x10420 }, { 0x114, 0x23ec0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x15c, 0x20820 }, { 0x19e, 0x22798 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x1e3, 0x10420 }, { 0x204, 0x1d938 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x240, 0x10420 }, { 0x261, 0xd0c8 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x27c, 0x8220 }, { 0x28d, 0x1bb8 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x291, 0x8220 }, { 0x2a2, 0x28d8 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x2a8, 0x10420 }, { 0x2c9, 0x120fc },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x2ee, 0x18620 }, { 0x31f, 0xc834 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x339, 0x18620 }, { 0x36a, 0xc834 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x384, 0x18620 }, { 0x3b5, 0x124d8 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x3da, 0x10420 }, { 0x3fb, 0x124f0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x420, 0x18620 }, { 0x451, 0x12c2c },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x477, 0x18620 }, { 0x4a8, 0x130f0 }
+};
+
+/* DS 0x8009cc6c (cdemd2_sum) */
+UCHAR cdemd2_sum[300] = {
+	0, 0, 181, 189, 0, 0, 0, 0, 0, 0, 147, 190, 0, 0, 76, 155,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 228, 80,
+	0, 0, 250, 172, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 114, 7, 0, 0, 85, 175, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 51, 40, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 121, 108, 0, 0, 0, 0, 0, 0, 18, 58,
+	0, 0, 0, 0, 0, 0, 104, 58, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 86, 13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 90, 201, 0, 0, 81, 252, 0, 0, 131, 246
+};
+
+/* DS 0x8009cd98 (cdemd3_pos) */
+DATA_POS cdemd3_pos[184] = {
+	{ 0x0, 0xcfa8 }, { 0x1a, 0xcfa8 }, { 0x34, 0x10420 }, { 0x55, 0x23dcc },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x9d, 0x10420 }, { 0xbe, 0x247dc },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x107, 0x20820 }, { 0x149, 0x23b5c },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x191, 0x10420 }, { 0x1b2, 0x23d2c },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x1fa, 0x10420 }, { 0x21b, 0x23cac },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x263, 0x10420 }, { 0x284, 0x23a5c },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x2cc, 0x10420 }, { 0x2ed, 0x24e98 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x337, 0x10420 }, { 0x358, 0x22604 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x39d, 0x20820 }, { 0x3df, 0x22604 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x424, 0x20820 }, { 0x466, 0x22604 },
+	{ 0x4ab, 0x56f6 }, { 0x4b6, 0x56f6 }, { 0x4c1, 0x10420 }, { 0x4e2, 0x1d938 },
+	{ 0x51e, 0x4a88 }, { 0x528, 0x4a88 }, { 0x532, 0x8220 }, { 0x543, 0x7e28 },
+	{ 0x553, 0x7698 }, { 0x562, 0x7698 }, { 0x571, 0x10420 }, { 0x592, 0x2ab74 },
+	{ 0x5e8, 0x48e8 }, { 0x5f2, 0x48e8 }, { 0x5fc, 0x20820 }, { 0x63e, 0x2e318 },
+	{ 0x69b, 0x5d90 }, { 0x6a7, 0x5d90 }, { 0x6b3, 0x10420 }, { 0x6d4, 0x1fab0 },
+	{ 0x714, 0x6684 }, { 0x721, 0x6684 }, { 0x72e, 0x10420 }, { 0x74f, 0xd0c8 },
+	{ 0x76a, 0x10f2 }, { 0x76d, 0x10f2 }, { 0x770, 0x8220 }, { 0x781, 0x1a14 },
+	{ 0x785, 0x389c }, { 0x78d, 0x389c }, { 0x795, 0x8220 }, { 0x7a6, 0x9ad0 },
+	{ 0x7ba, 0x67b0 }, { 0x7c7, 0x67b0 }, { 0x7d4, 0x20820 }, { 0x816, 0x2df0c },
+	{ 0x872, 0x1e84 }, { 0x876, 0x1e84 }, { 0x87a, 0x8220 }, { 0x88b, 0x3110 },
+	{ 0x892, 0x4e28 }, { 0x89c, 0x4e28 }, { 0x8a6, 0x10420 }, { 0x8c7, 0x21c84 },
+	{ 0x90b, 0x4d68 }, { 0x915, 0x4d68 }, { 0x91f, 0x18620 }, { 0x950, 0x22278 },
+	{ 0x995, 0x1f4 }, { 0x996, 0x1f4 }, { 0x997, 0x8220 }, { 0x9a8, 0x3e5c },
+	{ 0x9b0, 0x1528 }, { 0x9b3, 0x1528 }, { 0x9b6, 0x8220 }, { 0x9c7, 0x6020 },
+	{ 0x9d4, 0x5a82 }, { 0x9e0, 0x5a82 }, { 0x9ec, 0x10420 }, { 0xa0d, 0x34ecc },
+	{ 0xa77, 0x2464 }, { 0xa7c, 0x2464 }, { 0xa81, 0x8220 }, { 0xa92, 0x1578 },
+	{ 0xa95, 0x76ac }, { 0xaa4, 0x76ac }, { 0xab3, 0x18620 }, { 0xae4, 0x2527c },
+	{ 0xb2f, 0x7d58 }, { 0xb3f, 0x7d58 }, { 0xb4f, 0x18620 }, { 0xb80, 0x2f264 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0xbdf, 0x67b8 }, { 0xbec, 0x67b8 }, { 0xbf9, 0x18620 }, { 0xc2a, 0x320a8 },
+	{ 0xc8f, 0xb090 }, { 0xca6, 0xb090 }, { 0xcbd, 0x18620 }, { 0xcee, 0x42d94 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0xd74, 0x5a20 }, { 0xd80, 0x5a20 }, { 0xd8c, 0x20620 }, { 0xdcd, 0x1b6d4 },
+	{ 0xe04, 0x59d4 }, { 0xe10, 0x59d4 }, { 0xe1c, 0x8220 }, { 0xe2d, 0xe7f0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0xe4a, 0x5a82 }, { 0xe56, 0x5a82 }, { 0xe62, 0x10420 }, { 0xe83, 0x34ecc },
+	{ 0xeed, 0x4e80 }, { 0xef7, 0x4e80 }, { 0xf01, 0x10420 }, { 0xf22, 0xaa5c },
+	{ 0xf38, 0x14d6 }, { 0xf3b, 0x14d6 }, { 0xf3e, 0x8220 }, { 0xf4f, 0xd98 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 },
+	{ 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }, { 0x0, 0x0 }
+};
+
+/* DS 0x8009d358 (cdemd3_sum) */
+UCHAR cdemd3_sum[184] = {
+	38, 7, 181, 135, 0, 0, 12, 190, 0, 0, 147, 22, 0, 0, 76, 125,
+	0, 0, 0, 0, 0, 0, 13, 248, 0, 0, 235, 111, 0, 0, 202, 236,
+	0, 0, 156, 253, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 228, 253, 0, 0, 228, 253,
+	87, 116, 250, 133, 243, 210, 26, 164, 155, 181, 37, 224, 155, 186, 219, 137,
+	229, 199, 233, 85, 147, 178, 114, 7, 94, 121, 85, 195, 84, 117, 141, 20,
+	21, 54, 23, 52, 151, 182, 51, 184, 141, 178, 8, 209, 72, 105, 27, 176,
+	49, 18, 13, 71, 232, 201, 117, 79, 179, 146, 217, 21, 222, 255, 22, 117,
+	135, 165, 60, 100, 90, 123, 232, 217, 0, 0, 0, 0, 140, 162, 150, 2,
+	16, 49, 154, 152, 0, 0, 0, 0, 175, 140, 214, 68, 43, 10, 186, 28,
+	0, 0, 0, 0, 179, 146, 60, 21, 4, 39, 71, 171, 76, 108, 51, 27,
+	0, 0, 0, 0, 0, 0, 0, 0
+};
+
+/* DS 0x8009d410 (Emd_name) */
+UCHAR Emd_name[50] = "d:/bio2/room/emd/em000.emd";
+
+/* DS 0x8009d444 (Emd_tim_name) */
+UCHAR Emd_tim_name[50] = "d:/bio2/room/emd/em000.tim";
+
+/* DS 0x8009d478 (Room_100) */
+ROOM_ENEMY_TBL Room_100[2] = {
+	{ 11686, 0, 2760, 1024, 0, 1, 16, 0, 0, 0 },
+	{ 13374, 0, -547, 1024, 0, 2, 16, 0, 0, 0 }
+};
+
+/* DS 0x8009d498 (Room_102) */
+ROOM_ENEMY_TBL Room_102[1] = {
+	{ -13918, -3600, -9937, 1024, 257, 2, 34, 0, 0, 0 }
+};
+
+/* DS 0x8009d4a8 (Room_101) */
+ROOM_ENEMY_TBL Room_101[1] = {
+	{ -23456, 0, -14444, 0, 0, 2, 72, 0, 0, 0 }
+};
+
+/* DS 0x8009d4b8 (Room_202) */
+ROOM_ENEMY_TBL Room_202[1] = {
+	{ -7356, 0, -16264, 3072, 0, 2, 74, 0, 0, 0 }
+};
+
+/* DS 0x8009d4c8 (Room_109) */
+ROOM_ENEMY_TBL Room_109[1] = {
+	{ -14650, 0, -21020, 3072, 0, 2, 16, 0, 0, 0 }
+};
+
+/* DS 0x8009d4d8 (Room_10B) */
+ROOM_ENEMY_TBL Room_10B[1] = {
+	{ -21660, -7200, -21216, 2208, 1282, 1, 34, 0, 0, 0 }
+};
+
+/* DS 0x8009d4e8 (Room_110) */
+ROOM_ENEMY_TBL Room_110[4] = {
+	{ -1788, 0, -6596, 1024, 0, 2, 16, 0, 0, 0 },
+	{ -25848, 0, -18646, 3072, 0, 3, 16, 0, 0, 0 },
+	{ -26188, 0, -3646, 3072, 0, 4, 16, 0, 0, 0 },
+	{ -13728, -9000, 14854, 3072, 0, 5, 34, 5, 0, 0 }
+};
+
+/* DS 0x8009d528 (Room_117) */
+ROOM_ENEMY_TBL Room_117[7] = {
+	{ 2800, -7200, -1900, 0, 0, 2, 16, 4, 0, 0 },
+	{ 2800, -7200, -2000, 0, 0, 3, 16, 4, 0, 0 },
+	{ 2800, -7200, -2000, 0, 0, 4, 16, 4, 0, 0 },
+	{ 2800, -7200, -2000, 0, 0, 5, 16, 4, 0, 0 },
+	{ 2800, -7200, -2000, 0, 0, 6, 16, 4, 0, 0 },
+	{ 2800, -7200, -2000, 0, 0, 7, 16, 4, 0, 0 },
+	{ 2800, -7200, -2000, 0, 0, 8, 16, 4, 0, 0 }
+};
+
+/* DS 0x8009d598 (Room_700) */
+ROOM_ENEMY_TBL Room_700[2] = {
+	{ -15910, 0, -3033, 1024, 0, 2, 34, 0, 0, 0 },
+	{ -15000, 0, -8900, 0, 0, 3, 34, 0, 0, 0 }
+};
+
+/* DS 0x8009d5b8 (Room_702) */
+ROOM_ENEMY_TBL Room_702[2] = {
+	{ -15000, 0, -19000, 0, 0, 2, 16, 0, 0, 0 },
+	{ -20000, 0, -18000, 0, 0, 3, 16, 0, 0, 0 }
+};
+
+/* DS 0x8009d5d8 (Room_703) */
+ROOM_ENEMY_TBL Room_703[2] = {
+	{ -2800, 0, -25000, 0, 0, 2, 16, 0, 0, 0 },
+	{ -16000, 0, -25000, 0, 0, 3, 16, 0, 0, 0 }
+};
+
+/* DS 0x8009d5f8 (Room_705) */
+ROOM_ENEMY_TBL Room_705[5] = {
+	{ 15159, 0, 8971, 2048, 0, 2, 16, 0, 0, 0 },
+	{ 15469, 0, 6339, 2048, 0, 3, 16, 0, 0, 0 },
+	{ 17607, 0, 4836, 2048, 0, 4, 16, 0, 0, 0 },
+	{ 17571, 0, 7100, 2048, 0, 5, 16, 0, 0, 0 },
+	{ 17722, 0, 9434, 2048, 0, 6, 16, 0, 0, 0 }
+};
+
+/* DS 0x8009d648 (Em_stbl_st1) */
+SET_EM_JMP Em_stbl_st1[28] = {
+	{ 2, Room_100 },
+	{ 1, Room_101 },
+	{ 1, Room_102 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 1, Room_109 },
+	{ 0, 0 },
+	{ 1, Room_10B },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 4, Room_110 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, Room_117 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 }
+};
+
+/* DS 0x8009d728 (Em_stbl_st2) */
+SET_EM_JMP Em_stbl_st2[30] = {
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 1, Room_202 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 },
+	{ 0, 0 }
+};
+
+/* DS 0x8009d818 (Em_stbl_st7) */
+SET_EM_JMP Em_stbl_st7[6] = {
+	{ 1, Room_700 },
+	{ 0, 0 },
+	{ 2, Room_702 },
+	{ 2, Room_703 },
+	{ 0, 0 },
+	{ 5, Room_705 }
+};
+
+/* DS 0x8009d848 (Room_Enemy_tbl) */
+SET_EM_JMP *Room_Enemy_tbl[8] = { Em_stbl_st1, Em_stbl_st2, 0, 0, 0, 0, Em_stbl_st7, 0 };
+
 
 /* Top of the free work area: enemy works / parts packets must stay below */
 /* the overlay load area at DS 0x80190000 (kept: fixed placement, a limit not a data object). */
@@ -241,6 +567,13 @@ UCHAR cdemd1_sum[300] = {
 
 /* Size of one ENEMY_WORK in DS retail */
 #define EM_WORK_SIZE	0x248
+
+/* DS 0x80100000: enemy overlay load area, two 0xd000-byte banks. Em_bin_load passes the address as a plain
+ * constant (lui only); Em_move_tbl_set addresses the banks through Em_ov_bank (EM_SET.H, lui + addiu). */
+#define EM_OV_LOAD_BASE	((UCHAR (*)[0xd000])0x80100000)
+
+/* DS 0x80100000 (Em_bin_0_size): the word that pads the image to 987,136 bytes (BIO2.map: group em_bin_0). Not a buffer; its group is not defined here yet. */
+ULONG Em_bin_0_size[1] = { 4 };
 
 /* Enemy overlay bank size (two banks at Em_ov_bank) */
 #define EM_OV_BANK_SIZE	0xd000
@@ -256,22 +589,24 @@ void Enemy_work_set(void)
 {
 	ULONG	Mem_top;
 	ULONG	Em_num;
+	tagGLOBAL	*pG = &G;
+	ULONG	Em_size = EM_WORK_SIZE;
 	LONG	i;
 
-	Em_num       = G.Enemy_num;
+	Em_num       = pG->Enemy_num;
 	i            = -1;
-	Mem_top      = (ULONG)G.pFree_work;
-	G.pFree_work = G.pFree_work + Em_num * EM_WORK_SIZE;
+	Mem_top      = (ULONG)pG->pFree_work;
+	pG->pFree_work = pG->pFree_work + Em_num * Em_size;
 
 	do
 	{
-		i++;
-		G.pEnemy[i + 1] = (ENEMY_WORK *)Mem_top;
+		pG->pEnemy[i + 2] = (ENEMY_WORK *)Mem_top;
 		((ENEMY_WORK *)Mem_top)->Be_flg = 0;
-		Mem_top += EM_WORK_SIZE;
+		Mem_top += Em_size;
+		i++;
 	} while (--Em_num != 0);
 
-	G.ppEnemy_end = &G.pEnemy[i + 2];
+	pG->ppEnemy_end = &pG->pEnemy[i + 2];
 }
 
 /* ------------------------------------------------------------------ */
@@ -293,6 +628,7 @@ void Em_set(void)
 /* DS 0x8001aaa8 (Emd_load) */
 ULONG Emd_load(ULONG Id, ENEMY_WORK *pEm, ULONG Mem_top)
 {
+	tagGLOBAL	*pG = &G;
 	ULONG	nEm;
 	ULONG	*Head;
 	ULONG	End;
@@ -302,32 +638,34 @@ ULONG Emd_load(ULONG Id, ENEMY_WORK *pEm, ULONG Mem_top)
 
 	nEm = pEm->Id;
 
-	/* Zombie range 0x50..0x5a: zapping-dependent alternate models */
+	/* Zombie range 0x50..0x5a: zapping-dependent alternate models. Even Ids pick 0x58 or 0x5a from
+	 * Zapping_flg bits 5 and 0xf; odd Ids pick 0x59 from bit 6. */
 	if (nEm - 0x50 < 0xb)
 	{
-		if ((pEm->Id & 1) == 0)
+		if ((nEm & 1) != 0)
+		{
+			if (Flg_ck(G.SaveData.Zapping_flg, 6))
+				nEm = 0x59;
+		}
+		else
 		{
 			if (Flg_ck(G.SaveData.Zapping_flg, 5))
 				nEm = 0x58;
 			if (Flg_ck(G.SaveData.Zapping_flg, 0xf))
 				nEm = 0x5a;
 		}
-		else
-		{
-			if (Flg_ck(G.SaveData.Zapping_flg, 6))
-				nEm = 0x59;
-		}
 	}
 	Zensin = nEm - 0x10;
 
 	/* Texture */
 	Emd_load_file((Zensin << 2) | 2, (ULONG *)Mem_top);
-	pEm->Clut  = G.Cclut;
-	pEm->Tpage = G.Ctpage;
+	pEm->Clut  = pG->Cclut;
+	pEm->Tpage = pG->Ctpage;
 	Mapping_tim((ULONG *)Mem_top);
 	Task_sleep(1);
 
-	/* Model / animation data */
+	/* Model / animation data. Chg_id[] is the offset table at the head of the block: entries 0..7 hold
+	 * the byte offsets of the animation sequences and the TMD relative to Mem_top. */
 	Tmdmem = Emd_load_file((Zensin << 2) | 3, (ULONG *)Mem_top);
 
 	Chg_id = (LONG *)(Mem_top + *(LONG *)Mem_top);
@@ -358,8 +696,8 @@ ULONG Emd_load(ULONG Id, ENEMY_WORK *pEm, ULONG Mem_top)
 		pEm->pSub0_seq_t_ptr -= Zensin;
 		pEm->pSub1_kan_t_ptr -= Zensin;
 		pEm->pSub1_seq_t_ptr -= Zensin;
-		pEm->pSeq_t_ptr       = G.Player.pSeq_t_ptr;
-		pEm->pKan_t_ptr       = G.Player.pKan_t_ptr;
+		pEm->pSeq_t_ptr       = pG->Player.pSeq_t_ptr;
+		pEm->pKan_t_ptr       = pG->Player.pKan_t_ptr;
 	}
 
 	End = Mapping_tmd(0, pEm->pTmd, pEm->Tpage, pEm->Clut);
@@ -387,14 +725,15 @@ ENEMY_WORK *Set_enemy_work(UCHAR Id)
 	ENEMY_WORK	*pEm;
 	ENEMY_WORK	*pMoto;
 	ENEMY_WORK	**ppEm;
-	ENEMY_WORK	**pTmp = NULL;	/* G.ppEnemy_end before a grow; only read when Flg is set */
+	ENEMY_WORK	**pTmp;		/* G.ppEnemy_end before a grow; only read when Flg is set */
 	ULONG		Mem_top;
+	tagGLOBAL	*pG = &G;
 
 	Flg   = 0;
 	pMoto = NULL;
 
 	/* Pass 1: reuse an idle work of the same type, remember a prototype */
-	ppEm = G.pEnemy;
+	ppEm = pG->pEnemy;
 	do
 	{
 		pEm = *ppEm;
@@ -403,25 +742,22 @@ ENEMY_WORK *Set_enemy_work(UCHAR Id)
 			pMoto = pEm;
 			if ((pEm->Be_flg & 1) == 0)
 			{
-				pEm->Routine_0 = 0;
-				pEm->Routine_1 = 0;
-				pEm->Routine_2 = 0;
-				pEm->Routine_3 = 0;
+				*(UINT *)&pEm->Routine_0 = 0x0;		/* Routine_0 0, Routine_1 0, Routine_2 0, Routine_3 0 (DS: one sw at +0x4, delay slot of the Init_Parts_work call) */
 				Init_Parts_work(pEm);
 				pEm->Be_flg |= 1;
-				G.Enemy_num++;
+				pG->Enemy_num++;
 				return pEm;
 			}
 		}
 		ppEm++;
-	} while (ppEm != G.ppEnemy_end);
+	} while (ppEm != pG->ppEnemy_end);
 
 	if (pMoto == NULL)
 		return NULL;
 
 	/* Pass 2: first unused pointer slot from G.pEnemy[2] (32 slots) */
 	pEm  = NULL;
-	ppEm = &G.pEnemy[2];
+	ppEm = &pG->pEnemy[2];
 	for (i = 0x20; ; ppEm++)
 	{
 		if (((*ppEm)->Be_flg & 1) == 0)
@@ -435,14 +771,15 @@ ENEMY_WORK *Set_enemy_work(UCHAR Id)
 	if (pEm == NULL)
 		return NULL;
 
-	if (ppEm >= G.ppEnemy_end)
+	if (ppEm >= pG->ppEnemy_end)
 	{
-		pTmp          = G.ppEnemy_end;
-		G.ppEnemy_end = ppEm + 1;
+		pTmp          = pG->ppEnemy_end;
+		pG->ppEnemy_end = ppEm + 1;
 		Flg           = 1;
 	}
 
-	pEm     = (ENEMY_WORK *)G.pFree_work;
+	Mem_top = (ULONG)pG->pFree_work;
+	pEm     = (ENEMY_WORK *)Mem_top;
 	Mem_top = (ULONG)pEm + EM_WORK_SIZE;
 	*ppEm   = pEm;
 
@@ -450,11 +787,11 @@ ENEMY_WORK *Set_enemy_work(UCHAR Id)
 	{
 		pEm->Be_flg = 0;
 		if (Flg)
-			G.ppEnemy_end = pTmp;
+			pG->ppEnemy_end = pTmp;
 		return NULL;
 	}
 
-	G.Enemy_num++;
+	pG->Enemy_num++;
 
 	/* Clone model / animation data from the prototype */
 	pEm->pSa_dat         = pMoto->pSa_dat;
@@ -495,21 +832,18 @@ ENEMY_WORK *Set_enemy_work(UCHAR Id)
 	pEm->Pos_y           = pMoto->Pos_y;
 
 	/* Identity rotation (written as words: M[0][0..1], M[1][1..2], M[2][2]+pad) */
-	pEm->M[0][0] = 0x1000;	pEm->M[0][1] = 0;
-	pEm->M[1][1] = 0x1000;	pEm->M[1][2] = 0;
-	pEm->M[2][2] = 0x1000;
+	*(UINT *)&pEm->M[0][0] = 0x1000;	/* M[0][0] 0x1000, M[0][1] 0 (DS: one sw at +0x24) */
+	*(UINT *)&pEm->M[1][1] = 0x1000;	/* M[1][1] 0x1000, M[1][2] 0 (DS: one sw at +0x2c) */
+	*(UINT *)&pEm->M[2][2] = 0x1000;	/* M[2][2] 0x1000, pad 0 (DS: one sw at +0x34) */
 	pEm->Be_flg  = 1;
 	pEm->Cdir_x  = 0;
 	pEm->Cdir_y  = 0;
 	pEm->Cdir_z  = 0;
-	pEm->M[0][2] = 0;		pEm->M[1][0] = 0;
-	pEm->M[2][0] = 0;		pEm->M[2][1] = 0;
+	*(UINT *)&pEm->M[0][2] = 0;		/* M[0][2] 0, M[1][0] 0 (DS: one sw at +0x28) */
+	*(UINT *)&pEm->M[2][0] = 0;		/* M[2][0] 0, M[2][1] 0 (DS: one sw at +0x30) */
 	pEm->Work_no = (UCHAR)i;
 
-	pEm->Routine_0     = 0;
-	pEm->Routine_1     = 0;
-	pEm->Routine_2     = 0;
-	pEm->Routine_3     = 0;
+	*(UINT *)&pEm->Routine_0 = 0x0;		/* Routine_0 0, Routine_1 0, Routine_2 0, Routine_3 0 (DS: one sw at +0x4) */
 	pEm->Damage_flg    = 0;
 	pEm->Damage_cnt    = 0;
 	pEm->Status_flg    = 0;
@@ -525,26 +859,26 @@ ENEMY_WORK *Set_enemy_work(UCHAR Id)
 	pEm->Timer1        = 0;
 	pEm->Pos_z         = pMoto->Pos_z;
 	pEm->pTbefore_func = NULL;
-	pEm->Root_ck_cnt   = G.Enemy_num & 7;
+	pEm->Root_ck_cnt   = pG->Enemy_num & 7;
 	pEm->pTafter_func  = NULL;
 	pEm->pOn_om        = NULL;
 
 	/* Link the parts work behind the enemy work */
 	Mem_top = PartsWork_set(pEm, Mem_top);
-	if (Mem_top < EM_WORK_LIMIT && Mem_top + Mem_ck_Parts_work(pMoto) < EM_WORK_LIMIT)
+	if (Mem_top >= EM_WORK_LIMIT || Mem_top + Mem_ck_Parts_work(pMoto) >= EM_WORK_LIMIT)
 	{
-		Mem_top = PartsWork_link(pEm, Mem_top, pEm->pKan_t_ptr, 0);
-		Sa_dat_set(pEm, pEm->pSa_dat);
-		G.pFree_work = (UCHAR *)Mem_top;
-		return pEm;
+		/* Out of memory: roll back */
+		pEm->Be_flg = 0;
+		if (Flg)
+			pG->ppEnemy_end = pTmp;
+		pG->Enemy_num--;
+		return NULL;
 	}
 
-	/* Out of memory: roll back */
-	pEm->Be_flg = 0;
-	if (Flg)
-		G.ppEnemy_end = pTmp;
-	G.Enemy_num--;
-	return NULL;
+	Mem_top = PartsWork_link(pEm, Mem_top, pEm->pKan_t_ptr, 0);
+	Sa_dat_set(pEm, pEm->pSa_dat);
+	pG->pFree_work = (UCHAR *)Mem_top;
+	return pEm;
 }
 
 /* ------------------------------------------------------------------ */
@@ -553,10 +887,7 @@ ENEMY_WORK *Set_enemy_work(UCHAR Id)
 void Kill_enemy_work(ENEMY_WORK *pEm)
 {
 	pEm->Be_flg    = 0;
-	pEm->Routine_0 = 0;
-	pEm->Routine_1 = 0;
-	pEm->Routine_2 = 0;
-	pEm->Routine_3 = 0;
+	*(UINT *)&pEm->Routine_0 = 0x0;		/* Routine_0 0, Routine_1 0, Routine_2 0, Routine_3 0 (DS: one sw at +0x4) */
 	G.Enemy_num--;
 }
 
@@ -570,6 +901,9 @@ void Kill_enemy_work(ENEMY_WORK *pEm)
  * holds the G base in a register. CCPSX would share one G base register across the stores, so each
  * store is followed by an empty volatile asm, which makes CCPSX forget the cached address (no code). */
 #define EM_BARRIER() __asm__ volatile("" : : )
+/* Address inside an overlay bank. DS rebuilds every entry address with its own lui/addiu, so the value is passed
+ * through an empty asm to stop CSE from sharing one register between equal addresses (no code). */
+#define EM_OVA(b, o) ({ UCHAR *a_ = &Em_ov_bank[b][o]; __asm__("" : "=r"(a_) : "0"(a_)); a_; })
 
 /* DS 0x8001b274 (Em_move_tbl_set) */
 void Em_move_tbl_set(void)
@@ -578,10 +912,12 @@ void Em_move_tbl_set(void)
 	VOID *p_b0_4;
 	VOID *p_b1_2c0;
 	VOID *p_b1_4;
+	VOID *p_b0_18;
+	VOID *p_b1_18;
 
 	G.Em_bin_info[0].Id = 0xff; EM_BARRIER();
 	G.Em_bin_info[1].Id = 0xff; EM_BARRIER();
-	p_b0_2c0 = &Em_ov_bank[0][0x2c0];
+	p_b0_2c0 = EM_OVA(0, 0x2c0);
 	G.Em_ov_mtbl[0][0x00] = p_b0_2c0; EM_BARRIER();
 	G.Em_ov_mtbl[0][0x01] = p_b0_2c0; EM_BARRIER();
 	G.Em_ov_mtbl[0][0x02] = p_b0_2c0; EM_BARRIER();
@@ -598,35 +934,36 @@ void Em_move_tbl_set(void)
 	G.Em_ov_mtbl[0][0x0d] = p_b0_2c0; EM_BARRIER();
 	G.Em_ov_mtbl[0][0x0e] = p_b0_2c0; EM_BARRIER();
 	G.Em_ov_mtbl[0][0x0f] = p_b0_2c0; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x10] = &Em_ov_bank[0][0x004]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x11] = &Em_ov_bank[0][0x13c]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x12] = &Em_ov_bank[0][0x2eb0]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x13] = &Em_ov_bank[0][0x190]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x14] = &Em_ov_bank[0][0x2d80]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x15] = &Em_ov_bank[0][0x0c8]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x16] = &Em_ov_bank[0][0x01c]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x17] = &Em_ov_bank[0][0x0e0]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x18] = &Em_ov_bank[0][0x0fc]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x19] = &Em_ov_bank[0][0x078]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x1a] = &Em_ov_bank[0][0x1194]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x1b] = &Em_ov_bank[0][0x187c]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x1c] = &Em_ov_bank[0][0x004]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x1d] = &Em_ov_bank[0][0x018]; EM_BARRIER();
-	p_b0_4 = &Em_ov_bank[0][0x004];
-	G.Em_ov_mtbl[0][0x1e] = p_b0_4; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x1f] = &Em_ov_bank[0][0x034]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x20] = &Em_ov_bank[0][0x13c]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x21] = &Em_ov_bank[0][0x0cc]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x23] = &Em_ov_bank[0][0x098]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x24] = &Em_ov_bank[0][0x134]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x26] = &Em_ov_bank[0][0x0bc]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x27] = &Em_ov_bank[0][0x178]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x28] = &Em_ov_bank[0][0x018]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x2a] = &Em_ov_bank[0][0x030]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x2b] = &Em_ov_bank[0][0x004]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x2e] = &Em_ov_bank[0][0x004]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x2f] = &Em_ov_bank[0][0x004]; EM_BARRIER();
-	p_b1_2c0 = &Em_ov_bank[1][0x2c0];
+	G.Em_ov_mtbl[0][0x10] = EM_OVA(0, 0x004); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x11] = EM_OVA(0, 0x13c); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x12] = EM_OVA(0, 0x2eb0); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x13] = EM_OVA(0, 0x190); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x14] = EM_OVA(0, 0x2d80); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x15] = EM_OVA(0, 0x0c8); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x16] = EM_OVA(0, 0x01c); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x17] = EM_OVA(0, 0x0e0); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x18] = EM_OVA(0, 0x0fc); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x19] = EM_OVA(0, 0x078); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x1a] = EM_OVA(0, 0x1194); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x1b] = EM_OVA(0, 0x187c); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x1c] = EM_OVA(0, 0x004); EM_BARRIER();
+	p_b0_18 = EM_OVA(0, 0x018);
+	p_b0_4 = EM_OVA(0, 0x004);
+	G.Em_ov_mtbl[0][0x1d] = p_b0_18; EM_BARRIER();
+	G.Em_ov_mtbl[0][0x1e] = p_b0_4;
+	G.Em_ov_mtbl[0][0x1f] = EM_OVA(0, 0x034); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x20] = EM_OVA(0, 0x13c); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x21] = EM_OVA(0, 0x0cc); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x23] = EM_OVA(0, 0x098); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x24] = EM_OVA(0, 0x134); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x26] = EM_OVA(0, 0x0bc); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x27] = EM_OVA(0, 0x178); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x28] = EM_OVA(0, 0x018); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x2a] = EM_OVA(0, 0x030); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x2b] = EM_OVA(0, 0x004); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x2e] = EM_OVA(0, 0x004); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x2f] = EM_OVA(0, 0x004); EM_BARRIER();
+	p_b1_2c0 = EM_OVA(1, 0x2c0);
 	G.Em_ov_mtbl[1][0x00] = p_b1_2c0; EM_BARRIER();
 	G.Em_ov_mtbl[1][0x01] = p_b1_2c0; EM_BARRIER();
 	G.Em_ov_mtbl[1][0x02] = p_b1_2c0; EM_BARRIER();
@@ -643,36 +980,37 @@ void Em_move_tbl_set(void)
 	G.Em_ov_mtbl[1][0x0d] = p_b1_2c0; EM_BARRIER();
 	G.Em_ov_mtbl[1][0x0e] = p_b1_2c0; EM_BARRIER();
 	G.Em_ov_mtbl[1][0x0f] = p_b1_2c0; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x10] = &Em_ov_bank[1][0x004]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x11] = &Em_ov_bank[1][0x13c]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x12] = &Em_ov_bank[1][0x2eb0]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x13] = &Em_ov_bank[1][0x190]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x14] = &Em_ov_bank[1][0x2d80]; EM_BARRIER();
-	G.Em_ov_mtbl[0][0x29] = p_b0_4; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x15] = &Em_ov_bank[1][0x0c8]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x16] = &Em_ov_bank[1][0x01c]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x17] = &Em_ov_bank[1][0x0e0]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x18] = &Em_ov_bank[1][0x0fc]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x19] = &Em_ov_bank[1][0x078]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x1a] = &Em_ov_bank[1][0x1194]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x1b] = &Em_ov_bank[1][0x187c]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x1c] = &Em_ov_bank[1][0x004]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x1d] = &Em_ov_bank[1][0x018]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x1f] = &Em_ov_bank[1][0x034]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x20] = &Em_ov_bank[1][0x13c]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x21] = &Em_ov_bank[1][0x0cc]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x23] = &Em_ov_bank[1][0x098]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x24] = &Em_ov_bank[1][0x134]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x26] = &Em_ov_bank[1][0x0bc]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x27] = &Em_ov_bank[1][0x178]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x28] = &Em_ov_bank[1][0x018]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x2a] = &Em_ov_bank[1][0x030]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x2b] = &Em_ov_bank[1][0x004]; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x2e] = &Em_ov_bank[1][0x004]; EM_BARRIER();
-	p_b1_4 = &Em_ov_bank[1][0x004];
-	G.Em_ov_mtbl[1][0x1e] = p_b1_4; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x29] = p_b1_4; EM_BARRIER();
-	G.Em_ov_mtbl[1][0x2f] = &Em_ov_bank[1][0x004]; EM_BARRIER();
+	G.Em_ov_mtbl[1][0x10] = EM_OVA(1, 0x004); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x11] = EM_OVA(1, 0x13c); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x12] = EM_OVA(1, 0x2eb0); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x13] = EM_OVA(1, 0x190); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x14] = EM_OVA(1, 0x2d80); EM_BARRIER();
+	G.Em_ov_mtbl[0][0x29] = p_b0_4;
+	G.Em_ov_mtbl[1][0x15] = EM_OVA(1, 0x0c8); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x16] = EM_OVA(1, 0x01c); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x17] = EM_OVA(1, 0x0e0); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x18] = EM_OVA(1, 0x0fc); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x19] = EM_OVA(1, 0x078); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x1a] = EM_OVA(1, 0x1194); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x1b] = EM_OVA(1, 0x187c); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x1c] = EM_OVA(1, 0x004); EM_BARRIER();
+	p_b1_18 = EM_OVA(1, 0x018);
+	p_b1_4 = EM_OVA(1, 0x004);
+	G.Em_ov_mtbl[1][0x1d] = p_b1_18; EM_BARRIER();
+	G.Em_ov_mtbl[1][0x1f] = EM_OVA(1, 0x034); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x20] = EM_OVA(1, 0x13c); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x21] = EM_OVA(1, 0x0cc); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x23] = EM_OVA(1, 0x098); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x24] = EM_OVA(1, 0x134); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x26] = EM_OVA(1, 0x0bc); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x27] = EM_OVA(1, 0x178); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x28] = EM_OVA(1, 0x018); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x2a] = EM_OVA(1, 0x030); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x2b] = EM_OVA(1, 0x004); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x2e] = EM_OVA(1, 0x004); EM_BARRIER();
+	G.Em_ov_mtbl[1][0x1e] = p_b1_4;
+	G.Em_ov_mtbl[1][0x29] = p_b1_4;
+	G.Em_ov_mtbl[1][0x2f] = EM_OVA(1, 0x004); EM_BARRIER();
 }
 
 /* ------------------------------------------------------------------ */
@@ -691,7 +1029,7 @@ void Em_bin_load(ULONG Id)
 	LONG	i;
 	ULONG	Em_id;
 	ULONG	nEm;
-	ULONG	unused_pad[2];	/* retail reserves 8 more stack bytes at 0x10(sp) and never reads them */
+	tagGLOBAL	*pG = &G;
 
 	if (G.Em_ov_mtbl[0][Id - 0x10] == NULL)
 		return;
@@ -704,44 +1042,45 @@ void Em_bin_load(ULONG Id)
 	{
 		for (i = 1; i >= 0; i--)
 		{
-			if (G.Em_bin_info[i].Id == 0x10)
+			if (pG->Em_bin_info[i].Id == Em_id)
 			{
-				G.Em_bin_info[i].Use     = 1;
-				G.Em_move_tbl[Id - 0x10] = G.Em_ov_mtbl[i][Id - 0x10];
+				pG->Em_bin_info[i].Use     = 1;
+				pG->Em_move_tbl[Id - 0x10] = pG->Em_ov_mtbl[i][Id - 0x10];
 				return;
 			}
 		}
 
-		if (G.Em_bin_info[1].Use == 0)
+		if (pG->Em_bin_info[1].Use == 0)
 			i = 1;
-		else if (G.Em_bin_info[0].Use == 0)
+		else if (pG->Em_bin_info[0].Use == 0)
 			i = 0;
 		/* else: i == -1 */
 	}
 	else
 	{
-		for (i = 0; i < 2; )
+		for (i = 0; i < 2; i++)
 		{
-			if (G.Em_bin_info[i++].Id == Em_id)
+			if (pG->Em_bin_info[i].Id == Em_id)
 			{
-				G.Em_bin_info[i - 1].Use = 1;
+				pG->Em_bin_info[i].Use = 1;
 				return;
 			}
 		}
 
-		if (G.Em_bin_info[0].Use == 0)
+		if (pG->Em_bin_info[0].Use == 0)
 			i = 0;
-		else if (G.Em_bin_info[1].Use == 0)
+		else if (pG->Em_bin_info[1].Use == 0)
 			i = 1;
 		/* else: i == 2 */
 	}
 
-	/* load: */
-	G.Em_bin_info[i].Use     = 1;
-	G.Em_bin_info[i].Id      = (USHORT)Em_id;
-	G.Em_move_tbl[Id - 0x10] = G.Em_ov_mtbl[i][Id - 0x10];
+	/* Load the overlay for the chosen bank. nEm indexes the cdemd0_pos table: four overlay entries
+	 * per Id group, with the bank index subtracted so each bank takes its own entry. */
+	pG->Em_bin_info[i].Use     = 1;
+	pG->Em_bin_info[i].Id      = (USHORT)Em_id;
+	pG->Em_move_tbl[Id - 0x10] = pG->Em_ov_mtbl[i][Id - 0x10];
 
-	nEm = ((Em_id - 0x10) << 2) + 1 - i;
+	nEm = ((Em_id - 0x10) << 2) - i + 1;
 
 	CD.Fno           = CDEMD0_EMS;
 	CD.Fsize         = cdemd0_pos[nEm].Size;
@@ -750,7 +1089,7 @@ void Em_bin_load(ULONG Id)
 	CD.Fsector      += (floc[CDEMD0_EMS].sec_high << 16) + floc[CDEMD0_EMS].sector;
 	CD.Fsum          = cdemd0_sum[nEm];
 
-	Cd_read(CDEMD0_EMS, (ULONG *)Em_ov_bank[i], 3, (UCHAR *)"EMS");
+	Cd_read(CDEMD0_EMS, (ULONG *)EM_OV_LOAD_BASE[i], 3, (UCHAR *)"EMS");
 }
 
 /* ------------------------------------------------------------------ */
@@ -762,13 +1101,25 @@ void Em_bin_load(ULONG Id)
 /* DS 0x8001b934 (Emd_load_file) */
 ULONG Emd_load_file(ULONG Em_no, ULONG *Address)
 {
-	ULONG	File_no;
 	ULONG	Fsec;
 
-	if (G.Player.Id == 0xd || G.Player.Id == 0xb
-	 || (G.Player.Id != 0xe && (G.Player.Id & 1) == 0))
+	switch (G.Player.Id)
 	{
-		File_no         = CDEMD0_EMS;
+	case 0xb:
+	case 0xd:
+		goto Leon_side;
+	case 0xe:
+		goto Claire_side;
+	default:
+		if (G.Player.Id & 1)
+		{
+			goto Claire_side;
+		}
+		break;
+	}
+
+Leon_side:
+	{
 		CD.Fno          = CDEMD0_EMS;
 		EM_BARRIER();
 		CD.Fsize        = cdemd0_pos[Em_no].Size;
@@ -780,10 +1131,11 @@ ULONG Emd_load_file(ULONG Em_no, ULONG *Address)
 		EM_BARRIER();
 		CD.Fsector      = Fsec + ((floc[CDEMD0_EMS].sec_high << 16) + floc[CDEMD0_EMS].sector);
 		CD.Fsum         = cdemd0_sum[Em_no];
+		return Cd_read(CDEMD0_EMS, Address, 3, (UCHAR *)"EMD");
 	}
-	else
+
+Claire_side:
 	{
-		File_no         = CDEMD1_EMS;
 		CD.Fno          = CDEMD1_EMS;
 		EM_BARRIER();
 		CD.Fsize        = cdemd1_pos[Em_no].Size;
@@ -795,7 +1147,6 @@ ULONG Emd_load_file(ULONG Em_no, ULONG *Address)
 		EM_BARRIER();
 		CD.Fsector      = Fsec + ((floc[CDEMD1_EMS].sec_high << 16) + floc[CDEMD1_EMS].sector);
 		CD.Fsum         = cdemd1_sum[Em_no];
+		return Cd_read(CDEMD1_EMS, Address, 3, (UCHAR *)"EMD");
 	}
-
-	return Cd_read(File_no, Address, 3, (UCHAR *)"EMD");
 }

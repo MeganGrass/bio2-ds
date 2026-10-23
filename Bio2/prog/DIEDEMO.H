@@ -21,6 +21,8 @@ struct tagSPRITEGp {
 };
 
 
+/* Base effect object (ESPECT) used by the particle and spark effects. Field offsets follow the retail
+ * layout, and the Padd fields are placeholders that keep the later members at their retail offsets. */
 struct tagESPECT_BASE {
 	USHORT Be_flg;
 	UCHAR Wk_no;
@@ -73,7 +75,7 @@ struct tagDIEDEMO {
 	SHORT Theta;
 	USHORT Prad;
 	LONG P_radius;
-	UCHAR Free2;
+	UCHAR Phase;        /* +0x34 (0x801938a4) three-frame phase counter; Die_move_wait steps it 0, 1, 2 and wraps, handlers test bit 0 */
 	UCHAR S_trans_flg;
 	USHORT Daddpos;
 	SHORT Wait_ctr;     /* +0x38 signed; Die_move_delay counts it down, Rno++ when below 0 */
@@ -111,7 +113,7 @@ struct tagCUTINFO {
 /* Externs - DIEDEMO.C globals                                         */
 /* ------------------------------------------------------------------ */
 /* DS 0x801938a4: phase counter, 0..2 (Die_move_wait); bit 0 alternates each frame */
-extern UCHAR Die_phase;
+extern DIEDEMO Diedemo;
 /* DS 0x801938b0 */ extern VCUT   Dievcut;
 
 /* ------------------------------------------------------------------ */

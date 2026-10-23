@@ -29,6 +29,9 @@ extern ULONG *Flg_addr[];
 void   Replace_rdt(void);   /* ROOM.C */
 int    Stage_room_to_mapno(int Stage_no, int Room_no); /* SCE0.C */
 
+/* Event script opcode handlers (SCE1.C, one per opcode of Sce_jmp_tbl). Groups: control flow (if/else,
+ * loops, switch, goto/gosub/return), variables (set, calc, compare, copy), cuts and messages, action
+ * object (AOT) setup, enemy speed and position, and member access. Each returns the interpreter status. */
 /* function prototypes */
 ULONG  Break_point(SCE_TASK *pSce);
 ULONG  Nop(SCE_TASK *pSce);

@@ -268,7 +268,6 @@ typedef struct tagbyte_lh byte_lh;
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBCD.H>
-#include <LIBHMD.H>
 
 typedef char				CHAR;
 typedef unsigned char		UCHAR;

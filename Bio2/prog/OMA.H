@@ -11,6 +11,8 @@
 #include "SCA.H"
 
 /* ---- types migrated from data.h ---- */
+/* Hit area ("atari") of an object or enemy: a centre X/Y/Z, the width and depth (W, D), the height, and the
+ * offsets used to place it relative to the owner. At_w/At_d/At_h are the attack-box size. */
 struct tagAT_DATA {
 	LONG X;
 	LONG Y;
@@ -131,8 +133,6 @@ OBJ_MODEL_WORK *Oma_hit_ck_all(VECTOR *pV, ENEMY_WORK *pEm);
 void    Om_Jump_ck(ENEMY_WORK *pEm);
 
 /* Cross-module globals used by OMA.C */
-/* DS 0x800dcbc8 */ extern long    Ground_in_flg;
-/* DS 0x800c3b7c (Gnd_y) */ extern SHORT   Gnd_y;          /* defined in OMA.C; SCA.C uses it */
 /* DS 0x800a2594 */ extern SHORT   Up_add_tbl[];   /* short[], Id 0..; Id-4 used for Id >= 0x10 */
 /* DS 0x800a25bc */ extern SHORT   Down_add_tbl[]; /* short[], Id+8 used for Id >= 0x10 */
 /* DS 0x800a260c */ extern SHORT   Up_add_Spl_tbl[];   /* short[], index Id+0x10 */

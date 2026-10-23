@@ -42,13 +42,18 @@
 /* Print14 takes a format and its arguments as consecutive words after pPtr (DS 0x8002fa28 forwards &pPtr to Print_main). */
 typedef long (*PRINT14_VA)(ULONG x, ULONG y, ULONG c, ULONG p, UCHAR *pPtr, ...);
 
+/* Value passed as the last Print14 word of the running countdown display, indexed by the colour step (DS 0x8009d9e8). */
+static const signed char Timer_col_tbl[9] = { 0, 3, 6, 1, 4, 7, 2, 5, 9 };
+
 /* DS 0x80025794 (Game_loop) */
 VOID Game_loop(VOID) {
 	static INT Stop_bak;		/* 800B66C0 */
+	static ULONG Status_bak;	/* Status_flg of the previous frame */
 	static VECTOR V;			/* 800B66C4 */
 	static VECTOR Kpos;			/* 800B66D4 */
 	static SVECTOR Kofs;		/* 800B66E4 */
-	USHORT Time_cnt;			/* reg 22 */
+	tagGLOBAL * pG;
+	LONG Time_cnt;			/* reg 22 */
 	ULONG Col;					/* reg 6  */
 	ULONG Flg;					/* reg 2  */
 	LONG x;						/* reg 2  */
@@ -61,6 +66,7 @@ VOID Game_loop(VOID) {
 	Title_game_init();
 	Task_sleep(1);
 	Time_cnt = 0;
+	pG = &G;
 	G.Stop_flg = 0;
 	Stop_bak = 0;
 	Col = 8;
@@ -69,178 +75,282 @@ VOID Game_loop(VOID) {
 		Task_execute(1, (VOID *)Stage6_main_ptr);
 		Flg_on(G.SaveData.Common_flg, 0xfe);
 	}
-first:
-	G.pEm = (ENEMY_WORK *)&G.Player;
-	G.Player.Routine_0 = 0;
-	G.Player.Routine_1 = 0;
-	G.Player.Routine_2 = 0;
-	G.Player.Routine_3 = 0;
-	Player_move((ENEMY_WORK *)&G.Player);
-move:
-	Flg = 7;
-	Stop_bak |= G.Stop_flg;
-	G.System_flg &= ~SYS_DOOR_INIT;
-	G.Stop_flg |= 0xef000000;
-	Fade_set(0x200, -0x1800, 7, 1);
-	if ((G.System_flg & SYS_TIMER) != 0 && *(ULONG *)&G.SaveData.Stage_no == 0x1c0000) {
-		/* countdown tick: decrement, wrap to 0x1d and drop a second on expiry */
-		x = Time_cnt;
-		Time_cnt = (USHORT)(Time_cnt - 1);
-		Col = Time_cnt;
-		if ((x & 0xffff) == 0) {
-			G.SaveData.Count_down_timer += -1;
-			Time_cnt = 0x1d;
+	goto first;
+demo_end:
+	Snd_key_off_all();
+	goto pl_move;
+	while ((G.System_flg & SYS_IN_GAME) != 0) {
+		*(ULONG *)&Game.Move_flg = 0;
+		if (Main.Padoff_stop_flg[0][0] != 0) goto render;
+		x = Time_cnt + 1;
+		if ((G.System_flg & SYS_TIMER_EXPIRED) != 0) {
+			Time_cnt = x;
+			if ((SHORT)x == 0x10) {
+				Task_lexecute(1, 2);
+				Moji.Mess_flg = 0;
+				Time_cnt = -0x7530;
+			}
+			goto render;
+		}
+		if ((G.System_flg & SYS_DEMO_MODE) != 0 && Game.Doordemo_flg == 0 && pG->Pdemo_cnt > Demo.Pdemo_cnt) {
+			pG->SaveData.Key_idx = Key_idx_bak;
+			G.Stop_flg |= 0xff000000;
+			if (Main.Padoff_stop_flg[1][1] != 0) {
+				Fade_set(0x200, 0x800, 7, 1);
+			} else {
+				Fade_set(0x200, 0x200, 7, 1);
+			}
+			Game.Doordemo_flg = 2;
+		}
+		switch (Game.Doordemo_flg) {
+		case 1:
+			if ((Moji.Mess_flg & 0x80) != 0 || Fade_status(0) == 0) break;
+			G.Stop_flg |= 0xff000000;
+			if ((G.Status_flg & STAT_STATUS_SCREEN) == 0 && (G.System_flg & SYS_SAVE_GAME) == 0) {
+				if ((G.System_flg & SYS_EX_BATTLE) != 0) {
+					if ((UCHAR)pG->SaveData.Item_flg[7] == 0xff) {
+						Flg_on(pG->SaveData.Zapping_flg, 0x3f);
+					}
+				}
+				if ((G.System_flg & SYS_EX_BATTLE) == 0 || Flg_ck(pG->SaveData.Zapping_flg, 0x3f) == 0) {
+					G.System_flg |= SYS_FADE_OUT;
+					Bg_set_mode(1, 0);
+				}
+				pG->Stop_flg = 0;
+				Stop_bak = 0;
+				G.System_flg |= SYS_DOOR_INIT;
+				Set_door();
+				goto move;
+			}
+			Fade_set(0x200, 0x1800, 7, 1);
+			Game.Doordemo_flg = 2;
+			/* fall through */
+		case 2:
+			if (Fade_status(0) == 0) goto trans;
+			Fade_set(0x200, 0, 7, 1);
+			Fade_adjust(0, 0x7fff, 0xffffff, (RECT *)NULL);
+			Task_sleep(2);
+			if ((G.System_flg & SYS_DEMO_MODE) != 0 && pG->Pdemo_cnt > Demo.Pdemo_cnt) {
+				goto demo_end;
+			}
+			pG->Stop_flg = 0;
+			Stop_bak = 0;
+			G.System_flg |= SYS_DOOR_INIT;
+			if ((G.Status_flg & STAT_STATUS_SCREEN) != 0) {
+				if ((G.System_flg & SYS_CONFIG) != 0) {
+					G.System_flg &= ~SYS_CONFIG;
+					Task_lexecute(1, 4);
+					Task_sleep(1);
+					Pl_set_packet();
+				} else {
+					Task_execute(1, Status);
+					Task_sleep(1);
+				}
+				Stop_bak = *(ULONG *)&Game.Stop_bak;
+				*(ULONG *)&Game.Stop_bak = 0;
+				G.Status_flg &= ~STAT_PL_BUSY;
+				G.Status_flg &= ~STAT_STATUS_SCREEN;
+				Task_sleep(1);
+			} else if ((G.System_flg & SYS_SAVE_GAME) != 0) {
+				G.System_flg &= ~SYS_SAVE_GAME;
+				Task_lexecute(1, 1);
+				Stop_bak = *(ULONG *)&Game.Stop_bak;
+				*(ULONG *)&Game.Stop_bak = 0;
+				Task_sleep(1);
+				G.System_flg &= ~SYS_CARD_LOAD;
+				Pl_set_packet();
+			} else {
+				Task_sleep(1);
+			}
+			Game.Doordemo_flg = 3;
+		case 3:
+	first:
+		pG->pEm = (ENEMY_WORK *)&pG->Player;
+		*(LONG *)&pG->Player.Routine_0 = 0;
+		Player_move((ENEMY_WORK *)&pG->Player);
+	move:
+		Flg = 7;
+		Stop_bak |= pG->Stop_flg;
+		G.System_flg &= ~SYS_DOOR_INIT;
+		G.Stop_flg |= 0xef000000;
+		Fade_set(0x200, -0x1800, 7, 1);
+		if ((G.System_flg & SYS_TIMER) != 0 && *(ULONG *)&pG->SaveData.Stage_no == 0x1c0000) {
+			/* countdown tick: decrement, wrap to 0x1d and drop a second on expiry */
+			if ((SHORT)Time_cnt-- == 0) {
+				pG->SaveData.Count_down_timer += -1;
+				Time_cnt = 0x1d;
+			}
 			Col = Time_cnt;
 		}
-	}
-	Game.Doordemo_flg = 5;
+		Game.Doordemo_flg = 5;
+			break;
+		case 4:
+			Game.Doordemo_flg = 5;
+			G.Stop_flg |= 0xff000000;
+			break;
+		case 5:
+			if (Fade_status(0) == 0) {
+				Game.Doordemo_flg = 0;
+				pG->Stop_flg = Stop_bak;
+			}
+			break;
+		case 6:
+			while (Game.Doordemo_flg == 6) {
+				Task_sleep(1);
+			}
+			break;
+		case 7:
+			Task_execute(1, Windows);
+			Game.Doordemo_flg = 0;
+			goto post_render;
+		default:
+			break;
+		}
 trans:
-	for (;;) {
 		if ((G.Status_flg & 0x1000000) == 0) {
-			if ((G.Status_flg & STAT_TIMER) == 0) {
-normal:
-				V.vx = G.Status_flg;
-				if (G.Front_func != NULL) {
-					((CODE_PTR)(G.Front_func))();
-				}
-				if ((G.Status_flg & STAT_CAM_LOCK) == 0) {
-					Cut_check(0);
-				}
-				Sce_scheduler();
-				if (Task_status(1) == 0
-						&& G.SaveData.Cut_no == (USHORT)G.Next_cut_no
-						&& Main.Bg_chg_flg == 0
-						&& Game.Doordemo_flg == 0
-						&& (G.Status_flg & STAT_PL_BUSY) == 0
-						&& (G.Stop_flg & 0x1000000) == 0
-						&& G.Player.Damage_cnt == 0
-						&& (G.System_flg & (SYS_GAME_OVER | 0x200)) == 0) {
-					if ((G.Padd1_trg & 0x100) != 0 && (G.Status_flg & STAT_STATUS_SCREEN) == 0) {
-						G.System_flg |= SYS_CONFIG;
-						G.Status_flg |= STAT_STATUS_SCREEN;
+			if ((G.Status_flg & STAT_TIMER) != 0) {
+				/* Status_bak & STAT_TIMER - countdown timer display */
+				Flg = 1;
+				if ((G.System_flg & SYS_TIMER) != 0) {
+					if ((SHORT)Time_cnt > 0x1d || (Status_bak & STAT_TIMER) == 0) {
+						Time_cnt = 0;
+						Col = 0;
+						pG->SaveData.Count_down_timer += 1;
 					}
-					if ((G.Key_trg & 0x4000) != 0 && (G.Status_flg & STAT_CINESCO) == 0) {
-						G.Status_flg |= STAT_STATUS_SCREEN;
+					Flg = 0;
+					{
+						/* DS 0x80025794 timer words: Print14 receives the format at 0x10(sp), the fields at 0x14/0x18/0x1c and two more words at 0x20/0x24.
+						 * Print14 passes &pPtr to Print_main, which walks consecutive slots. PRINT14_VA makes the call pass those words on the stack. */
+						((PRINT14_VA)Print14)(0x68, 0x20, 0, 2, (UCHAR *)"%2d:%02d:%02d", pG->SaveData.Count_down_timer / 60, (pG->SaveData.Count_down_timer % 60) / 10, (pG->SaveData.Count_down_timer % 60) % 10, (SHORT)Time_cnt / 3, Timer_col_tbl[(SHORT)Col % 9]);
 					}
-					if ((G.Status_flg & STAT_STATUS_SCREEN) != 0) {
-						Game.Doordemo_flg = 1;
-						Game.Stop_bak = G.Stop_flg;
-						G.Stop_flg |= 0xff000000;
-						G.Status_flg |= STAT_PL_BUSY;
-						if (St.St_type != 2) {
-							Snd_se_stad(0x4060000, (VECTOR *)NULL);
+					if (pG->SaveData.Count_down_timer == 5999 && (SHORT)Time_cnt == 0x1b) {
+						Col = 8;
+					} else if (Game.Doordemo_flg == 0) {
+						if (Fade_status(0) != 0 && *(ULONG *)&pG->SaveData.Stage_no != 0x1c0000) {
+							Time_cnt++;
+							Col = Time_cnt;
 						}
-						goto render;
 					}
+					goto normal;
 				}
-				ppEm = G.pEnemy + 1;
-				SetSpadStack();
-				pPl = (ENEMY_WORK *)(UINT)(UCHAR)G.Room_enemy_flg;
-				*(ULONG *)&Game.Move_flg = *(ULONG *)&Game.Move_flg | 1;
-				G.Room_enemy_flg &= 0xff;
-				if (G.ppEnemy_end != G.pEnemy + 1) {
-					do {
-						pEm = *ppEm;
-						if ((pEm->Be_flg & 1) != 0 && (pEm->Type & 0x8000) == 0) {
-							x = pEm->Pos_x - G.Player.Pos_x;
-							z = pEm->Pos_z - G.Player.Pos_z;
-							G.pEm = pEm;
-							pEm->L_pl = SquareRoot0(x * x + z * z);
-							((VOID (*)(VOID))G.pEnemy[(UCHAR)*(LONG *)&pEm->Id + 0x12])();
-							pPl = pEm;
-						}
-						ppEm++;
-					} while (ppEm != G.ppEnemy_end);
-				}
-				G.pEm = (ENEMY_WORK *)&G.Player;
-				if ((G.Player.Type & 0x8000) == 0) {
-					Player_move((ENEMY_WORK *)&G.Player);
-					Oba_ck_em2((ENEMY_WORK *)&G.Player);
-					Sca_ck_em((ENEMY_WORK *)&G.Player, 0x8000);
-					Set_front_pos((ENEMY_WORK *)&G.Player);
-					V.vy = (LONG)G.Player.Fpos_x;
-					V.pad = (LONG)G.Player.Fpos_z;
-					Flg = 1 << (G.Player.nFloor & 0x1f);
-					G.Player.Sca_info = G.Player.Sca_info | Sca_ck_hit((VECTOR *)&V.vy, 0x1c2, Flg, 0x8000) << 0x10;
-					pPl = (ENEMY_WORK *)&V.vy;
-					Om_move();
-				} else {
-					Om_move();
-				}
-				Sce_at();
-				if (G.Back_func != NULL) {
-					((CODE_PTR)(G.Back_func))();
-				}
-				ResetSpadStack();
-				goto loop_end;
-			}
-			/* V.vx (Status_flg copy) & STAT_TIMER - countdown timer display */
-			Flg = 1;
-			if ((G.System_flg & SYS_TIMER) != 0) {
-				if ((SHORT)Time_cnt > 0x1d || (V.vx & STAT_TIMER) == 0) {
+				if ((SHORT)Time_cnt > 0x1d || (Status_bak & STAT_TIMER) == 0) {
 					Time_cnt = 0;
-					Col = 0;
-					G.SaveData.Count_down_timer += 1;
-				}
-				Flg = 0;
-				{
-					SHORT timer = G.SaveData.Count_down_timer;
-					/* DS 0x80025794 timer words: Print14 receives the format at 0x10(sp), the fields at 0x14/0x18/0x1c and two more words at 0x20/0x24.
-					 * Print14 passes &pPtr to Print_main, which walks consecutive slots. PRINT14_VA makes the call pass those words on the stack. */
-					((PRINT14_VA)Print14)(0x68, 0x20, 0, 2, (UCHAR *)"%2d:%02d:%02d", timer / 60, (timer % 60) / 10, (timer % 60) % 10, (SHORT)Time_cnt / 3, 0);
-				}
-				if (G.SaveData.Count_down_timer == 5999 && (SHORT)Time_cnt == 0x1b) {
 					Col = 8;
-				} else if (Game.Doordemo_flg == 0) {
-					if (Fade_status(0) != 0 && *(ULONG *)&G.SaveData.Stage_no != 0x1c0000) {
-						Time_cnt++;
-						Col = Time_cnt;
+					pG->SaveData.Count_down_timer += -1;
+				}
+				if (pG->SaveData.Count_down_timer < 0x3c) {
+					Flg = 2;
+				}
+				if (pG->SaveData.Count_down_timer >= 0) {
+					{
+						/* DS 0x80025794 timer words: Print14 receives the format at 0x10(sp), the fields at 0x14/0x18/0x1c and two more words at 0x20/0x24.
+						 * Print14 passes &pPtr to Print_main, which walks consecutive slots. PRINT14_VA makes the call pass those words on the stack. */
+						((PRINT14_VA)Print14)(0x68, 0x20, Flg, 2, (UCHAR *)"%2d:%02d:%02d", pG->SaveData.Count_down_timer / 60, (pG->SaveData.Count_down_timer % 60) / 10, (pG->SaveData.Count_down_timer % 60) % 10, 9 - (SHORT)Time_cnt / 3, (LONG)(SHORT)Col);
 					}
+				} else {
+					Print14(0x68, 0x20, 2, 0, (UCHAR *)"0 00:00");
 				}
-				goto normal;
-			}
-			if ((SHORT)Time_cnt > 0x1d || (V.vx & STAT_TIMER) == 0) {
-				Time_cnt = 0;
-				Col = 8;
-				G.SaveData.Count_down_timer += -1;
-			}
-			if (G.SaveData.Count_down_timer < 0x3c) {
-				Flg = 2;
-			}
-			if (G.SaveData.Count_down_timer < 0) {
-				Print14(0x68, 0x20, 2, 0, (UCHAR *)"0 00:00");
-			} else {
-				{
-					SHORT timer = G.SaveData.Count_down_timer;
-					/* DS 0x80025794 timer words: Print14 receives the format at 0x10(sp), the fields at 0x14/0x18/0x1c and two more words at 0x20/0x24.
-					 * Print14 passes &pPtr to Print_main, which walks consecutive slots. PRINT14_VA makes the call pass those words on the stack. */
-					((PRINT14_VA)Print14)(0x68, 0x20, Flg, 2, (UCHAR *)"%2d:%02d:%02d", timer / 60, (timer % 60) / 10, (timer % 60) % 10, 9 - (SHORT)Time_cnt / 3, (LONG)(SHORT)Col);
-				}
-			}
-			if (G.SaveData.Count_down_timer >= 0) {
-				if (Game.Doordemo_flg == 0) {
-					if (Fade_status(0) != 0) {
-						x = Col - 3;
-						Time_cnt++;
-						Col = (ULONG)x;
-						if ((INT)(x << 0x10) < 1) {
-							Col = 8;
+				if (pG->SaveData.Count_down_timer >= 0) {
+					if (Game.Doordemo_flg == 0) {
+						if (Fade_status(0) != 0) {
+							x = Col - 3;
+							Time_cnt++;
+							Col = (ULONG)x;
+							if ((INT)(x << 0x10) < 1) {
+								Col = 8;
+							}
 						}
 					}
+					goto normal;
 				}
-				goto normal;
+				if (Game.Doordemo_flg == 0 && Fade_status(0) != 0 && Task_status(1) == 0) {
+					Time_cnt = 0;
+					G.Status_flg &= ~STAT_TIMER;
+					G.System_flg |= SYS_TIMER_EXPIRED;
+					Col = 0;
+				}
+				goto render;
 			}
-			if (Game.Doordemo_flg == 0 && Fade_status(0) != 0 && Task_status(1) == 0) {
-				Time_cnt = 0;
-				G.Status_flg &= ~STAT_TIMER;
-				G.System_flg |= SYS_TIMER_EXPIRED;
-				Col = 0;
+normal:
+			Status_bak = pG->Status_flg;
+			if (pG->Front_func != NULL) {
+				((CODE_PTR)(pG->Front_func))();
 			}
+			if ((G.Status_flg & STAT_CAM_LOCK) == 0) {
+				Cut_check(0);
+			}
+			Sce_scheduler();
+			/* the status screen can open only when no cut change, door demo, background change or
+			 * scripted task is running and the player is not taking damage */
+			if (Task_status(1) == 0
+					&& pG->SaveData.Cut_no == (USHORT)pG->Next_cut_no
+					&& Main.Bg_chg_flg == 0
+					&& Game.Doordemo_flg == 0
+					&& (G.Status_flg & STAT_PL_BUSY) == 0
+					&& (G.Stop_flg & 0x1000000) == 0
+					&& pG->Player.Damage_cnt == 0
+					&& (G.System_flg & (SYS_GAME_OVER | 0x200)) == 0) {
+				/* pad trigger 0x100 opens the config and status screens; the key trigger 0x4000 opens the status screen */
+				if ((G.Padd1_trg & 0x100) != 0 && (G.Status_flg & STAT_STATUS_SCREEN) == 0) {
+					G.System_flg |= SYS_CONFIG;
+					G.Status_flg |= STAT_STATUS_SCREEN;
+				}
+				/* the key trigger opens the status screen only when no cinema scene is playing */
+				if ((G.Key_trg & 0x4000) != 0 && (G.Status_flg & STAT_CINESCO) == 0) {
+					G.Status_flg |= STAT_STATUS_SCREEN;
+				}
+				if ((G.Status_flg & STAT_STATUS_SCREEN) != 0) {
+					G.Status_flg |= STAT_PL_BUSY;
+					Game.Doordemo_flg = 1;
+					Game.Stop_bak = pG->Stop_flg;
+					G.Stop_flg |= 0xff000000;
+					if (St.St_type != 2) {
+						Snd_se_stad(0x4060000, (VECTOR *)NULL);
+					}
+					goto render;
+				}
+			}
+			ppEm = pG->pEnemy + 1;
+			SetSpadStack();
+			*(ULONG *)&Game.Move_flg = *(ULONG *)&Game.Move_flg | 1;
+			pG->Room_enemy_flg &= 0xff;
+			pPl = (ENEMY_WORK *)&pG->Player;
+			if (pG->ppEnemy_end != pG->pEnemy + 1) {
+				do {
+					pEm = *ppEm;
+					pG->pEm = pEm;
+					if ((pEm->Be_flg & 1) != 0 && (pEm->Type & 0x8000) == 0) {
+						x = pEm->Pos_x - pPl->Pos_x;
+						z = pEm->Pos_z - pPl->Pos_z;
+						pEm->L_pl = SquareRoot0(x * x + z * z);
+						((CODE_PTR)pG->Em_move_tbl[pEm->Id - 0x10])(pEm);
+					}
+					ppEm++;
+				} while (ppEm != pG->ppEnemy_end);
+			}
+			pG->pEm = (ENEMY_WORK *)&pG->Player;
+			if ((pG->Player.Type & 0x8000) == 0) {
+				Player_move((ENEMY_WORK *)&pG->Player);
+				Oba_ck_em2((ENEMY_WORK *)&pG->Player);
+				Sca_ck_em((ENEMY_WORK *)&pG->Player, 0x8000);
+				Set_front_pos((ENEMY_WORK *)&pG->Player);
+				V.vx = (LONG)pG->Player.Fpos_x;
+				V.vz = (LONG)pG->Player.Fpos_z;
+				Flg = 1 << pG->Player.nFloor;
+				pG->Player.Sca_info = pG->Player.Sca_info | Sca_ck_hit(&V, 0x1c2, Flg, 0x8000) << 0x10;
+				Om_move();
+			} else {
+				Om_move();
+			}
+			Sce_at();
+			if (pG->Back_func != NULL) {
+				((CODE_PTR)(pG->Back_func))();
+			}
+			ResetSpadStack();
+			goto loop_end;
 		} else {
 loop_end:
-			if ((G.System_flg & SYS_GAME_OVER) != 0 && Task_status(1) == 0
-					&& Main.Bg_chg_flg == 0
-					&& G.SaveData.Cut_no == (USHORT)G.Next_cut_no) {
+			if ((G.System_flg & SYS_GAME_OVER) != 0 && Task_status(1) == 0 && Main.Bg_chg_flg == 0 && G.SaveData.Cut_no == (USHORT)G.Next_cut_no) {
 				Task_lexecute(1, 2);
 				G.System_flg &= ~SYS_GAME_OVER;
 			}
@@ -257,21 +367,21 @@ render:
 		if ((Game.Plight_flg & 1) != 0) {
 			Gun_light_set();
 		}
-		ppEm = G.pEnemy;
-		if (G.ppEnemy_end != G.pEnemy) {
+		ppEm = pG->pEnemy;
+		if (pG->ppEnemy_end != pG->pEnemy) {
 			do {
 				pEm = *ppEm;
-				G.pEm = pEm;
+				pG->pEm = pEm;
 				if ((pEm->Be_flg & 1) != 0) {
 					pKage = (KAGE_WORK *)pEm->pKage_work;
-					if (pEm == (ENEMY_WORK *)&G.Player) {
+					if (pEm == (ENEMY_WORK *)&pG->Player) {
 						Kofs.vz = 0;
-						Kofs.vx = G.Player.Kage_ofs;
-						Rot_vector(G.Player.Cdir_y, &Kofs, &Kofs);
-						Kpos.vy = pKage->pPos->vx + (LONG)Kofs.vx;
-						Kpos.vz = pKage->pPos->vy;
-						Kpos.pad = pKage->pPos->vz + (LONG)Kofs.vz;
-						G.Player.Ground = (SHORT)Sca_get_ground((VECTOR *)&Kpos.vy, 0, (UINT)G.Player.Sc_id << 8, 0);
+						Kofs.vx = pG->Player.Kage_ofs;
+						Rot_vector(pG->Player.Cdir_y, &Kofs, &Kofs);
+						Kpos.vx = pKage->pPos->vx + (LONG)Kofs.vx;
+						Kpos.vy = pKage->pPos->vy;
+						Kpos.vz = pKage->pPos->vz + (LONG)Kofs.vz;
+						pG->Player.Ground = (SHORT)Sca_get_ground(&Kpos, 0, (UINT)pG->Player.Sc_id << 8, 0);
 					} else {
 						pEm->Ground = (SHORT)Sca_get_ground(pKage->pPos, 0, (UINT)pEm->Sc_id << 8, 0);
 					}
@@ -294,7 +404,7 @@ render:
 					pEm->Old_z2 = (SHORT)pEm->Atd[0].Z;
 				}
 				ppEm++;
-			} while (ppEm != G.ppEnemy_end);
+			} while (ppEm != pG->ppEnemy_end);
 		}
 		if (Game.Plight_flg != 0) {
 			Gun_light_reset();
@@ -316,144 +426,30 @@ post_render:
 		if ((G.System_flg & SYS_ENDING) != 0) {
 			Task_lchain(6);
 		}
-		if ((G.System_flg & SYS_IN_GAME) == 0) {
-			if ((G.System_flg & SYS_TIMER) == 0
-					&& (G.Status_flg & STAT_SCENARIO_B) == 0
-					&& (G.System_flg & 0x20080) == 0x20000
-					&& Flg_ck(G.SaveData.Common_flg, 6) == 0
-					&& G.SaveData.Save_cnt == 0) {
-				G.System_flg |= 0x80;
-			}
-pl_move:
-			Pad_vib_init();
-			Bg_set_mode(2, 0);
-			if ((G.System_flg & SYS_DEMO_MODE) == 0 || Main.Padoff_stop_flg[1][1] != 0) {
-				Main.Padoff_stop_flg[1][1] = 1;
-				Init_global();
-			} else {
-				Init_global();
-				Main.Padoff_stop_flg[0][1] = 0;
-				G.System_flg |= SYS_INTRO_PENDING;
-				Task_execute(1, Game_pad_wait_task);
-			}
-			Task_lchain(0);
-			return;
-		}
-		*(ULONG *)&Game.Move_flg = 0;
-		if (Main.Padoff_stop_flg[0][0] != 0) goto render;
-		x = Time_cnt + 1;
-		if ((G.System_flg & SYS_TIMER_EXPIRED) != 0) break;
-		if ((G.System_flg & SYS_DEMO_MODE) != 0 && Game.Doordemo_flg == 0 && Demo.Pdemo_cnt < G.Pdemo_cnt) {
-			G.SaveData.Key_idx = Key_idx_bak;
-			G.Stop_flg |= 0xff000000;
-			Fade_set(0x200, (Main.Padoff_stop_flg[1][1] == 0) ? 0x200 : 0x800, 7, 1);
-			Game.Doordemo_flg = 2;
-		}
-		switch (Game.Doordemo_flg) {
-		case 1:
-			if ((Moji.Mess_flg & 0x80) != 0 || Fade_status(0) == 0) break;
-			G.Stop_flg |= 0xff000000;
-			if ((G.Status_flg & STAT_STATUS_SCREEN) == 0 && (G.System_flg & SYS_SAVE_GAME) == 0) {
-				if ((G.System_flg & SYS_EX_BATTLE) == 0) {
-					G.System_flg |= SYS_FADE_OUT;
-					Bg_set_mode(1, 0);
-				} else {
-					if ((UCHAR)G.SaveData.Item_flg[7] == 0xff) {
-						Flg_on(G.SaveData.Zapping_flg, 0x3f);
-					}
-					if (Flg_ck(G.SaveData.Zapping_flg, 0x3f) == 0) {
-						G.System_flg |= SYS_FADE_OUT;
-						Bg_set_mode(1, 0);
-					}
-				}
-				G.Stop_flg = 0;
-				Stop_bak = 0;
-				G.System_flg |= SYS_DOOR_INIT;
-				Set_door();
-				goto move;
-			}
-			Fade_set(0x200, 0x1800, 7, 1);
-			Game.Doordemo_flg = 2;
-			/* fall through */
-		case 2:
-			if (Fade_status(0) == 0) goto trans;
-			Fade_set(0x200, 0, 7, 1);
-			Fade_adjust(0, 0x7fff, 0xffffff, (RECT *)NULL);
-			Task_sleep(2);
-			if ((G.System_flg & SYS_DEMO_MODE) != 0 && Demo.Pdemo_cnt < G.Pdemo_cnt) {
-				Snd_key_off_all();			/* was Snd_key_off_all */
-				goto pl_move;
-			}
-			G.Stop_flg = 0;
-			Stop_bak = 0;
-			if ((G.Status_flg & STAT_STATUS_SCREEN) == 0) {
-				if ((G.System_flg & SYS_SAVE_GAME) != 0) {
-					G.System_flg = (G.System_flg & ~SYS_SAVE_GAME) | SYS_DOOR_INIT;
-					Task_lexecute(1, 1);
-					Stop_bak = *(ULONG *)&Game.Stop_bak;
-					*(ULONG *)&Game.Stop_bak = 0;
-					Task_sleep(1);
-					G.System_flg &= ~SYS_CARD_LOAD;
-					Pl_set_packet();
-				} else {
-					G.System_flg |= SYS_DOOR_INIT;
-					Task_sleep(1);
-				}
-			} else {
-				if ((G.System_flg & SYS_CONFIG) == 0) {
-					G.System_flg |= SYS_DOOR_INIT;
-					Task_execute(1, Status);
-					Task_sleep(1);
-				} else {
-					G.System_flg = (G.System_flg & ~SYS_CONFIG) | SYS_DOOR_INIT;
-					Task_lexecute(1, 4);
-					Task_sleep(1);
-					Pl_set_packet();
-				}
-				Stop_bak = *(ULONG *)&Game.Stop_bak;
-				*(ULONG *)&Game.Stop_bak = 0;
-				G.Status_flg &= ~0x8040;
-				Task_sleep(1);
-			}
-			Game.Doordemo_flg = 3;
-			goto first;
-		case 3:
-			goto first;
-		case 4:
-			Game.Doordemo_flg = 5;
-			G.Stop_flg |= 0xff000000;
-			break;
-		case 5:
-			if (Fade_status(0) == 0) {
-				Game.Doordemo_flg = 0;
-				G.Stop_flg = Stop_bak;
-			}
-			break;
-		case 6:
-			while (Game.Doordemo_flg == 6) {
-				Task_sleep(1);
-			}
-			break;
-		case 7:
-			Task_execute(1, Windows);
-			Game.Doordemo_flg = 0;
-			goto post_render;
-		default:
-			break;
-		}
 	}
-	Time_cnt = (USHORT)x;
-	if ((SHORT)x == 0x10) {
-		Task_lexecute(1, 2);
-		Moji.Mess_flg = 0;
-		Time_cnt = (USHORT)-0x7530;
-	}
-	goto render;
+		if ((G.System_flg & SYS_TIMER) == 0 && (G.Status_flg & STAT_SCENARIO_B) == 0 && (G.System_flg & 0x20080) == 0x20000 && Flg_ck(pG->SaveData.Common_flg, 6) == 0 && pG->SaveData.Save_cnt == 0) {
+			G.System_flg |= 0x80;
+		}
+	pl_move:
+		Pad_vib_init();
+		Bg_set_mode(2, 0);
+		if ((G.System_flg & SYS_DEMO_MODE) != 0 && Main.Padoff_stop_flg[1][1] == 0) {
+			Init_global();
+			Main.Padoff_stop_flg[0][1] = 0;
+			G.System_flg |= SYS_INTRO_PENDING;
+			Task_execute(1, Game_pad_wait_task);
+		} else {
+			Main.Padoff_stop_flg[1][1] = 1;
+			Init_global();
+		}
+		Task_lchain(0);
+		return;
 }
 
 /* 80026b2c */
 /* DS 0x80026b2c (Game_pad_wait_task) */
 VOID Game_pad_wait_task(VOID) {
+	/* park until the pad-off stop flag is set, then clear it and end this task */
 	while (Main.Padoff_stop_flg[0][1] == 0) {
 		Task_sleep(1);
 	}
@@ -476,10 +472,10 @@ VOID Set_door(VOID) {
 		Door_snd_trans();
 		Task_sleep(1);
 	} else {
-		Door_ex_rno = 0;
+		Door_ex.rno = 0;
 		G.Next_cut_no = (UCHAR)G.SaveData.Cut_no;
 		Task_execute(1, Door_main_ex);
-		while ((G.System_flg & SYS_DOOR_PROCESS) != 0 && Door_ex_rno != 4) {
+		while ((G.System_flg & SYS_DOOR_PROCESS) != 0 && Door_ex.rno != 4) {
 			Task_sleep(1);
 		}
 	}
@@ -556,8 +552,11 @@ VOID Gun_light_set(VOID) {
 		Game.Plight_cnt++;
 		break;
 	case 1:
-		if (pLight->Col[2][0] < 0x7f) {
-			pLight->Col[2][0] = 0x7f;
+		{
+			UCHAR Col_lvl = 0x7f;	/* Col[2][0] is raised to this level when lower */
+			if (pLight->Col[2][0] < Col_lvl) {
+				pLight->Col[2][0] = Col_lvl;
+			}
 		}
 		if (pLight->Col[2][1] < Game.Plight_col[1] >> 1) {
 			pLight->Col[2][1] = Game.Plight_col[1] >> 1;
@@ -577,6 +576,8 @@ VOID Gun_light_set(VOID) {
 /* 800270ec */
 /* DS 0x800270ec (Gun_light_reset) */
 VOID Gun_light_reset(VOID) {
+	/* restore the 0x28-byte light cut saved in Plight_bak (skipping its 2-byte header) into the
+	 * current cut's slot; the active-light counters are cleared only when more than one light was used */
 	Memcpy(G.pRoom->pLight + G.SaveData.Cut_no, (VOID *)((INT)Game.Plight_bak + 2), 0x28);
 	if (Game.Plight_cnt > 1) {
 		Game.Plight_flg = 0;
@@ -591,4 +592,4 @@ tagGAME Game;
 PDEMO Demo;
 
 /* DS 0x800dfad6 (Key_idx_bak) */
-UCHAR Key_idx_bak = 0;
+UCHAR Key_idx_bak;

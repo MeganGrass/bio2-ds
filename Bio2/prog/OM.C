@@ -5,7 +5,6 @@
  */
 #include "TYPES.H"
 #include <ASM.H>
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
@@ -25,19 +24,25 @@
 #include "flag.h"
 
 /* DS 0x800d6c48 (Cc_work) */
-CC_WORK Cc_work = { { { 0 } } };
+CC_WORK Cc_work;
 
 /* DS 0x800d7638 (Om_fall_old_dir_x) */
-SHORT Om_fall_old_dir_x = 0x0000;
+SHORT Om_fall_old_dir_x;
+
+/* DS 0x800d7640 (Om_fall_old_dir_y): not referenced by any DS code */
+SHORT Om_fall_old_dir_y;
 
 /* DS 0x800d7642 (Om_fall_old_dir_z) */
-SHORT Om_fall_old_dir_z = 0x0000;
+SHORT Om_fall_old_dir_z;
 
 /* DS 0x800dcb98 (Om_fall_dir_x) */
-SHORT Om_fall_dir_x = 0x0000;
+SHORT Om_fall_dir_x;
+
+/* DS 0x800dcba0 (Om_fall_dir_y): not referenced by any DS code */
+SHORT Om_fall_dir_y;
 
 /* DS 0x800dcba2 (Om_fall_dir_z) */
-SHORT Om_fall_dir_z = 0x0000;
+SHORT Om_fall_dir_z;
 
 /* Om_init - 0x80035710
    Map an object model's TMD and preset its GT3/GT4 packets.
@@ -45,21 +50,21 @@ SHORT Om_fall_dir_z = 0x0000;
 /* DS 0x80035710 (Om_init) */
 void Om_init(ULONG Om_no, ULONG *pTmd_adr)
 {
+	OBJ_MODEL_WORK *pOm;
 	MODEL_WORK      *pMw;
 
+	pOm = &G.Ob_model[Om_no];
+	/* the TMD is mapped to VRAM only when it differs from the last one mapped (G.pOld_tmd) */
 	if (G.pOld_tmd != pTmd_adr)
 	{
 		G.pOld_tmd = pTmd_adr;
-		Mapping_tmd(1, pTmd_adr, (ULONG)G.Ob_model[Om_no].Tpage, (ULONG)G.Ob_model[Om_no].Clut);
+		Mapping_tmd(1, pTmd_adr, (ULONG)pOm->Tpage, (ULONG)pOm->Clut);
 	}
-	pMw = (MODEL_WORK *)&G.Ob_model[Om_no].Attribute;
-	G.Ob_model[Om_no].pTmd      = pTmd_adr + 3;
-	G.Ob_model[Om_no].Routine_0 = 0;
-	G.Ob_model[Om_no].Routine_1 = 0;
-	G.Ob_model[Om_no].Routine_2 = 0;
-	G.Ob_model[Om_no].Routine_3 = 0;
-	G.Ob_model[Om_no].pTmd2     = pTmd_adr + 10;
-	G.Ob_model[Om_no].Poly_rgb  = 0x808080;
+	pMw = (MODEL_WORK *)&pOm->Attribute;
+	pOm->pTmd      = pTmd_adr + 3;
+	*(long *)&pOm->Routine_0 = 0;
+	pOm->pTmd2     = pTmd_adr + 10;
+	pOm->Poly_rgb  = 0x808080;
 	G.pFree_work = (UCHAR *)PresetObjectGT3_neo(pMw, (ULONG *)G.pFree_work, 0);
 	G.pFree_work = (UCHAR *)PresetObjectGT4_neo(pMw, (ULONG *)G.pFree_work, 0);
 }
@@ -71,7 +76,8 @@ void Om_init(ULONG Om_no, ULONG *pTmd_adr)
 /* DS 0x800357d8 (Col_chg_init) */
 void Col_chg_init(ULONG Col_wk_no, CC_PARTS_WORK *pCcp)
 {
-	LONG            Frame_pad[4];   /* DS 0x800357d8: retail frame 0x30 keeps 16 unread bytes at 0x10 */
+	/* retail reserves 16 more bytes of locals (Col_chg_init frame 48); never read */
+	volatile int Rsv[4];
 	ULONG           Poly_num;
 	ULONG           Clut;
 	ULONG           i;
@@ -79,7 +85,6 @@ void Col_chg_init(ULONG Col_wk_no, CC_PARTS_WORK *pCcp)
 	ULONG           *p;
 	OBJ_MODEL_WORK  *pMw;
 
-	(void)Frame_pad;
 	pMw  = pCcp->pOm;
 	Clut = GetClut(0x130, Col_wk_no + 0x1e0);
 
@@ -210,7 +215,7 @@ void Col_chg(CC_PARTS_WORK *pCcp, RECT *pRect, ULONG Ctr)
 	case 3:
 		pRect->x = (SHORT)((pCcp->Cc_cnt / pCcp->Cc_wait) << 4);
 		pCcp->Cc_cnt++;
-		if ((ULONG)pCcp->Cc_cnt == (ULONG)pCcp->Cc_wait * pCcp->Cc_num)
+		if ((ULONG)pCcp->Cc_cnt == (ULONG)pCcp->Cc_num * pCcp->Cc_wait)
 		{
 			pCcp->Cc_cnt -= pCcp->Cc_wait;
 			pCcp->Cc_ctr  = 0x84;
@@ -221,8 +226,8 @@ void Col_chg(CC_PARTS_WORK *pCcp, RECT *pRect, ULONG Ctr)
 		pRect->x = (SHORT)((pCcp->Cc_cnt / pCcp->Cc_wait) << 4);
 		if (pCcp->Cc_cnt == 0)
 		{
+			pCcp->Cc_cnt += pCcp->Cc_wait;
 			pCcp->Cc_ctr = 0x83;
-			pCcp->Cc_cnt = pCcp->Cc_wait;
 		}
 		break;
 	}
@@ -250,14 +255,14 @@ void Tex_chg(CC_PARTS_WORK *pCcp, RECT *pRect, ULONG Ctr)
 		pRect->x = pCcp->Cc_pos_x + (SHORT)((pCcp->Cc_cnt / pCcp->Cc_wait) >> 2) * 0x20;
 		pRect->y = pCcp->Cc_pos_y + ((pCcp->Cc_cnt / pCcp->Cc_wait) & 3) * 0x40;
 		pCcp->Cc_cnt++;
-		if ((ULONG)pCcp->Cc_cnt == (ULONG)pCcp->Cc_wait * pCcp->Cc_num)
+		if ((ULONG)pCcp->Cc_cnt == pCcp->Cc_num * (ULONG)pCcp->Cc_wait)
 			pCcp->Cc_cnt = pCcp->Cc_wait;
 		break;
 	case 3:
 		pRect->x = pCcp->Cc_pos_x + (SHORT)((pCcp->Cc_cnt / pCcp->Cc_wait) >> 2) * 0x20;
 		pRect->y = pCcp->Cc_pos_y + ((pCcp->Cc_cnt / pCcp->Cc_wait) & 3) * 0x40;
 		pCcp->Cc_cnt++;
-		if ((ULONG)pCcp->Cc_cnt == (ULONG)pCcp->Cc_wait * pCcp->Cc_num)
+		if ((ULONG)pCcp->Cc_cnt == pCcp->Cc_num * (ULONG)pCcp->Cc_wait)
 		{
 			pCcp->Cc_cnt -= pCcp->Cc_wait;
 			pCcp->Cc_ctr  = 0x44;
@@ -327,14 +332,12 @@ void Om_move(void)
 			else if (Oma_ck_oba((ENEMY_WORK *)&G.Player, pOm, 2) != 0)
 			{
 				Hit_cnt++;
-				if ((G.Player.nFloor == pOm->nFloor) &&
-					(Oma_ck_front((ENEMY_WORK *)&G.Player, pOm) != 0))
+				if ((G.Player.nFloor == pOm->nFloor) && (Oma_ck_front((ENEMY_WORK *)&G.Player, pOm) != 0))
 					pHit_om = pOm;
 			}
 
 			/* falling box: start the fall when pushed off a ledge */
-			if ((pOm->Id == 2) && (pOm->Routine_0 == 0) &&
-				((Sca_ck_hit_om(pOm, 0x4000, 0x100) & 4) != 0))
+			if ((pOm->Id == 2) && (pOm->Routine_0 == 0) && ((Sca_ck_hit_om(pOm, 0x4000, 0x100) & 4) != 0))
 			{
 				Om_set_fall_dir(pOm);
 				pOm->Routine_0 = 1;
@@ -344,8 +347,7 @@ void Om_move(void)
 	}
 
 	/* player pushes a single pushable object */
-	if ((Hit_cnt == 1) && (pHit_om != NULL) &&
-		((pHit_om->Be_flg & 2) == 0) && ((pHit_om->Be_flg & 0x80) != 0))
+	if ((Hit_cnt == 1) && (pHit_om != NULL) && ((pHit_om->Be_flg & 2) == 0) && ((pHit_om->Be_flg & 0x80) != 0))
 	{
 		Bak_pos_x = (SHORT)pHit_om->Pos_x;
 		Bak_pos_z = (SHORT)pHit_om->Pos_z;
@@ -406,19 +408,24 @@ void Om_trans(void)
 {
 	MATRIX          M;
 	OBJ_MODEL_WORK  *pOm;
+	OBJ_MODEL_WORK  *pNext;
 	VECTOR          *pV;
 	ULONG           Cnt;
 	ULONG           D0;
+	tagGLOBAL      *pG = &G;
+	/* Retail reserves 8 bytes at sp+0x30 and never reads them */
+	volatile int    Rsv[2];
 	UCHAR           nOmodel;
 
-	nOmodel = G.pRoom->nOmodel;
+	nOmodel = pG->pRoom->nOmodel;
 	if (nOmodel == 0)
 		return;
 
-	pOm = G.Ob_model;
+	pOm = pG->Ob_model;
 	Cnt = 0;
 	do {
 		Cnt++;
+		pNext = pOm + 1;
 		if (((pOm->Be_flg & 1) != 0) && ((pOm->Be_flg & 0x80000) == 0))
 		{
 			RotMatrix((SVECTOR *)&pOm->Cdir_x, (MATRIX *)pOm->M);
@@ -439,30 +446,24 @@ void Om_trans(void)
 			{
 				Mizu_trans(pOm, D0);
 			}
-			else if ((Hit_ck_point4(pV, G.Cccut) != 0) || ((pOm->Be_flg & 0x10) != 0))
+			else if ((Hit_ck_point4(pV, pG->Cccut) != 0) || ((pOm->Be_flg & 0x10) != 0))
 			{
 				if ((pOm->Parts.Be_flg & 8) != 0)
 				{
-					Bomb_Parts_SortGT3((TMD_MEM *)pOm->pTmd,
-									   (POLY_GT3 *)(pOm->pPacket + G.Cbuf_id * 10), &pOm->Parts);
-					Bomb_Parts_SortGT4((TMD_MEM *)pOm->pTmd2,
-									   (POLY_GT4 *)(pOm->pPacket2 + G.Cbuf_id * 13), &pOm->Parts);
+					Bomb_Parts_SortGT3((TMD_MEM *)pOm->pTmd, (POLY_GT3 *)(pOm->pPacket + pG->Cbuf_id * 10), &pOm->Parts);
+					Bomb_Parts_SortGT4((TMD_MEM *)pOm->pTmd2, (POLY_GT4 *)(pOm->pPacket2 + pG->Cbuf_id * 13), &pOm->Parts);
 					if (++pOm->Parts.Free[4] == 0x1e)
 						pOm->Be_flg = 0;
 				}
-				else if ((pOm->Attribute & 0x10) == 0)
+				else if ((pOm->Attribute & 0x10) != 0)
 				{
-					SortGT3_neo((TMD_MEM *)pOm->pTmd,
-								(POLY_GT3 *)(pOm->pPacket + G.Cbuf_id * 10), pOm->Poly_rgb, D0);
-					SortGT4_neo((TMD_MEM *)pOm->pTmd2,
-								(POLY_GT4 *)(pOm->pPacket2 + G.Cbuf_id * 13), pOm->Poly_rgb, D0);
+					SortGT3_lno((TMD_MEM *)pOm->pTmd, (POLY_GT3 *)(pOm->pPacket + pG->Cbuf_id * 10), pOm->Poly_rgb, D0);
+					SortGT4_lno((TMD_MEM *)pOm->pTmd2, (POLY_GT4 *)(pOm->pPacket2 + pG->Cbuf_id * 13), pOm->Poly_rgb, D0);
 				}
 				else
 				{
-					SortGT3_lno((TMD_MEM *)pOm->pTmd,
-								(POLY_GT3 *)(pOm->pPacket + G.Cbuf_id * 10), pOm->Poly_rgb, D0);
-					SortGT4_lno((TMD_MEM *)pOm->pTmd2,
-								(POLY_GT4 *)(pOm->pPacket2 + G.Cbuf_id * 13), pOm->Poly_rgb, D0);
+					SortGT3_neo((TMD_MEM *)pOm->pTmd, (POLY_GT3 *)(pOm->pPacket + pG->Cbuf_id * 10), pOm->Poly_rgb, D0);
+					SortGT4_neo((TMD_MEM *)pOm->pTmd2, (POLY_GT4 *)(pOm->pPacket2 + pG->Cbuf_id * 13), pOm->Poly_rgb, D0);
 				}
 			}
 
@@ -473,7 +474,7 @@ void Om_trans(void)
 			pOm->Old_y2 = (SHORT)pOm->Atd[0].Y;
 			pOm->Old_z2 = (SHORT)pOm->Atd[0].Z;
 		}
-		pOm++;
+		pOm = pNext;
 	} while (Cnt < nOmodel);
 }
 
@@ -551,8 +552,7 @@ void Om_move_box(OBJ_MODEL_WORK *pOm)
 				pOm->Old_x  = (SHORT)pOm->Pos_x;
 				pOm->Old_z  = (SHORT)pOm->Pos_z;
 				/* DS: nFloor = (sign of ground word) - ((char)(ground / 0x708) + (char)(ground >> 7)) */
-				pOm->nFloor = (CHAR)(((Ground < 0) ? -1 : 0)
-								- ((CHAR)(Ground / 0x708) + (CHAR)(Ground >> 7)));
+				pOm->nFloor = (CHAR)(((Ground < 0) ? -1 : 0) - ((CHAR)(Ground / 0x708) + (CHAR)(Ground >> 7)));
 			}
 			if ((In_water_flg == 0) && (pOm->Water != 0) && (pOm->Water < pOm->Pos_y))
 			{
@@ -614,6 +614,8 @@ void Om_set_fall_dir(OBJ_MODEL_WORK *pOm)
 {
 	SHORT   Dx;
 
+	/* the object falls along the axis on which it is farther from the player: within 900 units in X
+	 * it falls along Z (toward the side it is on), otherwise along X (away from the player) */
 	Dx = (SHORT)(pOm->Pos_x - G.Player.Pos_x);
 	if (((Dx < 0) ? -Dx : Dx) < 900)
 	{
@@ -635,12 +637,12 @@ void Om_set_fall_dir(OBJ_MODEL_WORK *pOm)
 /* DS 0x80036cf8 (Ob_test_load2) */
 ULONG Ob_test_load2(void)
 {
+	/* retail reserves 16 more bytes of locals (Ob_test_load2 frame 80); never read */
+	volatile int Rsv[4];
 	/* DS 0x80036cf8: retail frame 0x50 keeps a 16-byte area below tim_file (0x10) and tmd_file (0x30) */
-	LONG    Frame_pad[4];
 	UCHAR   tim_file[31] = "d:/bio2/room/data/tetubox1.tim";
 	UCHAR   tmd_file[31] = "d:/bio2/room/data/tetubox1.tm2";
 
-	(void)Frame_pad;
 	(void)tim_file;
 	return tmd_file[30];
 }
@@ -651,19 +653,19 @@ ULONG Ob_test_load2(void)
 /* DS 0x80036e30 (Oma_set_ofs) */
 void Oma_set_ofs(OBJ_MODEL_WORK *pOm)
 {
-	if ((pOm->Cdir_y & 0x400) == 0)
-	{
-		pOm->Atd[0].Atw_x = pOm->Atd[0].Ofs_x;
-		pOm->Atd[0].Atw_z = pOm->Atd[0].Ofs_z;
-		pOm->Atd[0].W     = pOm->Atd[0].At_w;
-		pOm->Atd[0].D     = pOm->Atd[0].At_d;
-	}
-	else
+	if ((pOm->Cdir_y & 0x400) != 0)
 	{
 		pOm->Atd[0].Atw_x = pOm->Atd[0].Ofs_z;
 		pOm->Atd[0].Atw_z = pOm->Atd[0].Ofs_x;
 		pOm->Atd[0].W     = pOm->Atd[0].At_d;
 		pOm->Atd[0].D     = pOm->Atd[0].At_w;
+	}
+	else
+	{
+		pOm->Atd[0].Atw_x = pOm->Atd[0].Ofs_x;
+		pOm->Atd[0].Atw_z = pOm->Atd[0].Ofs_z;
+		pOm->Atd[0].W     = pOm->Atd[0].At_w;
+		pOm->Atd[0].D     = pOm->Atd[0].At_d;
 	}
 	pOm->Atd[0].X = pOm->Pos_x + pOm->Atd[0].Atw_x;
 	pOm->Atd[0].Y = pOm->Pos_y + pOm->Atd[0].Ofs_y;
@@ -673,16 +675,20 @@ void Oma_set_ofs(OBJ_MODEL_WORK *pOm)
 /* Om_explosion_set - 0x80036eb4 .. 0x80036ef7 (0x44 bytes)
    No Ghidra function here; body taken from the raw SLUS_007.48 words (re-checked 2026-10-13:
    every store, Free[1] = -10 from "li v0,-0xa", and the jr ra at 0x80036ef0 match).
+   DS loads the Free[4] value with "ori v0,zero,0x8000" (an unsigned 16-bit constant), while the
+   Free[1] value is "addiu v0,zero,-0xa". Free[] is SHORT, and a SHORT store of 0x8000 compiles to
+   "addiu v0,zero,-0x8000", so the Free[4] store goes through a USHORT view of the element. The
+   halfword written is 0x8000 either way.
 */
 /* DS 0x80036eb4 (Om_explosion_set) */
 void Om_explosion_set(OBJ_MODEL_WORK *pOm)
 {
+	*(USHORT *)&pOm->Parts.Free[4] = 0x8000;
+	pOm->Parts.Free[1]  = -10;
 	pOm->Parts.Be_flg  |= 0x4a;
 	pOm->Parts.Poly_rgb = 0x404040;
-	pOm->Parts.Free[0]  = pOm->Cdir_y + 0x800;
-	pOm->Parts.Free[1]  = -10;
 	pOm->Parts.Free[2]  = 0;
 	pOm->Parts.Free[3]  = 0;
-	pOm->Parts.Free[4]  = 0x8000;
 	pOm->Parts.Free[6]  = 0;
+	pOm->Parts.Free[0]  = pOm->Cdir_y + 0x800;
 }

@@ -90,7 +90,7 @@ struct tagSET_EM_JMP {
 /* ------------------------------------------------------------------ */
 
 /* EM_BIN_INFO - which enemy overlay is resident in a bank (4 bytes)   */
-/* (G.Em_bin_info[2] @ G+0x4134; belongs in GLOBAL.H once it exists)   */
+/* (G.Em_bin_info[2] @ G+0x4134)   */
 struct tagEM_BIN_INFO {
 	/* 0x00 */ USHORT Id;
 	/* 0x02 */ USHORT Use;
@@ -106,9 +106,11 @@ struct tagDATA_POS {
 /* Externs                                                              */
 /* ------------------------------------------------------------------ */
 
-/* Enemy overlay load area: two 0xd000-byte banks                      */
-/* DS 0x80100000 */
-extern UCHAR     Em_ov_bank[2][0xd000];
+/* Enemy overlay load area: two 0xd000-byte banks. They start at the   */
+/* EM_BIN_0 id object (DS 0x80100000, linked by Makefile.link).        */
+/* DS 0x80100000 (EM_BIN_0_id) */
+extern UCHAR EM_BIN_0_id[];
+#define Em_ov_bank	((UCHAR (*)[0xd000])EM_BIN_0_id)
 
 /* CD position / checksum tables of the enemy EMD archives             */
 /* DS 0x8009adf4 */

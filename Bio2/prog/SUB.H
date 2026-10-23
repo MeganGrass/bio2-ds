@@ -8,6 +8,8 @@
 #include "TYPES.H"
 
 /* ---- types migrated from data.h ---- */
+/* Light setup for one room cut: a magnitude, three light modes and colours, an ambient colour, three light
+ * positions and three intensity values. Stored in the room's light table. */
 struct tagLIGHT_CUT_DATA {
 	UCHAR Mag;
 	UCHAR Mode[3];
@@ -17,6 +19,8 @@ struct tagLIGHT_CUT_DATA {
 	USHORT L[3];
 };
 
+/* One entry of the free-work allocation table: the block address and its size. Get_work fills it and
+ * Free_work searches it. */
 struct tagMEMORY_MANAGE {
 	VOID* pAddress;
 	ULONG Size;
@@ -48,7 +52,7 @@ extern ULONG Free_work(register VOID **p);
 
 extern MEMORY_MANAGE Mem_man[8];	// 800D5BA0		// 64 bytes
 extern MEMORY_MANAGE *pCmem_man;	// 800AB204		// 8 bytes
-extern UCHAR Prim_work_buf[];		// 8018F040		// Mapping_tmd scratch buffer
+extern UCHAR *Prim_work_buf;		// 8018F040		// Mapping_tmd scratch buffer
 
 
 

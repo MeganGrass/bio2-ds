@@ -8,9 +8,7 @@
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBSND.H>
-#include <MCGUI.H>
 #include "OPENING.H"
 #include "CD.H"
 #include "CONFIG.H"
@@ -24,6 +22,13 @@
 #include "DOOR.H"
 #include "FILECODE.H"
 #include "flag.h"
+
+/* DS 0x801c24d8 (Opening_prim) */
+POLY_FT4 (*Opening_prim)[32] = (POLY_FT4 (*)[32])0x801c24d8;
+/* DS 0x8013f814 (Opening_scene_tim_buf) */
+ULONG *Opening_scene_tim_buf = (ULONG *)0x8013f814;
+/* DS 0x80165028 (Opening_tim_load_buf) */
+ULONG *Opening_tim_load_buf = (ULONG *)0x80165028;
 
 
 /* Cd_read file codes. [0..3] TIM loads at the top of Opening_init; the
@@ -203,14 +208,8 @@ USHORT Opening_scene_no;
 /* DS 0x801c24d4 (Opening_trans_phase) */
 UCHAR Opening_trans_phase;
 
-/* DS 0x801c24d8 (Opening_prim) */
-POLY_FT4 Opening_prim[2][32] RAM_SECTION(".buf_opening_prim");
 
-/* DS 0x8013f814: second scene TIM buffer (OPEN11/OPEN14, 0x25800 bytes = floc size); copied to Bg_img_buf */
-ULONG Opening_scene_tim_buf[0x9600] RAM_SECTION(".buf_opening_scene_tim_buf");
 
-/* DS 0x80165028: bank TIM load buffer (OPEN01_TIM, 0x25C20 bytes = the largest floc size) */
-ULONG Opening_tim_load_buf[0x9708] RAM_SECTION(".buf_opening_tim_load_buf");
 
 /* DS 0x801c2ed8 (Opening_sprite_cur) */
 OP_WORK *Opening_sprite_cur;
@@ -237,6 +236,9 @@ ULONG Opening_vis_mask;
  * of the function, as retail does, and indexes that copy. */
 typedef struct { UCHAR t[5]; } OP_CTPAGE_TBL;
 
+/* Opening main loop, one pass per frame: draw the current draw and scene handlers, draw the sprites,
+ * and count frames. After frame 400 the pad 0x800 press skips the intro (phase 0 to 1 starts the
+ * BGM fade and jumps to scene 4; phase 2 to 3 finishes the transition). */
 /* DS 0x801bfad8 (Opening) */
 VOID Opening(VOID)
 {
@@ -287,6 +289,9 @@ VOID Opening(VOID)
 	} while (1);
 }
 
+/* Transition wait used by the skip path. Sprites flagged with type bit 0x10 are cleared each call. In
+ * phase 1 it waits for the fade to finish and the first edit entry to clear, then sets phase 2 with a
+ * 0x5a-frame timer and returns to the scene saved before the skip. */
 /* DS 0x801bfcfc (Opening_trans_wait) */
 VOID Opening_trans_wait(VOID)
 {
@@ -315,9 +320,12 @@ VOID Opening_trans_wait(VOID)
 VOID Opening_init(VOID)
 {
 	BGMCTR bgm;
-	USHORT idx;
+	/* 40-byte stack gap: retail reserves 40 bytes below its ctpage copy and never reads them; saves already match */
+	volatile UCHAR frame_gap[40];
+	/* idx and pFree_bak are volatile so they stay in the stack frame, where retail keeps them; the values and the order of use are unchanged */
+	volatile USHORT idx;
 	ULONG cd_ret;
-	UCHAR *pFree_bak;
+	UCHAR * volatile pFree_bak;
 	OP_CTPAGE_TBL ctpage;
 
 	ctpage = *(OP_CTPAGE_TBL *)Opening_ctpage;
@@ -1136,6 +1144,8 @@ next_timer:
 /* DS 0x801c1a0c (Opening_sprite_draw) */
 VOID Opening_sprite_draw(VOID)
 {
+	/* retail reserves 24 more bytes of locals (Opening_sprite_draw frame 88); never read */
+	volatile int Rsv[6];
 	OP_WORK *pSpr;
 	OP_MOJI_TBL *pTbl;
 	POLY_FT4 *p;

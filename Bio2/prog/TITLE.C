@@ -11,7 +11,6 @@
 #include <LIBETC.H>
 #include <LIBGPU.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include "TITLE.h"
 #include "CD.H"
 #include "EM_SET.H"
@@ -36,15 +35,17 @@
 #include "SCE2.H"
 #include "FILECODE.H"
 #include "flag.h"
-/* TITLE work buffers (declared extern in TITLE.H) */
-ULONG Title_bg_work_buf[0x96F8] RAM_SECTION(".buf_title_bg_work_buf");	/* DS 0x80132420, Title_BG CD load buffer */
+#include "SPL_TBL.H"
+
+/* DS 0x80132420 (Title_bg_work_buf) */
+ULONG *Title_bg_work_buf = (ULONG *)0x80132420;
+/* DS 0x80168000 (Ex_room_snd_buf) */
+UCHAR *Ex_room_snd_buf = (UCHAR *)0x80168000;
+/* DS 0x8018d270 (Init_tbl_buf) */
+UCHAR *Init_tbl_buf = (UCHAR *)0x8018d270;
 
 /* TITLE overlay data (declared extern in TITLE.H). ROM items carry the TITLE.BIN bytes at their DS address; RAM items are zero-initialised. */
-/* DS 0x80168000 (Ex_room_snd_buf), ROOM800.SND load buffer. Size 0x9C4C = floc[ROOM800_SND] byte size (FILE_LOC.H), the length Cd_read loads. */
-UCHAR Ex_room_snd_buf[0x9C4C] RAM_SECTION(".buf_ex_room_snd_buf");
 
-/* DS 0x8018d270 (Init_tbl_buf) */
-UCHAR Init_tbl_buf[0x2D90] RAM_SECTION(".buf_init_tbl_buf");
 
 /* DS 0x80196794 (Open_msg_00) */
 UCHAR Open_msg_00[] = {
@@ -611,6 +612,8 @@ moji_disp:
 /* DS 0x80190d34 (Title_moji_disp) */
 static VOID Title_moji_disp(ULONG Cur, ULONG Pass_mask, LONG Disp_dist, LONG Disp_dir)
 {
+	/* retail reserves 16 more bytes of locals (Title_moji_disp frame 80); never read */
+	volatile int Rsv[4];
 	register LONG i;
 	// display helper for moji (text sprite) overlay
 	// sets Y positions, brightness, and queues primitives for each moji entry
@@ -729,33 +732,39 @@ static VOID Title_mode_disp(LONG Mode, LONG Sel_no)
 	UCHAR kido2;
 	CHAR disp_col;
 	SPRT *pPrim;
+	TITLE_WORK *ti;
+	tagGLOBAL *pg;
 
+	ti = &Ti;
+	pg = &G;
 	for (j = 0; j < 4; j++) {
 		for (i = 0; i < 2; i++) {
-			kido2 = Ti.Moji_kido2;
-			pPrim = &Title_prim[j * 2 + i + 54].Spr[G.Cbuf_id];
-			pPrim->b0 = Ti.Moji_kido2;
+			kido2 = ti->Moji_kido2;
+			pPrim = &Title_prim[j * 2 + i + 54].Spr[pg->Cbuf_id];
+			pPrim->b0 = ti->Moji_kido2;
 			pPrim->g0 = kido2;
 			pPrim->r0 = kido2;
-			Title_prim[j * 2 + i + 54].Spr[G.Cbuf_id].clut = 0x7f8c;
-			AddPrim(G.pOt1 + 1, (VOID *)&Title_prim[j * 2 + i + 54].Spr[G.Cbuf_id]);
-			AddPrim(G.pOt1 + 1, (VOID *)&Title_prim[j * 2 + i + 54].Dr[G.Cbuf_id]);
+			Title_prim[j * 2 + i + 54].Spr[pg->Cbuf_id].clut = 0x7f8c;
+			AddPrim(pg->pOt1 + 1, (VOID *)&Title_prim[j * 2 + i + 54].Spr[pg->Cbuf_id]);
+			AddPrim(pg->pOt1 + 1, (VOID *)&Title_prim[j * 2 + i + 54].Dr[pg->Cbuf_id]);
 		}
 	}
 	if (Mode == 0) {
-		Title_prim[Sel_no * 2 + 54].Spr[G.Cbuf_id].clut = 0x7f80;
-		pPrim = &Title_prim[Sel_no * 2 + 54].Spr[G.Cbuf_id];
+		Title_prim[Sel_no * 2 + 54].Spr[pg->Cbuf_id].clut = 0x7f80;
+		pPrim = &Title_prim[Sel_no * 2 + 54].Spr[pg->Cbuf_id];
 	} else {
-		Title_prim[60].Spr[G.Cbuf_id].clut = 0x7f80;
-		pPrim = &Title_prim[60].Spr[G.Cbuf_id];
+		Title_prim[60].Spr[pg->Cbuf_id].clut = 0x7f80;
+		pPrim = &Title_prim[60].Spr[pg->Cbuf_id];
 	}
-	disp_col = Ti.Moji_kido2 + Ti.Disp_cnt;
+	disp_col = ti->Moji_kido2 + ti->Disp_cnt;
 	pPrim->b0 = disp_col;
 	pPrim->g0 = disp_col;
 	pPrim->r0 = disp_col;
 }
 
 /* DS 0x80191628 (Ex_battle_result) */
+/* Extra-mode result: loads overlay 7 into a new task (Task_lexecute), waits one frame and moves the title
+ * state machine to Main_rtn 5, clearing the tile fade and background counters. */
 VOID Ex_battle_result(VOID)
 {
 	Task_lexecute(2, 7);
@@ -811,6 +820,8 @@ fade_check:
 }
 
 /* DS 0x80191808 (Title) */
+/* Title overlay entry, once per frame. Ti.Main_rtn picks the state: 0 Capcom logo, 1 title init, 2 title
+ * main, 3 and 4 spy screen, 5 and 6 extra-mode screen, 7 extra-mode result. */
 VOID Title(VOID)
 {
 	/* Retail Title_rtn_tbl at 0x80196e40, 8 entries (TITLE.BIN offset 0x6e40), indexed by Ti.Main_rtn */
@@ -824,17 +835,21 @@ VOID Title(VOID)
 	Ti.Main_rtn = 0;
 	Title_prim = (TITLE_PRIM *)Prim_work_buf;
 	Moji_set_work();
+	/* ExData[0] set means the extra-mode data is present: start in the extra-mode result state and load
+	 * the ROOM800.SND sound block into the free work area before the title runs. */
 	if (G.ExData[0] != 0) {
 		Ti.Main_rtn = 7;
 		Snd_sys_core_set(17, 0);
-		G.pFree_work = (UCHAR *)&Ex_room_snd_buf;
+		G.pFree_work = Ex_room_snd_buf;
+		/* read_size + 1 == 0 is the same test as read_size == 0xffffffff (unsigned wrap), written this way so the -1 constant is not held in a register across Cd_read. */
 		do {
 			read_size = Cd_read(ROOM800_SND, (ULONG *)G.pFree_work, 1, (UCHAR *)"ROOM800.SND");
-		} while (read_size == 0xffffffff);
+		} while (read_size + 1 != 0);
+		/* G.pFree_work still equals Ex_room_snd_buf here (Cd_read does not write it; same pattern as ENDING.C), so the header address is read back from it instead of being held across the loop. */
 		Ex_room_cnt = 0;
-		Ex_room_snd_a = ((ULONG)&Ex_room_snd_buf + 0xc0);
-		Ex_room_snd_hdr = (ULONG)&Ex_room_snd_buf;
-		Ex_room_snd_b = ((ULONG)&Ex_room_snd_buf + 0xce0);
+		Ex_room_snd_a = ((ULONG)Ex_room_snd_buf + 0xc0);
+		Ex_room_snd_hdr = (ULONG)G.pFree_work;
+		Ex_room_snd_b = ((ULONG)Ex_room_snd_buf + 0xce0);
 		G.pRoom = (ROOM_WORK *)&pRoom_ex;
 		G.pFree_work += read_size;
 		Snd_sys_room_set();
@@ -975,6 +990,7 @@ VOID Title_main(VOID)
 }
 
 /* DS 0x80191e3c (Title_main_game) */
+/* Start the game from the title: Task_chain replaces this task with Game_loop. */
 VOID Title_main_game(VOID)
 {
 	Task_chain(Game_loop);
@@ -1884,22 +1900,24 @@ VOID Moji_set_work(VOID)
 	UCHAR *pClutX;
 	USHORT tpage;
 	SPRT *p;
+	T_MOJI_TBL *pw;
 
 	for (j = 0; j < 2; j++) {
 		for (i = 0; i < 0x3e; i++) {
 			p = &Title_prim[i].Spr[j];
+			pw = &Moji_work_tbl[i];
 			p->r0 = 0x80; p->g0 = 0x80; p->b0 = 0x80; p->code = 0;
-			p->x0 = Moji_work_tbl[i].x;
-			p->y0 = Moji_work_tbl[i].y;
-			p->w  = Moji_work_tbl[i].w;
-			p->h  = Moji_work_tbl[i].h;
-			p->u0 = Moji_work_tbl[i].u;
-			p->v0 = Moji_work_tbl[i].v;
-			p->clut = (Moji_work_tbl[i].clut_y + 0x1e0) * 0x40;
+			p->x0 = pw->x;
+			p->y0 = pw->y;
+			p->w  = pw->w;
+			p->h  = pw->h;
+			p->u0 = pw->u;
+			p->v0 = pw->v;
+			p->clut = (pw->clut_y + 0x1e0) * 0x40;
 			SetSprt(p);
-			SetSemiTrans(p, (ULONG)Moji_work_tbl[i].flag);
-			pRate = &Moji_work_tbl[i].rate;
-			pClutX = &Moji_work_tbl[i].clut_x;
+			SetSemiTrans(p, (ULONG)pw->flag);
+			pRate = &pw->rate;
+			pClutX = &pw->clut_x;
 			tpage = GetTPage(1, (ULONG)*pRate, (ULONG)*pClutX << 6, 0);
 			SetDrawMode(&Title_prim[i].Dr[j], 0, 0, (ULONG)tpage, (RECT *)0x0);
 		}
@@ -1915,6 +1933,8 @@ VOID Moji_set_work(VOID)
 /* DS 0x80194240 (Moji_SelectMode) */
 VOID Moji_SelectMode(ULONG Mode, ULONG No, ULONG Dis, ULONG Flg)
 {
+	/* retail reserves 32 more bytes of locals (Moji_SelectMode frame 88); never read */
+	volatile int Rsv[8];
 	SHORT disp_ofs;
 	UCHAR kido_save;
 	CHAR disp_col;
@@ -1986,40 +2006,46 @@ static VOID Moji_mode_disp(LONG Mode, ULONG Opt_a, ULONG Opt_b, LONG Row)
 	CHAR disp_col;
 	ULONG col;
 	ULONG row;
+	TITLE_PRIM **ppt;
+	TITLE_WORK *ti;
+	tagGLOBAL *pg;
 
+	ti = &Ti;
+	pg = &G;
+	ppt = &Title_prim;
 	row = 0;
 	do {
 		col = 0;
 		do {
-			kido2 = Ti.Moji_kido2;
+			kido2 = ti->Moji_kido2;
 			cell = row * 2 + col + 8;
 			col++;
-			Title_prim[cell].Spr[G.Cbuf_id].b0 = Ti.Moji_kido2;
-			Title_prim[cell].Spr[G.Cbuf_id].g0 = kido2;
-			Title_prim[cell].Spr[G.Cbuf_id].r0 = kido2;
+			Title_prim[cell].Spr[pg->Cbuf_id].b0 = ti->Moji_kido2;
+			Title_prim[cell].Spr[pg->Cbuf_id].g0 = kido2;
+			Title_prim[cell].Spr[pg->Cbuf_id].r0 = kido2;
 		} while (col < 2);
 		row = row + 1; col = 0;
 	} while (row < 3);
 	cell = 0;
 	do {
 		if (Mode == 0) {
-			if (Ti.Rookie_flg == 1) {
-				Title_prim[cell + 8].Spr[G.Cbuf_id].clut = 0x7f8c;
-				Title_prim[cell + 10].Spr[G.Cbuf_id].clut = 0x7f80;
+			if (ti->Rookie_flg == 1) {
+				Title_prim[cell + 8].Spr[pg->Cbuf_id].clut = 0x7f8c;
+				Title_prim[cell + 10].Spr[pg->Cbuf_id].clut = 0x7f80;
 				Row = 1;
 			} else {
-				Title_prim[cell + 10].Spr[G.Cbuf_id].clut = 0x7f8c;
-				Title_prim[cell + 8].Spr[G.Cbuf_id].clut = 0x7f80;
+				Title_prim[cell + 10].Spr[pg->Cbuf_id].clut = 0x7f8c;
+				Title_prim[cell + 8].Spr[pg->Cbuf_id].clut = 0x7f80;
 				Row = 0;
 			}
-			Title_prim[cell + 12].Spr[G.Cbuf_id].clut = 0x7f8c;
+			Title_prim[cell + 12].Spr[pg->Cbuf_id].clut = 0x7f8c;
 		} else if (Mode == 1) {
-			Title_prim[cell + 8].Spr[G.Cbuf_id].clut = 0x7f8c;
-			Title_prim[cell + 10].Spr[G.Cbuf_id].clut = 0x7f8c;
+			Title_prim[cell + 8].Spr[pg->Cbuf_id].clut = 0x7f8c;
+			Title_prim[cell + 10].Spr[pg->Cbuf_id].clut = 0x7f8c;
 			if (col == 0) {
-				Title_prim[12].Spr[G.Cbuf_id].clut = 0x7f80;
+				Title_prim[12].Spr[pg->Cbuf_id].clut = 0x7f80;
 			} else {
-				Title_prim[cell + 12].Spr[G.Cbuf_id].clut = 0x7f8c;
+				Title_prim[cell + 12].Spr[pg->Cbuf_id].clut = 0x7f8c;
 			}
 			Row = 2;
 		}
@@ -2027,8 +2053,8 @@ static VOID Moji_mode_disp(LONG Mode, ULONG Opt_a, ULONG Opt_b, LONG Row)
 		cell++;
 	} while (col < 2);
 	row = 0;
-	pPrim = &Title_prim[Row * 2 + 8].Spr[G.Cbuf_id];
-	disp_col = Ti.Moji_kido2 + Ti.Disp_cnt;
+	pPrim = &Title_prim[Row * 2 + 8].Spr[pg->Cbuf_id];
+	disp_col = ti->Moji_kido2 + ti->Disp_cnt;
 	pPrim->b0 = disp_col;
 	pPrim->g0 = disp_col;
 	pPrim->r0 = disp_col;
@@ -2036,9 +2062,9 @@ static VOID Moji_mode_disp(LONG Mode, ULONG Opt_a, ULONG Opt_b, LONG Row)
 		col = 0;
 		do {
 			cell = row * 2 + col + 8;
-			AddPrim(G.pOt1 + 1, (VOID *)&Title_prim[cell].Spr[G.Cbuf_id]);
+			AddPrim(pg->pOt1 + 1, (VOID *)&(*ppt)[cell].Spr[pg->Cbuf_id]);
 			col++;
-			AddPrim(G.pOt1 + 1, (VOID *)&Title_prim[cell].Dr[G.Cbuf_id]);
+			AddPrim(pg->pOt1 + 1, (VOID *)&(*ppt)[cell].Dr[pg->Cbuf_id]);
 		} while (col < 2);
 		row++;
 	} while (row < 3);
@@ -2054,32 +2080,38 @@ VOID Moji_Game_mode(register ULONG Mode)
 	LONG Row_idx;
 	ULONG col;
 	ULONG row;
+	TITLE_PRIM **ppt;
+	TITLE_WORK *ti;
+	tagGLOBAL *pg;
 
+	ti = &Ti;
+	pg = &G;
+	ppt = &Title_prim;
 	row = 0;
 	do {
 		col = 0;
 		do {
-			kido2 = Ti.Moji_kido2;
+			kido2 = ti->Moji_kido2;
 			cell = row * 2 + col + 0xe;
 			col++;
-			Title_prim[cell].Spr[G.Cbuf_id].b0 = Ti.Moji_kido2;
-			Title_prim[cell].Spr[G.Cbuf_id].g0 = kido2;
-			Title_prim[cell].Spr[G.Cbuf_id].r0 = kido2;
+			Title_prim[cell].Spr[pg->Cbuf_id].b0 = ti->Moji_kido2;
+			Title_prim[cell].Spr[pg->Cbuf_id].g0 = kido2;
+			Title_prim[cell].Spr[pg->Cbuf_id].r0 = kido2;
 		} while (col < 2);
 		row = row + 1; col = 0;
 	} while (row < 2);
 	cell = 0;
 	do {
 		if (Mode == 0) {
-			Title_prim[cell + 14].Spr[G.Cbuf_id].clut = 0x7f80;
+			Title_prim[cell + 14].Spr[pg->Cbuf_id].clut = 0x7f80;
 			Row_idx = 0;
-			Title_prim[cell + 16].Spr[G.Cbuf_id].clut = 0x7f8c;
+			Title_prim[cell + 16].Spr[pg->Cbuf_id].clut = 0x7f8c;
 		} else if (Mode == 1) {
-			Title_prim[cell + 14].Spr[G.Cbuf_id].clut = 0x7f8c;
+			Title_prim[cell + 14].Spr[pg->Cbuf_id].clut = 0x7f8c;
 			if (col == 0) {
-				pPrim = &Title_prim[16].Spr[G.Cbuf_id];
+				pPrim = &Title_prim[16].Spr[pg->Cbuf_id];
 			} else {
-				pPrim = &Title_prim[cell + 14].Spr[G.Cbuf_id];
+				pPrim = &Title_prim[cell + 14].Spr[pg->Cbuf_id];
 			}
 			pPrim->clut = 0x7f80;
 			Row_idx = 1;
@@ -2088,8 +2120,8 @@ VOID Moji_Game_mode(register ULONG Mode)
 		cell++;
 	} while (col < 2);
 	row = 0;
-	pPrim = &Title_prim[Row_idx * 2 + 14].Spr[G.Cbuf_id];
-	disp_col = Ti.Moji_kido2 + Ti.Disp_cnt;
+	pPrim = &Title_prim[Row_idx * 2 + 14].Spr[pg->Cbuf_id];
+	disp_col = ti->Moji_kido2 + ti->Disp_cnt;
 	pPrim->b0 = disp_col;
 	pPrim->g0 = disp_col;
 	pPrim->r0 = disp_col;
@@ -2097,9 +2129,9 @@ VOID Moji_Game_mode(register ULONG Mode)
 		col = 0;
 		do {
 			cell = row * 2 + col + 0xe;
-			AddPrim(G.pOt1 + 1, (VOID *)&Title_prim[cell].Spr[G.Cbuf_id]);
+			AddPrim(pg->pOt1 + 1, (VOID *)&(*ppt)[cell].Spr[pg->Cbuf_id]);
 			col++;
-			AddPrim(G.pOt1 + 1, (VOID *)&Title_prim[cell].Dr[G.Cbuf_id]);
+			AddPrim(pg->pOt1 + 1, (VOID *)&(*ppt)[cell].Dr[pg->Cbuf_id]);
 		} while (col < 2);
 		row++;
 	} while (row < 2);
@@ -2115,7 +2147,11 @@ VOID Moji_Sound(register ULONG Mode)
 	ULONG col;
 	ULONG row;
 	SPRT *pSpr;
+	TITLE_PRIM **tpp;
+	tagGLOBAL *g;
 
+	g = &G;
+	tpp = &Title_prim;
 	row = 0;
 	do {
 		col = 0;
@@ -2123,34 +2159,34 @@ VOID Moji_Sound(register ULONG Mode)
 			kido2 = Ti.Moji_kido2;
 			cell = row * 2 + col + 0x12;
 			col++;
-			Title_prim[cell].Spr[G.Cbuf_id].b0 = Ti.Moji_kido2;
-			Title_prim[cell].Spr[G.Cbuf_id].g0 = kido2;
-			Title_prim[cell].Spr[G.Cbuf_id].r0 = kido2;
+			(*tpp)[cell].Spr[g->Cbuf_id].b0 = Ti.Moji_kido2;
+			(*tpp)[cell].Spr[g->Cbuf_id].g0 = kido2;
+			(*tpp)[cell].Spr[g->Cbuf_id].r0 = kido2;
 		} while (col < 2);
 		row = row + 1; col = 0;
 	} while (row < 3);
 	cell = 0;
 	do {
 		if (((LONG)Mode) == 0) {
-			if ((G.Sound_mode & 1) == 0) {
+			if ((g->Sound_mode & 1) == 0) {
 				sel_row = cell;
-				Title_prim[sel_row + 18].Spr[G.Cbuf_id].clut = 0x7f80;
+				(*tpp)[sel_row + 18].Spr[g->Cbuf_id].clut = 0x7f80;
 				sel_row = 0;
-				Title_prim[cell + 20].Spr[G.Cbuf_id].clut = 0x7f8c;
+				(*tpp)[cell + 20].Spr[g->Cbuf_id].clut = 0x7f8c;
 			} else {
-				Title_prim[cell + 18].Spr[G.Cbuf_id].clut = 0x7f8c;
+				(*tpp)[cell + 18].Spr[g->Cbuf_id].clut = 0x7f8c;
 				sel_row = cell;
-				Title_prim[sel_row + 20].Spr[G.Cbuf_id].clut = 0x7f80;
+				(*tpp)[sel_row + 20].Spr[g->Cbuf_id].clut = 0x7f80;
 				sel_row = 1;
 			}
-			Title_prim[cell + 22].Spr[G.Cbuf_id].clut = 0x7f8c;
+			(*tpp)[cell + 22].Spr[g->Cbuf_id].clut = 0x7f8c;
 		} else {
-			Title_prim[cell + 18].Spr[G.Cbuf_id].clut = 0x7f8c;
-			Title_prim[cell + 20].Spr[G.Cbuf_id].clut = 0x7f8c;
+			(*tpp)[cell + 18].Spr[g->Cbuf_id].clut = 0x7f8c;
+			(*tpp)[cell + 20].Spr[g->Cbuf_id].clut = 0x7f8c;
 			if (col == 0) {
-				Title_prim[22].Spr[G.Cbuf_id].clut = 0x7f80;
+				(*tpp)[22].Spr[g->Cbuf_id].clut = 0x7f80;
 			} else {
-				Title_prim[cell + 22].Spr[G.Cbuf_id].clut = 0x7f8c;
+				(*tpp)[cell + 22].Spr[g->Cbuf_id].clut = 0x7f8c;
 			}
 			sel_row = 2;
 		}
@@ -2158,7 +2194,7 @@ VOID Moji_Sound(register ULONG Mode)
 		cell++;
 	} while (col < 2);
 	row = 0;
-	pSpr = &Title_prim[sel_row * 2 + 18].Spr[G.Cbuf_id];
+	pSpr = &(*tpp)[sel_row * 2 + 18].Spr[g->Cbuf_id];
 	disp_col = Ti.Moji_kido2 + Ti.Disp_cnt;
 	pSpr->b0 = disp_col;
 	pSpr->g0 = disp_col;
@@ -2167,9 +2203,9 @@ VOID Moji_Sound(register ULONG Mode)
 		col = 0;
 		do {
 			cell = row * 2 + col + 0x12;
-			AddPrim(G.pOt1 + 1, (VOID *)&Title_prim[cell].Spr[G.Cbuf_id]);
+			AddPrim(g->pOt1 + 1, (VOID *)&(*tpp)[cell].Spr[g->Cbuf_id]);
 			col++;
-			AddPrim(G.pOt1 + 1, (VOID *)&Title_prim[cell].Dr[G.Cbuf_id]);
+			AddPrim(g->pOt1 + 1, (VOID *)&(*tpp)[cell].Dr[g->Cbuf_id]);
 		} while (col < 2);
 		row++;
 	} while (row < 3);
@@ -2224,26 +2260,30 @@ static VOID Title_logo_disp(UCHAR Kido_a, UCHAR Kido_b, LONG Semi_trans)
 	LONG cell;
 	SPRT *pPrim;
 	ULONG cnt;
+	TITLE_PRIM *tp;
+	tagGLOBAL *g;
 
+	g = &G;
+	tp = Title_prim;
 	cnt = 0;
 	cell = 30;
 	do {
-		pPrim = &Title_prim[cell].Spr[G.Cbuf_id];
+		pPrim = &tp[cell].Spr[g->Cbuf_id];
 		pPrim->b0 = Kido_a;
 		pPrim->g0 = Kido_a;
 		pPrim->r0 = Kido_a;
 		SetSemiTrans(pPrim, Semi_trans);
-		AddPrim(G.pOt1 + 2, pPrim);
+		AddPrim(g->pOt1 + 2, pPrim);
 		cnt++;
-		AddPrim(G.pOt1 + 2, (VOID *)&Title_prim[cell].Dr[G.Cbuf_id]);
+		AddPrim(g->pOt1 + 2, (VOID *)&tp[cell].Dr[g->Cbuf_id]);
 		cell++;
 	} while (cnt < 4);
-	pPrim = &Title_prim[34].Spr[G.Cbuf_id];
+	pPrim = &tp[34].Spr[g->Cbuf_id];
 	pPrim->b0 = Kido_b;
 	pPrim->g0 = Kido_b;
 	pPrim->r0 = Kido_b;
-	AddPrim(G.pOt1 + 2, pPrim);
-	AddPrim(G.pOt1 + 2, (VOID *)&Title_prim[34].Dr[G.Cbuf_id]);
+	AddPrim(g->pOt1 + 2, pPrim);
+	AddPrim(g->pOt1 + 2, (VOID *)&tp[34].Dr[g->Cbuf_id]);
 }
 
 // --- static display helpers ---
@@ -2276,28 +2316,34 @@ static VOID Title_bg_disp(VOID)
 	UCHAR bright;
 	LONG tmp_i;
 	LONG tmp_j;
-	ULONG Frame_pad[12];		/* retail reserves 0x48 bytes and only saves s0-s2/ra in them */
+	TITLE_PRIM *tp;
+	tagGLOBAL *g;
+	TITLE_WORK *ti;
+	/* Retail reserves 40 more stack bytes below its four saved registers
+	   and never reads them; this keeps the frame at 0x48 to match. */
+	volatile ULONG frame_reserve[10];
 
-	(void)Frame_pad;
-
-	if (Ti.Tile_kido != 0) {
-		Ti.Tile_kido = Ti.Tile_kido + -2;
+	g = &G;
+	ti = &Ti;
+	tp = Title_prim;
+	if (ti->Tile_kido != 0) {
+		ti->Tile_kido = ti->Tile_kido + -2;
 	}
-	tmp_i = Ti.Bg_cnt + -1;
-	if (-1 < Ti.Bg_cnt) {
-		Ti.Bg_y = (SHORT)((tmp_i * tmp_i * 0x2e) / 0x1e4) + -0x2e;
-		Ti.Bg_cnt = tmp_i;
+	tmp_i = ti->Bg_cnt + -1;
+	if (-1 < ti->Bg_cnt) {
+		ti->Bg_y = (SHORT)((tmp_i * tmp_i * 0x2e) / 0x1e4) + -0x2e;
+		ti->Bg_cnt = tmp_i;
 	}
-	Title_prim[35].Spr[G.Cbuf_id].y0 = Ti.Bg_y + 0x4c;
-	Title_prim[36].Spr[G.Cbuf_id].y0 = Ti.Bg_y + 0x4c;
-	Title_prim[37].Spr[G.Cbuf_id].y0 = Ti.Bg_y + 0x4c;
-	AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[35].Spr[G.Cbuf_id]);
-	AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[35].Dr[G.Cbuf_id]);
-	AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[36].Spr[G.Cbuf_id]);
-	AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[36].Dr[G.Cbuf_id]);
-	AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[37].Spr[G.Cbuf_id]);
-	AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[37].Dr[G.Cbuf_id]);
-	if ((Ti.Bg_cnt < 0) && (Main.Fade[0].Kido < 1)) {
+	tp[35].Spr[g->Cbuf_id].y0 = ti->Bg_y + 0x4c;
+	tp[36].Spr[g->Cbuf_id].y0 = ti->Bg_y + 0x4c;
+	tp[37].Spr[g->Cbuf_id].y0 = ti->Bg_y + 0x4c;
+	AddPrim(g->pOt0 + 3, (VOID *)&tp[35].Spr[g->Cbuf_id]);
+	AddPrim(g->pOt0 + 3, (VOID *)&tp[35].Dr[g->Cbuf_id]);
+	AddPrim(g->pOt0 + 3, (VOID *)&tp[36].Spr[g->Cbuf_id]);
+	AddPrim(g->pOt0 + 3, (VOID *)&tp[36].Dr[g->Cbuf_id]);
+	AddPrim(g->pOt0 + 3, (VOID *)&tp[37].Spr[g->Cbuf_id]);
+	AddPrim(g->pOt0 + 3, (VOID *)&tp[37].Dr[g->Cbuf_id]);
+	if ((ti->Bg_cnt < 0) && (Main.Fade[0].Kido < 1)) {
 		if (Title_fade_val < 0x100) {
 			tmp_j = (int)Title_fade_val + (ULONG)Title_fade_add;
 			Title_fade_val = (SHORT)tmp_j;
@@ -2318,28 +2364,28 @@ static VOID Title_bg_disp(VOID)
 	if (0 < Title_fade_val) {
 		SPRT *pSpr;
 		bright = (UCHAR)Title_fade_val;
-		pSpr = &Title_prim[38].Spr[G.Cbuf_id];
+		pSpr = &tp[38].Spr[g->Cbuf_id];
 		pSpr->b0 = bright; pSpr->g0 = bright; pSpr->r0 = bright;
 		bright = (UCHAR)Title_fade_val;
-		pSpr = &Title_prim[39].Spr[G.Cbuf_id];
+		pSpr = &tp[39].Spr[g->Cbuf_id];
 		pSpr->b0 = (UCHAR)Title_fade_val;
 		pSpr->g0 = bright; pSpr->r0 = bright;
-		AddPrim(G.pOt0 + 2, (VOID *)&Title_prim[38].Spr[G.Cbuf_id]);
-		AddPrim(G.pOt0 + 2, (VOID *)&Title_prim[39].Spr[G.Cbuf_id]);
-		AddPrim(G.pOt0 + 2, (VOID *)&Title_prim[38].Dr[G.Cbuf_id]);
+		AddPrim(g->pOt0 + 2, (VOID *)&tp[38].Spr[g->Cbuf_id]);
+		AddPrim(g->pOt0 + 2, (VOID *)&tp[39].Spr[g->Cbuf_id]);
+		AddPrim(g->pOt0 + 2, (VOID *)&tp[38].Dr[g->Cbuf_id]);
 	}
 	if (0 < Title_fade_val2) {
 		SPRT *pSpr;
 		bright = (UCHAR)Title_fade_val2;
-		pSpr = &Title_prim[40].Spr[G.Cbuf_id];
+		pSpr = &tp[40].Spr[g->Cbuf_id];
 		pSpr->b0 = bright; pSpr->g0 = bright; pSpr->r0 = bright;
 		bright = (UCHAR)Title_fade_val2;
-		pSpr = &Title_prim[41].Spr[G.Cbuf_id];
+		pSpr = &tp[41].Spr[g->Cbuf_id];
 		pSpr->b0 = (UCHAR)Title_fade_val2;
 		pSpr->g0 = bright; pSpr->r0 = bright;
-		AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[40].Spr[G.Cbuf_id]);
-		AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[41].Spr[G.Cbuf_id]);
-		AddPrim(G.pOt0 + 3, (VOID *)&Title_prim[40].Dr[G.Cbuf_id]);
+		AddPrim(g->pOt0 + 3, (VOID *)&tp[40].Spr[g->Cbuf_id]);
+		AddPrim(g->pOt0 + 3, (VOID *)&tp[41].Spr[g->Cbuf_id]);
+		AddPrim(g->pOt0 + 3, (VOID *)&tp[40].Dr[g->Cbuf_id]);
 	}
 }
 
@@ -2372,41 +2418,45 @@ VOID Title_game_init(VOID)
 	UCHAR core_type_no;
 	UCHAR battle_life;
 	ULONG msg_no;
+	tagGLOBAL *g;
+	ULONG *sflg;
 
+	g = &G;
+	sflg = &g->Status_flg;
 	Game.Doordemo_flg = 3;
 	UnknownPadInfoByte = 1;
 	Main.Scrl_type = 0;
 	Bg_set_mode(2, 0);
 	Fade_off(0);
-	G.SaveData.Stereo = (G.SaveData.Stereo | G.Sound_mode) & 1;
-	if ((int)G.Status_flg < 0) {
-		G.Dummy8[1] = 2;
+	g->SaveData.Stereo = (g->SaveData.Stereo | g->Sound_mode) & 1;
+	if ((int)(*sflg) < 0) {
+		g->Dummy8[1] = 2;
 	} else {
-		G.Dummy8[1] = 0;
+		g->Dummy8[1] = 0;
 	}
-	if ((G.Status_flg & STAT_SCENARIO_B) != 0) {
-		G.Dummy8[1]++;
+	if (((*sflg) & STAT_SCENARIO_B) != 0) {
+		g->Dummy8[1]++;
 	}
-	if ((G.System_flg & SYS_TIMER) != 0) {
-		G.Dummy8[1] = 4;
-		G.Status_flg |= STAT_SPECIAL_RUN;
+	if ((g->System_flg & SYS_TIMER) != 0) {
+		g->Dummy8[1] = 4;
+		(*sflg) |= STAT_SPECIAL_RUN;
 	}
-	if ((G.System_flg & SYS_EX_BATTLE) != 0) {
-		G.Dummy8[1] = 5;
+	if ((g->System_flg & SYS_EX_BATTLE) != 0) {
+		g->Dummy8[1] = 5;
 	}
-	if ((G.System_flg & (SYS_EX_BATTLE | SYS_NEW_GAME)) == (SYS_EX_BATTLE | SYS_NEW_GAME)) {
+	if ((g->System_flg & (SYS_EX_BATTLE | SYS_NEW_GAME)) == (SYS_EX_BATTLE | SYS_NEW_GAME)) {
 		Task_lexecute(1, 3);
 	}
 	Task_sleep(1);
-	if ((G.System_flg & (SYS_EX_BATTLE | SYS_DEMO_MODE | SYS_TIMER)) == 0) {
+	if ((g->System_flg & (SYS_EX_BATTLE | SYS_DEMO_MODE | SYS_TIMER)) == 0) {
 		Task_lexecute(1, 5);
 		Task_sleep(1);
 	}
-	if ((G.System_flg & SYS_NEW_GAME) == 0) {
-		if ((G.System_flg & SYS_EX_BATTLE) == 0) {
-			if ((G.System_flg & SYS_DEMO_MODE) == 0) {
-				if (G.SaveData.Save_area - 0xf < 2) {
-					if ((G.Status_flg & STAT_SCENARIO_B) == 0) {
+	if ((g->System_flg & SYS_NEW_GAME) == 0) {
+		if ((g->System_flg & SYS_EX_BATTLE) == 0) {
+			if ((g->System_flg & SYS_DEMO_MODE) == 0) {
+				if (g->SaveData.Save_area - 0xf < 2) {
+					if (((*sflg) & STAT_SCENARIO_B) == 0) {
 						msg_no = (ULONG)Open_msg_ptr[0];
 					} else {
 						msg_no = (ULONG)Open_msg_ptr[1];
@@ -2423,138 +2473,138 @@ VOID Title_game_init(VOID)
 open_msg_set:
 		Mess_set(0xb40000, 0x4c02, (ULONG)&Open_msg_00[msg_no], 0);
 	} else {
-		if ((G.System_flg & SYS_TIMER) != 0) {
+		if ((g->System_flg & SYS_TIMER) != 0) {
 			msg_no = (ULONG)Open_msg_ptr[4];
 			goto open_msg_set;
 		}
-		if ((G.System_flg & SYS_EX_BATTLE) == 0) {
+		if ((g->System_flg & SYS_EX_BATTLE) == 0) {
 			msg_no = (ULONG)Open_msg_ptr[0];
 			goto open_msg_set;
 		}
 	}
-	if ((G.System_flg & SYS_NEW_GAME) == 0) {
-		if ((G.System_flg & SYS_DEMO_MODE) == 0) {
-			G.Player.Pos_x = (LONG)G.SaveData.Pl_pos_x;
-			G.Player.Pos_y = (LONG)G.SaveData.Pl_pos_y;
-			G.Player.Pos_z = (LONG)G.SaveData.Pl_pos_z;
-			G.Player.Cdir_y = G.SaveData.Dummy0;
-			G.Player.Id = G.SaveData.Pl_id;
-			G.Player.nFloor = (CHAR)(G.SaveData.Pl_pos_y >> 0xf) -
-				((CHAR)((int)G.SaveData.Pl_pos_y / 0x708) + (CHAR)(G.SaveData.Pl_pos_y >> 7));
-			if ((G.System_flg & SYS_EX_BATTLE) != 0) {
-				G.Font_type = 9;
+	if ((g->System_flg & SYS_NEW_GAME) == 0) {
+		if ((g->System_flg & SYS_DEMO_MODE) == 0) {
+			g->Player.Pos_x = (LONG)g->SaveData.Pl_pos_x;
+			g->Player.Pos_y = (LONG)g->SaveData.Pl_pos_y;
+			g->Player.Pos_z = (LONG)g->SaveData.Pl_pos_z;
+			g->Player.Cdir_y = g->SaveData.Dummy0;
+			g->Player.Id = g->SaveData.Pl_id;
+			g->Player.nFloor = (CHAR)(g->SaveData.Pl_pos_y >> 0xf) -
+				((CHAR)((int)g->SaveData.Pl_pos_y / 0x708) + (CHAR)(g->SaveData.Pl_pos_y >> 7));
+			if ((g->System_flg & SYS_EX_BATTLE) != 0) {
+				g->Font_type = 9;
 			}
 		} else {
-			G.System_flg &= ~SYS_EASY_MODE;
-			G.SaveData.Max_item_num = 8;
-			G.Status_flg &= ~STAT_EASY_MODE;
-			G.SaveData.Stage_no = (SHORT)Demo.Stage_no;
-			G.Player.Pos_x = (LONG)Demo.Pos_x;
-			G.Player.Pos_y = (LONG)Demo.Pos_y;
-			G.Player.Pos_z = (LONG)Demo.Pos_z;
-			G.SaveData.Room_no = (SHORT)Demo.Room_no;
-			G.SaveData.Cut_no = (SHORT)Demo.Cut_no;
-			G.SaveData.Equip_id = Demo.Equip_id;
+			g->System_flg &= ~SYS_EASY_MODE;
+			g->SaveData.Max_item_num = 8;
+			(*sflg) &= ~STAT_EASY_MODE;
+			g->SaveData.Stage_no = (SHORT)Demo.Stage_no;
+			g->Player.Pos_x = (LONG)Demo.Pos_x;
+			g->Player.Pos_y = (LONG)Demo.Pos_y;
+			g->Player.Pos_z = (LONG)Demo.Pos_z;
+			g->SaveData.Room_no = (SHORT)Demo.Room_no;
+			g->SaveData.Cut_no = (SHORT)Demo.Cut_no;
+			g->SaveData.Equip_id = Demo.Equip_id;
 			St.Equip_item_id = Demo.Equip_id;
-			G.SaveData.Equip_no = Demo.Equip_no;
+			g->SaveData.Equip_no = Demo.Equip_no;
 			St.Equip_item_no = Demo.Equip_no;
-			G.Player.Id = Demo.Player_id;
-			G.Player.Cdir_y = Demo.Cdir_y;
-			G.Player.nFloor = (CHAR)(Demo.Pos_y >> 0xf) -
+			g->Player.Id = Demo.Player_id;
+			g->Player.Cdir_y = Demo.Cdir_y;
+			g->Player.nFloor = (CHAR)(Demo.Pos_y >> 0xf) -
 				((CHAR)((int)Demo.Pos_y / 0x708) + (CHAR)(Demo.Pos_y >> 7));
-			Memcpy(G.SaveData.Item_work, Demo.Item_wk, 0x2c);
-			G.SaveData.Pl_life = 200;
+			Memcpy(g->SaveData.Item_work, Demo.Item_wk, 0x2c);
+			g->SaveData.Pl_life = 200;
 			Main.Padoff_stop_flg[1][1] = 0;
-			Key_idx_bak = G.SaveData.Key_idx;
-			G.SaveData.Key_idx = Demo.Key_idx;
+			Key_idx_bak = g->SaveData.Key_idx;
+			g->SaveData.Key_idx = Demo.Key_idx;
 		}
-		G.SaveData.Room_no_old = 0xff;
-		G.Player.Life = G.SaveData.Pl_life;
+		g->SaveData.Room_no_old = 0xff;
+		g->Player.Life = g->SaveData.Pl_life;
 	} else {
-		if ((G.System_flg & SYS_EASY_MODE) != 0) {
-			G.Status_flg |= STAT_EASY_MODE;
+		if ((g->System_flg & SYS_EASY_MODE) != 0) {
+			(*sflg) |= STAT_EASY_MODE;
 		}
 		Init_tbl_load();
-		if ((G.System_flg & SYS_TIMER) == 0) {
-			if ((G.System_flg & SYS_EX_BATTLE) == 0) {
-				if ((G.Status_flg & STAT_SCENARIO_B) == 0) {
-					G.Player.Pos_x = 0x4972;
-					G.Player.Pos_z = -0xc5c;
-					G.SaveData.Room_no = 0;
-					G.Player.Cdir_y = 0x800;
+		if ((g->System_flg & SYS_TIMER) == 0) {
+			if ((g->System_flg & SYS_EX_BATTLE) == 0) {
+				if (((*sflg) & STAT_SCENARIO_B) == 0) {
+					g->Player.Pos_x = 0x4972;
+					g->Player.Pos_z = -0xc5c;
+					g->SaveData.Room_no = 0;
+					g->Player.Cdir_y = 0x800;
 				} else {
-					G.SaveData.Room_no = 4;
-					G.Player.Pos_x = -0x4600;
-					G.Player.Pos_z = -0x54da;
-					G.Player.Cdir_y = 400;
+					g->SaveData.Room_no = 4;
+					g->Player.Pos_x = -0x4600;
+					g->Player.Pos_z = -0x54da;
+					g->Player.Cdir_y = 400;
 				}
-				G.SaveData.Stage_no = 0;
-				G.SaveData.Cut_no = 0;
-				G.Player.Pos_y = 0;
-				G.Player.nFloor = 0;
-				G.SaveData.Dummy[0] = 200;
-				G.SaveData.Dummy1[1] = 0;
-				G.Player.Id = (int)G.Status_flg < 0;
-				G.SaveData.Pl_life = 200;
-				G.Player.Life = 200;
+				g->SaveData.Stage_no = 0;
+				g->SaveData.Cut_no = 0;
+				g->Player.Pos_y = 0;
+				g->Player.nFloor = 0;
+				g->SaveData.Dummy[0] = 200;
+				g->SaveData.Dummy1[1] = 0;
+				g->Player.Id = (int)(*sflg) < 0;
+				g->SaveData.Pl_life = 200;
+				g->Player.Life = 200;
 			} else {
-				G.SaveData.Dummy[1] = (USHORT)G.ExData[1];
-				G.SaveData.Sce_timer = Ti_ex_cur + 1;
-				G.SaveData.Player_life = (SHORT)*(Ex_battle_life + (ULONG)G.Player.Id);
-				Memcpy(G.SaveData.ExData3 + 8, G.ExData + 4, 0x3c);
-				G.SaveData.Stage_no = 5;
-				G.Font_type = 9;
-				G.SaveData.Room_no = 0x12;
-				G.SaveData.Cut_no = 1;
-				G.Player.Pos_x = -0x450a;
-				G.Player.Pos_z = -0x1ef3;
-				G.Player.Cdir_y = -0x6ab;
-				G.Player.Pos_y = 0;
-				G.Player.nFloor = 0;
-				G.Player.Life = 200;
+				g->SaveData.Dummy[1] = (USHORT)g->ExData[1];
+				g->SaveData.Sce_timer = Ti_ex_cur + 1;
+				g->SaveData.Player_life = (SHORT)*(Ex_battle_life + (ULONG)g->Player.Id);
+				Memcpy(g->SaveData.ExData3 + 8, g->ExData + 4, 0x3c);
+				g->SaveData.Stage_no = 5;
+				g->Font_type = 9;
+				g->SaveData.Room_no = 0x12;
+				g->SaveData.Cut_no = 1;
+				g->Player.Pos_x = -0x450a;
+				g->Player.Pos_z = -0x1ef3;
+				g->Player.Cdir_y = -0x6ab;
+				g->Player.Pos_y = 0;
+				g->Player.nFloor = 0;
+				g->Player.Life = 200;
 				Sce_rnd_item_set();
 			}
 		} else {
-			G.SaveData.Stage_no = 2;
-			G.SaveData.Room_no = 4;
-			G.SaveData.Cut_no = 3;
-			G.Player.Pos_x = -0x1cff;
-			G.Player.Pos_y = 0;
-			G.Player.Pos_z = -0x5fac;
-			G.Player.Cdir_y = 0x800;
-			G.Player.nFloor = 0;
-			if ((G.System_flg & SYS_TOFU_SURVIVOR) == 0) {
-				G.Player.Id = 12;
-				G.Player.Life = 200;
+			g->SaveData.Stage_no = 2;
+			g->SaveData.Room_no = 4;
+			g->SaveData.Cut_no = 3;
+			g->Player.Pos_x = -0x1cff;
+			g->Player.Pos_y = 0;
+			g->Player.Pos_z = -0x5fac;
+			g->Player.Cdir_y = 0x800;
+			g->Player.nFloor = 0;
+			if ((g->System_flg & SYS_TOFU_SURVIVOR) == 0) {
+				g->Player.Id = 12;
+				g->Player.Life = 200;
 			} else {
-				G.Player.Id = 13;
-				G.Player.Life = 400;
+				g->Player.Id = 13;
+				g->Player.Life = 400;
 			}
 		}
-		G.Pl_poison_timer = 0;
-		G.Pl_poison_down = 0;
-		G.Player.Old_x = (SHORT)G.Player.Pos_x;
-		G.Player.Sca_old_x = (SHORT)G.Player.Pos_z;
-		G.Player.Old_z = (SHORT)G.Player.Pos_z;
-		G.Player.Ground = (SHORT)G.Player.Pos_y;
-		G.SaveData.Key_idx = Main.Key_idx;
+		g->Pl_poison_timer = 0;
+		g->Pl_poison_down = 0;
+		g->Player.Old_x = (SHORT)g->Player.Pos_x;
+		g->Player.Sca_old_x = (SHORT)g->Player.Pos_z;
+		g->Player.Old_z = (SHORT)g->Player.Pos_z;
+		g->Player.Ground = (SHORT)g->Player.Pos_y;
+		g->SaveData.Key_idx = Main.Key_idx;
 		Status_init();
 	}
 	Status_init_m();
-	if ((G.Sound_mode & 0x20) == 0) {
-		G.SaveData.Weapon_mugen &= 0x2001;
+	if ((g->Sound_mode & 0x20) == 0) {
+		g->SaveData.Weapon_mugen &= 0x2001;
 	} else {
-		G.SaveData.Weapon_mugen |= 0xffffdf00;
+		g->SaveData.Weapon_mugen |= 0xffffdf00;
 	}
-	switch (G.Dummy8[1]) {
+	switch (g->Dummy8[1]) {
 	case 0: case 1: core_type_no = 0; break;
 	case 2: case 3: core_type_no = 1; break;
 	case 4:
 		core_type_no = 12;
-		if ((G.System_flg & SYS_TOFU_SURVIVOR) != 0) core_type_no = 13;
+		if ((g->System_flg & SYS_TOFU_SURVIVOR) != 0) core_type_no = 13;
 		break;
 	case 5:
-		battle_life = *(Ex_battle_life + (ULONG)G.Player.Id);
+		battle_life = *(Ex_battle_life + (ULONG)g->Player.Id);
 		if (battle_life == 1) core_type_no = 1;
 		else if (battle_life < 2) { core_type_no = 0; if (battle_life != 0) goto skip_core_set; }
 		else if (battle_life == 2) core_type_no = 14;
@@ -2568,11 +2618,11 @@ skip_core_set:
 	Esp_init_C();
 	Em_move_tbl_set();
 	Set_stage();
-	G.pEnemy[0] = (ENEMY_WORK *)&G.Player;
-	G.Player.Be_flg = 1;
-	G.pFree_work = G.pFree_work_head;
+	g->pEnemy[0] = (ENEMY_WORK *)&g->Player;
+	g->Player.Be_flg = 1;
+	g->pFree_work = g->pFree_work_head;
 	SetSpadStack();
-	Player_set((ENEMY_WORK *)&G.Player);
+	Player_set((ENEMY_WORK *)&g->Player);
 	ResetSpadStack();
 	Spl_set();
 	Kage_work_init();
@@ -2582,12 +2632,12 @@ skip_core_set:
 	while ((Moji.Mess_flg & 0x80) != 0) {
 		Task_sleep(1);
 	}
-	G.System_flg |= SYS_IN_GAME;
-	G.Game_time_offset = VSync(-1);
+	g->System_flg |= SYS_IN_GAME;
+	g->Game_time_offset = VSync(-1);
 	Main.Vloop = 2;
 	Bg_set_mode(0, 0);
 	Main.Bg_chg_flg = 1;
-	Cut_change((int)G.SaveData.Cut_no);
+	Cut_change((int)g->SaveData.Cut_no);
 	Cut_check(1);
 	UnknownPadInfoByte = 0;
 }

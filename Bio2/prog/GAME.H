@@ -58,6 +58,9 @@ struct tagMAP_STAGE_INFO {
 	USHORT File_no;
 };
 
+/* Work area of the status (inventory and item) screen. Sub_rtn0..6 are the state routines of the
+ * current page, the cursor and item-box fields hold the selection, and the *_pos_x/_pos_y pairs are the
+ * on-screen positions of each panel. Field order follows the retail layout. */
 struct tagSTATUS {
 	UCHAR Main_rtn;
 	UCHAR Sub_rtn0;
@@ -136,8 +139,19 @@ struct tagSTATUS {
 	SHORT Cure_y;
 	MODEL_WORK Fmodel[30];
 	USHORT Add_life;
-	USHORT dm00;
-	USHORT Clut[22];
+	/* St+0xE02: map hint index. St_map_hint stores a script byte here, and St_init_map_rooms and
+	 * St_disp_map_rooms read it back; retail accesses it as a single byte (sb/lbu). */
+	UCHAR dm00;
+	/* St+0xE03: set to 1 by St_exit when the equipped item was cleared, so that the next Status entry restores
+	 * the equipment from Equip_pending_no and Equip_pending_id; Status_init_m and Status clear it. */
+	UCHAR Equip_pending_flg;
+	/* Pending equipment slot: St_exit writes the item number and item id here, and Status reads
+	 * them back on the next menu entry. Retail keeps them as two bytes at St+0xE04 and St+0xE05. */
+	UCHAR Equip_pending_no;
+	UCHAR Equip_pending_id;
+	/* St+0xE06..0xE07. No retail function reads or writes these bytes (checked across every
+	 * St-based function). They fill the space so that Dmode starts at its retail offset St+0xE08. */
+	UCHAR Unknown_e06[2];
 	DR_MODE Dmode[24][2];
 };
 /*
@@ -147,6 +161,7 @@ struct tagSTATUS {
 
 
 
+/* Game-level entry points from GAME.C (addresses are the retail SLUS-00748 locations). */
 void    Game_loop(void);                    /* 80025794 */
 void    Game_pad_wait_task(void);           /* 80026b2c */
 void    Set_door(void);                     /* 80026b7c */

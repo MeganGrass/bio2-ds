@@ -4,7 +4,6 @@
  * Source: D:\Bio2\prog\PC_EVENT.C
  */
 #include "TYPES.H"
-#include <LIBAPI.H>
 #include <LIBGTE.H>
 #include "MAIN.H"
 #include "CONFIG.H"
@@ -24,58 +23,65 @@
 #include "flag.h"
 
 /* DS 0x80010bcc */
-UCHAR s_DOOR_LOCK_SERVICE________________80010bcc[] = "DOOR LOCK SERVICE]------------------------------\0\0\0";
+const UCHAR s_DOOR_LOCK_SERVICE________________80010bcc[52] = "DOOR LOCK SERVICE]------------------------------\0\0\0";
 
 /* Computer200/Computer613 message strings (retail rodata; declared in PC_EVENT.H) */
 /* DS 0x80010c00 */
-UCHAR s_Hall_side_doors___2RELEASED_0__80010c00[] = "Hall side doors:      |2RELEASED|0]";
+const UCHAR s_Hall_side_doors___2RELEASED_0__80010c00[36] = "Hall side doors:      |2RELEASED|0]";
+/* Wait: declared but never read or written by the code in this file. */
 static char   Wait;
+/* Kend: key-end flag, set to 1 when the player ends the current text page with a button or key press.
+ * DS keeps one copy per terminal function: Computer200 uses 0x800a3e7c, Computer613 uses 0x800a3e88. */
 static ULONG  Kend;
+/* Mend: message-end flag, filled in by Cprint through its out parameter when the text page has been drawn completely.
+ * DS keeps one copy per terminal function: Computer200 uses 0x800a3e80, Computer613 uses 0x800a3e8c. */
 static ULONG  Mend;
 /* DS 0x80010c24 */
-UCHAR s_Hall_side_doors___2LOCKED_0__80010c24[] = "Hall side doors:      |2LOCKED|0]\0\0";
+const UCHAR s_Hall_side_doors___2LOCKED_0__80010c24[36] = "Hall side doors:      |2LOCKED|0]\0\0";
 /* DS 0x80010c48 (48 bytes: the string ends where s_Pc_event_msg_80010c78 begins) */
-UCHAR s__The_doors_can_be_unlocked_by_a___80010c48[] = "]The doors can be unlocked]by a |2CARD KEY|0.]\0";
-static UCHAR  Key_mode;			/* 0: keyboard input, 1: wait for any pad button (was Key_type; renamed, PAD.H owns Key_type[][16]) */
+const UCHAR s__The_doors_can_be_unlocked_by_a___80010c48[48] = "]The doors can be unlocked]by a |2CARD KEY|0.]\0";
+static UCHAR  Key_mode;			/* 0: keyboard input, 1: wait for any pad button (PAD.H owns Key_type[][16]) */
 
 /* DS 0x80010c78 */
-UCHAR s_Pc_event_msg_80010c78[] = {
+UCHAR s_Pc_event_msg_80010c78[4] = {
 	93, 0, 0, 0
 };
 /* DS 0x80010c7c */
-UCHAR s__Checking_up_ID_CARD_025__025__0_80010c7c[] = "]Checking up ID CARD[025.[025.[025.[025.\0\0\0";
+const UCHAR s__Checking_up_ID_CARD_025__025__0_80010c7c[44] = "]Checking up ID CARD[025.[025.[025.[025.\0\0\0";
 /* DS 0x80010ca8 */
-UCHAR s__OK__Hall_side_doors_lock_releas_80010ca8[] = "]OK!]Hall side doors lock released.";
+const UCHAR s__OK__Hall_side_doors_lock_releas_80010ca8[36] = "]OK!]Hall side doors lock released.";
 /* DS 0x80010ccc */
-UCHAR s_press_any_key___80010ccc[] = "press any key]>";
+UCHAR s_press_any_key___80010ccc[16] = "press any key]>";
 /* DS 0x80010d0c */
-UCHAR s_Register_your_fingerprint___80010d0c[] = "Register your fingerprint.]";
+const UCHAR s_Register_your_fingerprint___80010d0c[28] = "Register your fingerprint.]";
 /* DS 0x80010d28 */
-UCHAR s_UMBRELLA__RODEM__SYSTEM__Ver_5_0_80010d28[] = "UMBRELLA \"RODEM\" SYSTEM]                      Ver 5.0]\0";
+const UCHAR s_UMBRELLA__RODEM__SYSTEM__Ver_5_0_80010d28[56] = "UMBRELLA \"RODEM\" SYSTEM]                      Ver 5.0]\0";
 /* DS 0x80010d60 */
-UCHAR s_Culture_Experiment_Room_Staff_Re_80010d60[] = "Culture Experiment Room Staff Registry.]]\0\0";
+const UCHAR s_Culture_Experiment_Room_Staff_Re_80010d60[44] = "Culture Experiment Room Staff Registry.]]\0\0";
 /* DS 0x80010d8c */
-UCHAR s_Accessing_020__020__020__020__02_80010d8c[] = "Accessing[020.[020.[020.[020.[020.]]\0\0\0";
+const UCHAR s_Accessing_020__020__020__020__02_80010d8c[40] = "Accessing[020.[020.[020.[020.[020.]]\0\0\0";
 /* DS 0x80010db4 */
-UCHAR s_Enter_your_user_name__80010db4[] = "Enter your user name.]>";
+const UCHAR s_Enter_your_user_name__80010db4[24] = "Enter your user name.]>";
 /* DS 0x80010dcc */
-UCHAR s_GUEST_80010dcc[] = "GUEST\0\0";
+UCHAR s_GUEST_80010dcc[8] = "GUEST\0\0";
 /* DS 0x80010dd4 */
-UCHAR s__1This_name_is_not_in_the_resear_80010dd4[] = "|1This name is not in the]researcher data base.|0]\0";
+const UCHAR s__1This_name_is_not_in_the_resear_80010dd4[52] = "|1This name is not in the]researcher data base.|0]\0";
 /* DS 0x80010e08 */
-UCHAR s_Register_your_fingerprint__80010e08[] = "Register your fingerprint.\0";
+const UCHAR s_Register_your_fingerprint__80010e08[28] = "Register your fingerprint.\0";
 /* DS 0x80010e24 */
-UCHAR s_Please_wait_025__025__025__025___80010e24[] = "Please wait[025.[025.[025.[025.[025.]\0\0";
+const UCHAR s_Please_wait_025__025__025__025___80010e24[40] = "Please wait[025.[025.[025.[025.[025.]\0\0";
 /* DS 0x80010e4c */
-UCHAR s_Registration_complete____80010e4c[] = "Registration complete.]]\0\0\0";
+const UCHAR s_Registration_complete____80010e4c[28] = "Registration complete.]]\0\0\0";
 /* DS 0x80010e68 */
-UCHAR s_Guest_registration_is_valid_for_2_80010e68[] = "Guest registration is valid]for 24 hours.]\0";
+const UCHAR s_Guest_registration_is_valid_for_2_80010e68[44] = "Guest registration is valid]for 24 hours.]\0";
 
 
 static char   Id_card_work;		/* DS 0x800c3b48 */
 static UCHAR *pM1;				/* DS 0x800c3b50 */
 static UCHAR *pM2;				/* DS 0x800c3b54 */
 
+/* DS stack frame: 0x28 bytes; s0..s3 saved at sp+0x10..0x1c, ra saved at sp+0x20. No local variable slots are
+ * used. */
 /* DS 0x8003a9f4 (Computer200) */
 void Computer200(void)
 {
@@ -111,7 +117,7 @@ void Computer200(void)
 
 		switch (Rtn_bak)
 		{
-		case 0:
+		case C200_INIT:
 			pCom_work    = (COM_WORK *)G.pFree_work;
 			G.pFree_work = G.pFree_work + sizeof(COM_WORK);
 			Computer_init((UINT)(G.Window_no >> 4), 1);
@@ -275,7 +281,7 @@ void Computer200(void)
 			}
 			break;
 
-		case 11:
+		case C200_EXIT_1:
 			Computer_exit(1);
 			return;
 		}
@@ -298,6 +304,8 @@ void Computer200(void)
 	Sprite_Trans(0x16c);
 }
 
+/* DS stack frame: 0x20 bytes; s0..s1 saved at sp+0x10..0x14, ra saved at sp+0x18. No local variable slots are
+ * used. */
 /* DS 0x8003b264 (Computer613) */
 void Computer613(void)
 {
@@ -371,7 +379,7 @@ void Computer613(void)
 				G.Up_eve_rtn = 4;
 			break;
 
-		case 4:
+		case C613_ENTER_USER_NAME:
 			Cprint(1, (UCHAR *)s_Enter_your_user_name__80010db4, &Mend);
 			if ((Mend & Kend) != 0)
 			{
@@ -380,7 +388,7 @@ void Computer613(void)
 			}
 			break;
 
-		case 5:
+		case C613_KEYBOARD_NAME:
 			Key_ret = Keyboard_Input(8, 0);
 			if (Key_ret != 0)
 			{
@@ -435,11 +443,11 @@ void Computer613(void)
 			}
 			break;
 
-		case 11:
+		case C613_EXIT_1:
 			Computer_exit(1);
 			return;
 
-		case 12:
+		case C613_EXIT_0:
 			Computer_exit(0);
 			return;
 		}
@@ -462,11 +470,13 @@ void Computer613(void)
 	Sprite_Trans(0x16c);
 }
 
+/* DS stack frame: 0x30 bytes; s0..s5 saved at sp+0x10..0x24, ra saved at sp+0x28. No local variable slots are
+ * used. */
 /* DS 0x8003b7e8 (Computer_init) */
 void Computer_init(ULONG Cut_no, ULONG Open_flg)
 {
 	COM_WORK *pCom;
-	int       i;
+	ULONG     i;
 
 	pCom       = pCom_work;
 	Main.Vloop = 0;
@@ -498,9 +508,13 @@ void Computer_init(ULONG Cut_no, ULONG Open_flg)
 	}
 }
 
+/* DS stack frame: 0x18 bytes; s0 saved at sp+0x10, ra saved at sp+0x14. No local variable slots are used. */
 /* DS 0x8003b918 (Computer_exit) */
 void Computer_exit(ULONG Close_flg)
 {
+	COM_WORK *pCom;
+
+	pCom = pCom_work;
 	if (Close_flg != 0)
 	{
 		Snd_se_stad(0x2070000, (VECTOR *)0);
@@ -511,7 +525,7 @@ void Computer_exit(ULONG Close_flg)
 	G.Up_event_no   = 0;
 	G.Up_eve_rtn    = 0;
 	G.pFree_work    = G.pFree_work - sizeof(COM_WORK);
-	G.Next_cut_no   = pCom_work->Cut_no_old;
+	G.Next_cut_no   = pCom->Cut_no_old;
 	Main.Bg_chg_flg = 1;
 	Main.Vloop      = 2;
 	Task_signal(0);

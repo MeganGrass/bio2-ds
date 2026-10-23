@@ -9,15 +9,13 @@
 #include "TYPES.H"
 
 
+/* Scenario-driven step of a sub-player (Spl) character: runs the entry of Spl_sce selected by the scenario
+ * state, using the motion data Kan and Seq. */
 extern VOID Spl_Scenario(register ENEMY_WORK *pEm, register ULONG Kan, register ULONG Seq);
 
 /* Spl_sce[33] (DS 0x800a8d90) is defined static in SPL_SCE.C, the only file that uses it. */
 
-/* Subpl walk/back/ato/run speed tables, defined in SPL.C */
-extern UCHAR Subpl_walk[32][2];		/* DS 0x800a8268 */
-extern UCHAR Subpl_back[32][2];		/* DS 0x800a82a8 */
-extern UCHAR Subpl_ato[32][2];		/* DS 0x800a8328 */
-extern UCHAR Subpl_run[32][2];		/* DS 0x800a8368 */
+/* Subpl_walk/back/ato/run are static tables in SPL_TBL.H; SPL_SCE.C has its own copy (DS 0x800a8c40) */
 
 
 #endif /* SPL_SCE_H_H */

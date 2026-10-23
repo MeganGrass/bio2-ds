@@ -117,6 +117,8 @@
 #undef gte_stszotz
 #define gte_stszotz(...) ((void)0)
 #else
+/* Non-MSVC build (CCPSX): mtc2 writes the CPU register into GTE data register 8 (IR0). The SDK has no
+ * macro for this, so it is written out here. */
 #define gte_ldIR0( r0 ) __asm__ volatile (			\
 	"mtc2	%0, $8"						\
 	:						\

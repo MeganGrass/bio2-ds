@@ -26,22 +26,23 @@ typedef struct {
 /* DS 0x8004b3b8 (Sa_dat_set) */
 void Sa_dat_set(ENEMY_WORK *pEm, ULONG *pSa)
 {
+	ULONG  *pBits;
 	ULONG   Bit_no;
-	ULONG  *pDat;
 	ULONG **ppHead;
 	UINT    Parts_cnt;
 
 	pEm->pSa_dat = pSa;
-	if (*pSa != 0) {
+	pBits        = pSa;
+	if (*pBits != 0) {
 		Bit_no    = 0;
-		pDat      = pSa + 3;
+		pSa       = pSa + 3;
 		ppHead    = &pEm->pSin_parts_ptr->pSa_dat_head;
 		Parts_cnt = pEm->pTmd[-1] >> 1;
 		do {
 			*ppHead = (ULONG *)0;
-			if ((*pSa & 1 << (Bit_no & 0x1f)) != 0) {
-				*ppHead = pDat;
-				pDat += pDat[2] + 3;
+			if ((*pBits & 1 << Bit_no) != 0) {
+				*ppHead = pSa;
+				pSa += pSa[2] + 3;
 			}
 			ppHead = ppHead + sizeof(PARTS_W) / sizeof(ULONG *);		/* one PARTS_W */
 			Parts_cnt--;
@@ -60,7 +61,7 @@ void Sa_parts_mod(ENEMY_WORK *pEm, PARTS_W *pP_ptr)
 {
 	SVECTOR  SA_sv0;
 	SVECTOR  SA_sv1;
-	SVECTOR  SA_sv2;		/* retail reserves a 3rd SVECTOR slot (sp+0x10), never accessed */
+	SVECTOR  SA_sv2;		/* a third SVECTOR slot at sp+0x10, never accessed */
 	SVECTOR *pVtx;
 	ULONG   *pSa_head;
 	ULONG   *pSa_dat;
@@ -503,8 +504,9 @@ void Sa_parts_offset_allmv(ENEMY_WORK *pEm, PARTS_W *pP_ptr)
  * pass, so the vertex count must be a multiple of 5), then each morph target k
  * (weight pSa_head[3+k], 0..0xfff) is blended into every vertex (gpf12/gpl12):
  * v = v*(0xfff-w)/0x1000 + target*w/0x1000.
+ * pP_ptr is the second argument the caller in EM36.C passes; this function does not read it.
  */
-void Sa_morph_trans(ENEMY_WORK *pEm, ULONG *pTmd, ULONG *pSa_head)
+void Sa_morph_trans(ENEMY_WORK *pEm, PARTS_W *pP_ptr, ULONG *pTmd, ULONG *pSa_head)
 {
 	SVECTOR  Tmp_sv;
 	SVECTOR *pVtx;

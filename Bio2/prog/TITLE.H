@@ -8,7 +8,7 @@
 #include "TYPES.H"
 
 
-// Ti (80197000). Offsets confirmed from the disassembly of Title_init, Title_ex_init,
+// Ti (80197000). Offsets follow the disassembly of Title_init, Title_ex_init,
 // Title_main_select and Title_bg_disp (lui 0x8019 + 0x7000-based stores/loads).
 struct TITLE_WORK {
 	UCHAR Main_rtn;				// 00000000
@@ -105,9 +105,9 @@ extern ULONG Sound_sel_flg;			// 80196F9C
 /* TITLE overlay data used by TITLE.C (addresses from the Ghidra dumps) */
 extern UCHAR Ti_ex_rtn;						/* DS 0x80197042 */
 extern UCHAR Ti_ex_cur;						/* DS 0x80197043 */
-extern UCHAR Ex_room_snd_buf[0x9C4C];				/* DS 0x80168000 */
-extern ULONG Title_bg_work_buf[];			/* DS 0x80132420 */
-extern UCHAR Init_tbl_buf[];				/* DS 0x8018d270 */
+extern UCHAR *Ex_room_snd_buf;				/* DS 0x80168000 */
+extern ULONG *Title_bg_work_buf;			/* DS 0x80132420 */
+extern UCHAR *Init_tbl_buf;				/* DS 0x8018d270 */
 extern USHORT Open_msg_ptr[6];				/* DS 0x80196a70 */
 extern UCHAR Open_msg_00[];					/* DS 0x80196794 */
 extern UCHAR Ex_battle_life[];				/* DS 0x80196a8c */

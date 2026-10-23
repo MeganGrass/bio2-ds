@@ -18,8 +18,7 @@
 #include "MAIN.H"
 #include "MOJIDISP.H"
 
-/* DS 0x80010804 (Stage6_main_ptr): stage main hook word in the image */
-CODE_PTR Stage6_main_ptr = 0;
+/* Stage6_main_ptr (DS 0x80010804) is defined in SLD.S, in the table after the SLD code. */
 #include "MONITOR.H"
 #include "SND.H"
 #include "SUB.H"
@@ -149,7 +148,7 @@ UCHAR Stage6_msg_20[11] = {
 
 /* DS 0x8011b378 (Stage6_msg_ptr_tbl) */
 /* entries point at the message arrays above; entries 4 and 19 share Stage6_msg_empty */
-UCHAR *Stage6_msg_ptr_tbl[] = {
+UCHAR *Stage6_msg_ptr_tbl[20] = {
 	Stage6_msg_01, Stage6_msg_02, Stage6_msg_03, Stage6_msg_empty,
 	Stage6_msg_05, Stage6_msg_06, Stage6_msg_07, Stage6_msg_08,
 	Stage6_msg_09, Stage6_msg_10, Stage6_msg_11, Stage6_msg_12,
@@ -158,7 +157,7 @@ UCHAR *Stage6_msg_ptr_tbl[] = {
 };
 
 /* DS 0x8011b3c8 (Stage6_msg_len_tbl) */
-UCHAR Stage6_msg_len_tbl[] = {
+UCHAR Stage6_msg_len_tbl[332] = {
 	0x05, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05, 0x03, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x03,
 	0x05, 0x0a, 0x05, 0x03, 0x05, 0x05, 0x03, 0x03, 0x05, 0x0a, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05,
 	0x03, 0x05, 0x0a, 0x03, 0x05, 0x05, 0x03, 0x05, 0x03, 0x05, 0x05, 0x03, 0x0a, 0x05, 0x05, 0x03,
@@ -183,7 +182,7 @@ UCHAR Stage6_msg_len_tbl[] = {
 };
 
 /* DS 0x8011b514 (Stage6_poly_tbl) */
-UCHAR Stage6_poly_tbl[] = {
+UCHAR Stage6_poly_tbl[140] = {
 	0x0c, 0x00, 0xf1, 0x01, 0x00, 0x00, 0xff, 0x20, 0xff, 0x20, 0x0c, 0x00, 0xf1, 0x01, 0x00, 0x20,
 	0xff, 0x20, 0xff, 0x20, 0x0c, 0x00, 0xf1, 0x01, 0x00, 0x40, 0xff, 0x20, 0xff, 0x20, 0x0c, 0x00,
 	0xf1, 0x01, 0x00, 0x60, 0xff, 0x20, 0xff, 0x20, 0x0c, 0x00, 0xf1, 0x01, 0x00, 0x80, 0xff, 0x20,
@@ -196,7 +195,7 @@ UCHAR Stage6_poly_tbl[] = {
 };
 
 /* DS 0x8011b5a0 (Stage6_obj_tbl) */
-UCHAR Stage6_obj_tbl[] = {
+UCHAR Stage6_obj_tbl[160] = {
 	0x00, 0x00, 0x02, 0x00, 0x20, 0x00, 0xb4, 0x00,
 	0x00, 0x01, 0x02, 0x00, 0x20, 0x00, 0xb4, 0x00,
 	0x00, 0x00, 0x02, 0x01, 0x20, 0x00, 0xb4, 0x00,
@@ -220,7 +219,7 @@ UCHAR Stage6_obj_tbl[] = {
 };
 
 /* DS 0x8011b640 (Stage6_rnd_tbl) */
-UCHAR Stage6_rnd_tbl[] = {
+UCHAR Stage6_rnd_tbl[8] = {
 	0x00, 0x02, 0x04, 0x06, 0x08, 0x0a, 0x0c, 0x0e
 };
 
@@ -448,12 +447,13 @@ UCHAR Stage6_mess_op_tim_ld[10] = {   /* overlay string (OP_TIM_LD), NUL-termina
 /* DS 0x8011a054 (Stage6_init) */
 static VOID Stage6_init(VOID)
 {
+	/* Retail reserves 0x10..0x37 of its frame here and never reads or writes those bytes;
+	   the reservation keeps the frame at the retail size. */
+	volatile UCHAR frame_reserve[40];
 	USHORT i;
 	SHORT  saveStageNo;
 	UCHAR  saveCbuf;
-	ULONG  Frame_pad[8];		/* retail reserves 0x50 bytes; its locals are above sp+0x38 */
 
-	(void)Frame_pad;
 
 	Task_suspend(0);
 	G.Stop_flg |= 0x2000000;
@@ -485,10 +485,10 @@ static VOID Stage6_init(VOID)
 	Stage6_fade_step = 0;
 	Stage6_unk_bc6e = 0xff3d;
 	Stage6_cut_no = (UCHAR)G.SaveData.Cut_no;
-	for (i = 0; i < 3; i++) {
-		while (Cd_read(Stage6_file_tbl[i], Bg_img_buf, 1, Stage6_mess_op_tim_ld) == 0xffffffff)
+	for (i = 12; i < 15; i++) {
+		while (~Cd_read(Stage6_file_tbl[i - 12], Bg_img_buf, 1, Stage6_mess_op_tim_ld) == 0)
 			;
-		G.Ctpage = i + 12;
+		G.Ctpage = i;
 		Mapping_tim(Bg_img_buf);
 		Task_sleep(1);
 	}
@@ -519,6 +519,8 @@ static VOID Stage6_init(VOID)
 	Fade_set(0x200, 0, 7, 0);
 }
 
+/* Stage 6 exit. Waits until the fade has finished and the XA voice is stopped, saves the exit cut and
+ * the room light data back to the room, restores the scene's geometry, background and BGM, then ends the task. */
 /* DS 0x8011a394 (Stage6_exit) */
 static VOID Stage6_exit(VOID)
 {
@@ -548,6 +550,9 @@ static VOID Stage6_exit(VOID)
 	Task_exit();
 }
 
+/* Flash sequence for the stage's flashing objects. Phase 0 is a timed sequence keyed on Stage6_flash_timer
+ * (the object set is shown or hidden at fixed frames). Phase 1 is a random flicker that picks a random
+ * clut index for the objects. */
 /* DS 0x8011a4e8 (Stage6_flash_ctrl) */
 static VOID Stage6_flash_ctrl(VOID)
 {
@@ -668,6 +673,8 @@ static VOID Stage6_flash_ctrl(VOID)
 	Stage6_flash_timer++;
 }
 
+/* Per-frame stage update. Pressing pad 0x800 during the timed phase (Stage6_flash_phase 0) starts the exit
+ * fade (Stage6_fade_step 0x400, Stage6_exit_req set). Stage6_fade_val accumulates the step every frame. */
 /* DS 0x8011a9bc (Stage6_update) */
 static VOID Stage6_update(VOID)
 {
@@ -706,8 +713,7 @@ Stage6_fade_restart:
 			Stage6_msg_char = 0;
 			Stage6_msg_state = 1;
 		case 1:
-			if (Stage6_msg_ptr_tbl[Stage6_msg_line + Stage6_msg_base]
-				[Stage6_msg_char] == 0xfe) {
+			if (Stage6_msg_ptr_tbl[Stage6_msg_line + Stage6_msg_base] [Stage6_msg_char] == 0xfe) {
 				Stage6_msg_line++;
 				if (Stage6_msg_line < 10) {
 					Snd_se_stad(0x2230000, (VECTOR *)0x0);
@@ -718,9 +724,7 @@ Stage6_fade_restart:
 				}
 			}
 			else {
-				Memcpy(Stage6_msg_buf,
-					   Stage6_msg_ptr_tbl
-					   [Stage6_msg_line + Stage6_msg_base], Stage6_msg_char + 1);
+				Memcpy(Stage6_msg_buf, Stage6_msg_ptr_tbl [Stage6_msg_line + Stage6_msg_base], Stage6_msg_char + 1);
 				Stage6_msg_buf[1 + Stage6_msg_char] = 0xfe;
 				Mess_print(0x3c, Stage6_msg_line * 0xe + 0x20, Stage6_msg_buf, 0x4034);
 				if (Stage6_msg_timer == 0) {
@@ -755,8 +759,7 @@ Stage6_fade_restart:
 		case 4:
 			Stage6_msg_timer--;
 			if (Stage6_msg_timer == 0) {
-				if ((Stage6_fade_step == 0) &&
-					(Stage6_fade_step = 0x80, Stage6_exit_req == 0)) {
+				if ((Stage6_fade_step == 0) && (Stage6_fade_step = 0x80, Stage6_exit_req == 0)) {
 					Stage6_fade_step = 0x400;
 				}
 				Stage6_msg_state = 5;
@@ -769,11 +772,8 @@ Stage6_fade_restart:
 		Stage6_msg_i = 0;
 		if (Stage6_msg_line != 0) {
 			do {
-				if (Stage6_msg_ptr_tbl
-					[Stage6_msg_i + Stage6_msg_base] != (UCHAR *)0x0) {
-					Mess_print(0x3c, Stage6_msg_i * 0xe + 0x20,
-							   Stage6_msg_ptr_tbl
-							   [Stage6_msg_i + Stage6_msg_base], 0x4002);
+				if (Stage6_msg_ptr_tbl [Stage6_msg_i + Stage6_msg_base] != (UCHAR *)0x0) {
+					Mess_print(0x3c, Stage6_msg_i * 0xe + 0x20, Stage6_msg_ptr_tbl [Stage6_msg_i + Stage6_msg_base], 0x4002);
 				}
 				Stage6_msg_i++;
 			} while (Stage6_msg_i < Stage6_msg_line);
@@ -829,13 +829,11 @@ static VOID Stage6_draw(VOID)
 			texH = Stage6_poly_tbl[polyOfs + 7];
 			SetPolyFT4(p);
 			if ((*pObjInfo & 0x10) == 0) {
-				clutVal = GetClut((UINT)(UCHAR)Stage6_poly_tbl[polyOfs + 1] << 4,
-								 (UINT)*(USHORT *)(Stage6_poly_tbl + 2 + polyOfs));
+				clutVal = GetClut((UINT)(UCHAR)Stage6_poly_tbl[polyOfs + 1] << 4, (UINT)*(USHORT *)(Stage6_poly_tbl + 2 + polyOfs));
 				tpageVal = (UCHAR)Stage6_poly_tbl[polyOfs] & 0xf;
 			}
 			else {
-				clutVal = GetClut(((UINT)(UCHAR)Stage6_poly_tbl[polyOfs + 1] + (UINT)Stage6_rnd_clut)
-								 * 0x10, (UINT)*(USHORT *)(Stage6_poly_tbl + 2 + polyOfs));
+				clutVal = GetClut(((UINT)(UCHAR)Stage6_poly_tbl[polyOfs + 1] + (UINT)Stage6_rnd_clut) * 0x10, (UINT)*(USHORT *)(Stage6_poly_tbl + 2 + polyOfs));
 				tpageVal = ((UCHAR)Stage6_poly_tbl[polyOfs] & 0xf) | 0x80;
 			}
 			p->clut = clutVal;
@@ -866,6 +864,9 @@ static VOID Stage6_draw(VOID)
 	} while (objRem != 0);
 }
 
+/* Show or hide the flash objects. For each object, Stage6_flash_mask bit idx decides the visibility: a set
+ * bit writes vis_val into the object's visibility byte, a clear bit clears it when clr_flg is set. Objects
+ * whose type byte (pObj[1]) is not 16 are always hidden. */
 /* DS 0x8011b104 (Stage6_set_visi) */
 static VOID Stage6_set_visi(UCHAR vis_val, CHAR clr_flg)
 {
@@ -891,6 +892,8 @@ static VOID Stage6_set_visi(UCHAR vis_val, CHAR clr_flg)
 	} while (idx < (UINT)(INT)Stage6_obj_num);
 }
 
+/* Stage 6 setup: points the BS size, checksum and XA tables at this stage's data, installs Stage6_main as
+ * the stage main hook, then ends the task. */
 /* DS 0x8011b180 (Stage6) */
 VOID Stage6(VOID)
 {

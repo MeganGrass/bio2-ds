@@ -27,23 +27,23 @@ struct tagATTACK_WORK {
  * through Rnd_s32() in ESP_R.C. A global LONG declaration was tested and made 17 other functions worse. */
 extern UCHAR Rnd(VOID);
 
-/* Ground / water / collision helpers (declared in BIO2_global.h). */
+/* Ground / water / collision helpers (declared in their owner headers). */
 
 /* Hit-box constants read from ROM data (values not
  * readable through ghidramcp, so they stay external). */
-extern ATTACK_WORK Esp_aw_0e;	/* DS 0x800108d8 (Esp_0e) */
-extern ATTACK_WORK Esp_aw_0f;	/* DS 0x80010900 (Esp_0f) */
-extern ATTACK_WORK Esp_aw_18;	/* DS 0x80010908 (Esp_18) */
-extern ATTACK_WORK Esp_aw_28;	/* DS 0x80010910 (Esp_28) */
-extern ATTACK_WORK Esp_aw_2f[2];	/* DS 0x80010918 (Esp_2f); Esp_2f copies it to a stack array that Pos_em_at_ck updates */
-extern ATTACK_WORK Esp_aw_30[2];	/* DS 0x8001093c (Esp_30, Esp_31) */
-extern ATTACK_WORK Esp_aw_46;	/* DS 0x80010964 (Esp_46) */
+extern const ATTACK_WORK Esp_aw_0e;	/* DS 0x800108d8 (Esp_0e) */
+extern const ATTACK_WORK Esp_aw_0f;	/* DS 0x80010900 (Esp_0f) */
+extern const ATTACK_WORK Esp_aw_18;	/* DS 0x80010908 (Esp_18) */
+extern const ATTACK_WORK Esp_aw_28;	/* DS 0x80010910 (Esp_28) */
+extern const ATTACK_WORK Esp_aw_2f[2];	/* DS 0x80010918 (Esp_2f); Esp_2f copies it to a stack array that Pos_em_at_ck updates */
+extern const ATTACK_WORK Esp_aw_30[2];	/* DS 0x8001093c (Esp_30, Esp_31) */
+extern const ATTACK_WORK Esp_aw_46;	/* DS 0x80010964 (Esp_46) */
 
 /* OBA.C / SUB.H (retail 0x8003513c, Flg_ck) */
 extern ULONG Oba_ck_em_at(SVECTOR *pPos, LONG R, LONG H);
 extern ULONG Flg_ck(ULONG *p, ULONG x);
 
-/* PAD.C (name_registry.md) */
+/* Functions defined in PAD.C */
 extern VOID Pad_vib_set0(int Time, USHORT Attr);				/* DS 0x8003947c */
 extern VOID Pad_vib_fade_set(int Time, int Pow_st, int Pow_ed, USHORT Attr);	/* DS 0x800395b8 */
 

@@ -12,6 +12,8 @@
 #include "PL_WEP.H"
 
 /* ---- types migrated from data.h ---- */
+/* Bow attack hit table: for each of the four hit frames, the parts index (HitN_parts) and the ren4
+ * index (HitN_ren4) that the hit test checks. */
 struct tagBOW_HIT_PARTS {
 	UCHAR Hit0_parts;
 	UCHAR Hit0_ren4;
@@ -23,7 +25,7 @@ struct tagBOW_HIT_PARTS {
 	UCHAR Hit3_ren4;
 };
 
-/* pl_mv05_w_tbl (declared in PL_WEP.H) is the gun init table used here */
+/* pl_mv05_t2_init and pl_mv05_t2_spr (declared in PL_WEP.H) are the per-weapon t2 routine tables used here */
 
 /* pl_mv05 dispatcher */
 VOID pl_mv05(ENEMY_WORK *pEm, ULONG Kan, ULONG Seq);
@@ -92,7 +94,7 @@ ULONG Bow_goto_parts_no(ENEMY_WORK *pTa, MATRIX *pM, BOW_HIT_PARTS *pBow_t);
 typedef void (*PL_MV05_FN)(ENEMY_WORK *pEm, ULONG Kan, ULONG Seq, ULONG Key);
 
 /* pl_mv05 dispatch tables (DS addresses in comments) */
-extern PL_MV05_FN pl_mv05_type_tbl[];	/* DS 0x800a6f38, index Type & 0xfff */
+extern PL_MV05_FN pl_mv05_w_tbl[20];	/* DS 0x800a6f3c, index (Type & 0xfff) - 1 */
 extern PL_MV05_FN pl_mv05_w2_tbl[];	/* DS 0x800a7068, index Routine_2 */
 extern PL_MV05_FN pl_mv05_w3_tbl[];	/* DS 0x800a7080, index Routine_2 */
 extern PL_MV05_FN pl_mv05_w0_tbl[7];	/* DS 0x800a702c, index Routine_2 */
@@ -112,31 +114,15 @@ VOID pl_mv05_w4_t2(ENEMY_WORK *pEm, ULONG Kan, ULONG Seq, ULONG Key);
 VOID pl_mv05_w5(ENEMY_WORK *pEm, ULONG Kan, ULONG Seq, ULONG Key);
 VOID pl_mv05_w5_t2(ENEMY_WORK *pEm, ULONG Kan, ULONG Seq, ULONG Key);
 
-/* Literal words copied into local move-number tables (rodata 0x80011030..0x8001109e) */
-extern SHORT  Pl_mvtbl3[6];	/* DS 0x80011030 */
-extern ULONG  Pl_mvtbl4_w0;	/* DS 0x8001103c */
-extern ULONG  Pl_mvtbl4_w1;	/* DS 0x80011040 */
-extern ULONG  Pl_mvtbl5_w0;	/* DS 0x80011060 */
-extern ULONG  Pl_mvtbl5_w1;	/* DS 0x80011064 */
-extern USHORT Pl_mvtbl5_w2;	/* DS 0x80011068 */
-extern ULONG  Pl_mvtbl6_w0;	/* DS 0x8001106c */
-extern ULONG  Pl_mvtbl6_w1;	/* DS 0x80011070 */
-extern USHORT Pl_mvtbl6_w2;	/* DS 0x80011074 */
-extern ULONG  Pl_mvtbl6_w3;	/* DS 0x80011078 */
-extern ULONG  Pl_mvtbl6_w4;	/* DS 0x8001107c */
-extern USHORT Pl_mvtbl6_w5;	/* DS 0x80011080 */
-extern UCHAR  Pl_wep_byte_b0;	/* DS 0x8001109c */
-extern UCHAR  Pl_wep_byte_b1;	/* DS 0x8001109d */
-extern UCHAR  Pl_wep_byte_b2;	/* DS 0x8001109e */
 
 
 
 /* Globals defined in PL_WEP2.C */
 	extern ATTACK_WORK3 Pl_w011[5];						// 0x800a63a8
-	extern ATTACK_SEQ Pl_w01_s1[8];						// 0x800a6434
-	extern ATTACK_SEQ Pl_w01_s0[8];						// 0x800a656c
+	extern ATTACK_SEQ Pl_w01_s1[7];						// 0x800a6434
+	extern ATTACK_SEQ Pl_w01_s0[7];						// 0x800a656c
 	extern ATTACK_WORK3 Pl_w012[5];						// 0x800a657c
-	extern ATTACK_SEQ Pl_w01_s2[8];						// 0x800a6608
+	extern ATTACK_SEQ Pl_w01_s2[7];						// 0x800a6608
 	extern BOW_HIT_PARTS Pl_bow_hit_parts[48];			// 0x800a6b88
 	extern UCHAR Pl_weapon_kyan[19][3];					// 0x800a6d78
 	extern UCHAR Gun_jtg_bit[5];						// 0x800a6f8c

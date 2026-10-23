@@ -11,6 +11,7 @@
 #include "DOOR.H"
 
 
+/* Stage 4 setup: points the BS size, checksum and XA tables at this stage's data, then ends the task. */
 /* DS 0x8011a004 (Stage4) */
 VOID Stage4(VOID)
 {
@@ -20,6 +21,7 @@ VOID Stage4(VOID)
 	Task_exit();
 }
 
+/* Stage 4 BS stream sizes: 17 rows of 16 words, one row per BS load group. Unused slots hold 0x0008. */
 /* DS 0x8011a054 (Bs_size4) */
 USHORT Bs_size4[17][16] =
 {
@@ -42,6 +44,7 @@ USHORT Bs_size4[17][16] =
 	{ 0xBCC0, 0x99EC, 0x9BFC, 0x90B4, 0xB158, 0xC5E4, 0xBC94, 0x7BC8, 0x0008, 0x0008, 0x0008, 0x0008, 0x0008, 0x0008, 0x0008, 0x0008 },
 };
 
+/* Checksum bytes for the BS loads in Bs_size4 (same 17 x 16 layout). Unused slots are zero. */
 /* DS 0x8011a274 (Bs_check_sum4) */
 UCHAR Bs_check_sum4[17][16] =
 {
@@ -64,8 +67,9 @@ UCHAR Bs_check_sum4[17][16] =
 	{ 0x97, 0xEB, 0x8E, 0xCE, 0x79, 0x73, 0x0D, 0xBA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
 };
 
+/* Stage 4 XA sector table: one {channel, start offset, length} entry per XA segment. */
 /* DS 0x8011a384 (Xa_sector04) */
-USHORT Xa_sector04[41][3] =
+USHORT Xa_sector04[42][3] =
 {
 	{ 0x000C, 0x0056, 0x0006 },
 	{ 0x0002, 0x0054, 0x0008 },
@@ -108,4 +112,5 @@ USHORT Xa_sector04[41][3] =
 	{ 0x000E, 0x0038, 0x001A },
 	{ 0x000F, 0x004C, 0x0008 },
 	{ 0x000C, 0x0000, 0x002F },
+	{ 0x000D, 0x003C, 0x001E }
 };

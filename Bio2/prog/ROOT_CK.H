@@ -9,7 +9,8 @@
 #include "TYPES.H"
 
 
-/* Function prototypes */
+/* Enemy route checks. Root_ck tests a route to Dest_area, Rnd_area picks a random area, Guide_check tests a
+ * target point against the guide area, and kara_rootck2 is the route helper for the main body area. */
 UCHAR   Root_ck(ENEMY_WORK *pEm, VECTOR *Dest, UCHAR Dest_area, UCHAR Mode);
 UCHAR   Rnd_area(void);
 UCHAR   Guide_check(short target_x, short target_z);

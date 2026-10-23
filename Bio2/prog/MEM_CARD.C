@@ -5,7 +5,6 @@
 
 #include "TYPES.H"
 #include <KERNEL.H>
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBETC.H>
 #include <LIBGPU.H>
@@ -36,7 +35,7 @@
 #include "flag.h"
 
 /* DS 0x801bfa1c (Mc_search_pat) */
-UCHAR Mc_search_pat[] = {
+UCHAR Mc_search_pat[4] = {
 	0x00, 0x00, 0x00, 0x00
 };
 
@@ -47,12 +46,12 @@ UCHAR Mc_name_tmpl[15] = {
 };
 
 /* DS 0x801bfad8 (Card_font) */
-UCHAR Card_font[] = {
+UCHAR Card_font[4] = {
 	0x26, 0x00, 0x00, 0x00
 };
 
 /* DS 0x801bfb40 (Mc_icon_801bfb40) */
-UCHAR Mc_icon_801bfb40[] = {
+UCHAR Mc_icon_801bfb40[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x62, 0x82, 0x8c, 0x82, 0x81, 0x82, 0x89,
@@ -61,7 +60,7 @@ UCHAR Mc_icon_801bfb40[] = {
 };
 
 /* DS 0x801bfb68 (Mc_icon_801bfb68) */
-UCHAR Mc_icon_801bfb68[] = {
+UCHAR Mc_icon_801bfb68[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x6b, 0x82, 0x85, 0x82, 0x8f, 0x82, 0x8e,
@@ -70,7 +69,7 @@ UCHAR Mc_icon_801bfb68[] = {
 };
 
 /* DS 0x801bfb90 (Mc_icon_801bfb90) */
-UCHAR Mc_icon_801bfb90[] = {
+UCHAR Mc_icon_801bfb90[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x62, 0x82, 0x88, 0x82, 0x92, 0x82, 0x89,
@@ -79,7 +78,7 @@ UCHAR Mc_icon_801bfb90[] = {
 };
 
 /* DS 0x801bfbb8 (Mc_icon_801bfbb8) */
-UCHAR Mc_icon_801bfbb8[] = {
+UCHAR Mc_icon_801bfbb8[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x60, 0x82, 0x84, 0x82, 0x81, 0x81, 0x40,
@@ -88,7 +87,7 @@ UCHAR Mc_icon_801bfbb8[] = {
 };
 
 /* DS 0x801bfbe0 (Mc_icon_801bfbe0) */
-UCHAR Mc_icon_801bfbe0[] = {
+UCHAR Mc_icon_801bfbe0[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x81, 0x48, 0x81, 0x48, 0x81, 0x48, 0x81, 0x48,
@@ -97,7 +96,7 @@ UCHAR Mc_icon_801bfbe0[] = {
 };
 
 /* DS 0x801bfc08 (Mc_icon_801bfc08) */
-UCHAR Mc_icon_801bfc08[] = {
+UCHAR Mc_icon_801bfc08[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x62, 0x82, 0x8c, 0x82, 0x81, 0x82, 0x89,
@@ -106,7 +105,7 @@ UCHAR Mc_icon_801bfc08[] = {
 };
 
 /* DS 0x801bfc30 (Mc_icon_801bfc30) */
-UCHAR Mc_icon_801bfc30[] = {
+UCHAR Mc_icon_801bfc30[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x6b, 0x82, 0x85, 0x82, 0x8f, 0x82, 0x8e,
@@ -115,7 +114,7 @@ UCHAR Mc_icon_801bfc30[] = {
 };
 
 /* DS 0x801bfc58 (Mc_icon_801bfc58) */
-UCHAR Mc_icon_801bfc58[] = {
+UCHAR Mc_icon_801bfc58[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x62, 0x82, 0x8c, 0x82, 0x81, 0x82, 0x89,
@@ -124,7 +123,7 @@ UCHAR Mc_icon_801bfc58[] = {
 };
 
 /* DS 0x801bfc80 (Mc_icon_801bfc80) */
-UCHAR Mc_icon_801bfc80[] = {
+UCHAR Mc_icon_801bfc80[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x6b, 0x82, 0x85, 0x82, 0x8f, 0x82, 0x8e,
@@ -133,7 +132,7 @@ UCHAR Mc_icon_801bfc80[] = {
 };
 
 /* DS 0x801bfca8 (Mc_icon_801bfca8) */
-UCHAR Mc_icon_801bfca8[] = {
+UCHAR Mc_icon_801bfca8[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x67, 0x82, 0x95, 0x82, 0x8e, 0x82, 0x8b,
@@ -142,7 +141,7 @@ UCHAR Mc_icon_801bfca8[] = {
 };
 
 /* DS 0x801bfcd0 (Mc_icon_801bfcd0) */
-UCHAR Mc_icon_801bfcd0[] = {
+UCHAR Mc_icon_801bfcd0[40] = {
 	0x82, 0x71, 0x82, 0x64, 0x82, 0x51, 0x81, 0x40,
 	0x81, 0x40, 0x82, 0x4f, 0x82, 0x4f, 0x81, 0x44,
 	0x82, 0x73, 0x82, 0x8f, 0x82, 0x86, 0x82, 0x95,
@@ -151,33 +150,33 @@ UCHAR Mc_icon_801bfcd0[] = {
 };
 
 /* DS 0x801bfcf8 (Mc_icon_801bfcf8) */
-UCHAR Mc_icon_801bfcf8[] = {
+UCHAR Mc_icon_801bfcf8[4] = {
 	0x81, 0x40, 0x00, 0x00
 };
 
 /* DS 0x801bfcfc (Mc_icon_801bfcfc) */
-UCHAR Mc_icon_801bfcfc[] = {
+UCHAR Mc_icon_801bfcfc[4] = {
 	0x82, 0x64, 0x00, 0x00
 };
 
 /* DS 0x801bfd00 (Mc_icon_801bfd00) */
-UCHAR Mc_icon_801bfd00[] = {
+UCHAR Mc_icon_801bfd00[4] = {
 	0x82, 0x71, 0x00, 0x00
 };
 
 /* DS 0x801bfd04 (Mc_icon_801bfd04) */
-UCHAR Mc_icon_801bfd04[] = {
+UCHAR Mc_icon_801bfd04[4] = {
 	0x82, 0x74, 0x00, 0x00
 };
 
 /* DS 0x801bfd08 (Mc_icon_801bfd08) */
-UCHAR Mc_icon_801bfd08[] = {
+UCHAR Mc_icon_801bfd08[4] = {
 	0x82, 0x61, 0x00, 0x00
 };
 
 
 /* DS 0x801c3e1c (Mess_text) */
-UCHAR Mess_text[] = {
+UCHAR Mess_text[1092] = {
 	0x20, 0x4b, 0x00, 0x4a, 0x4b, 0x50, 0x00, 0x4f, 0x3d, 0x52, 0x41, 0xfe, 0x00, 0x20, 0x4b, 0x00,
 	0x4a, 0x4b, 0x50, 0x00, 0x48, 0x4b, 0x3d, 0x40, 0xfe, 0x00, 0x29, 0x41, 0x49, 0x4b, 0x4e, 0x55,
 	0x00, 0x3f, 0x3d, 0x4e, 0x40, 0x00, 0x0d, 0xfe, 0x00, 0x29, 0x41, 0x49, 0x4b, 0x4e, 0x55, 0x00,
@@ -250,7 +249,7 @@ UCHAR Mess_text[] = {
 };
 
 /* DS 0x801c4260 (Mess_offs) */
-USHORT Mess_offs[] = {
+USHORT Mess_offs[76] = {
 	0x0000, 0x000d, 0x001a, 0x0029, 0x0038, 0x0040, 0x0055, 0x006c,
 	0x0084, 0x0090, 0x0095, 0x0099, 0x00b1, 0x00c3, 0x00dc, 0x00ed,
 	0x0104, 0x0114, 0x011d, 0x0133, 0x0144, 0x015f, 0x016d, 0x017d,
@@ -267,7 +266,7 @@ USHORT Mess_offs[] = {
 MWORK *pMwork = (MWORK *)0x801c45a8;
 
 /* DS 0x801c4320 (Mc_area_name) */
-UCHAR Mc_area_name[][29] = {
+UCHAR Mc_area_name[21][29] = {
 	{ 0x82, 0x76, 0x82, 0x81, 0x82, 0x89, 0x82, 0x94, 0x82, 0x89, 0x82, 0x8e, 0x82, 0x87, 0x81, 0x40,
 	  0x82, 0x71, 0x82, 0x8f, 0x82, 0x8f, 0x82, 0x8d, 0x81, 0x40, 0x00, 0x00, 0x00 },
 	{ 0x82, 0x67, 0x82, 0x81, 0x82, 0x8c, 0x82, 0x8c, 0x81, 0x40, 0x81, 0x40, 0x81, 0x40, 0x81, 0x40,
@@ -318,13 +317,41 @@ UCHAR Mess_ctrl[6] = {
 };
 
 /* DS 0x801c458c (Mc_slot_ofs) */
-UCHAR Mc_slot_ofs[] = {
+UCHAR Mc_slot_ofs[16] = {
 	0x04, 0x06, 0x04, 0x06, 0x04, 0x06, 0x04, 0x06,
 	0x04, 0x06, 0x00, 0x05, 0x00, 0x00, 0x03, 0x00
 };
 
 /* DS 0x801c45a0 (Mc_prev_slot) */
 UCHAR Mc_prev_slot = 0x00;
+
+/* ------------------------------------------------------------------ */
+/* Mem_card — MEMCARD overlay task entry                                */
+/* ------------------------------------------------------------------ */
+/* DS 0x801bfd14 (Mem_card). If Task_status(0) returns 1, the task suspends level 0, runs Card_access
+ * and signals level 0. Otherwise, if Task_status(2) returns 1, it suspends level 2, runs Card_access,
+ * clears Main.Bg_chg_flg and signals level 2. If neither status is 1 it returns without signalling.
+ * Both signalling paths end with Task_exit. */
+void Mem_card(void)
+{
+	ULONG Level;
+
+	if (Task_status(0) == 1) {
+		Task_suspend(0);
+		Card_access();
+		Level = 0;
+	} else {
+		if (Task_status(2) != 1) {
+			return;
+		}
+		Task_suspend(2);
+		Card_access();
+		Main.Bg_chg_flg = 0;
+		Level = 2;
+	}
+	Task_signal(Level);
+	Task_exit();
+}
 
 /* ------------------------------------------------------------------ */
 /* Static helpers (no PSYQ symbol records; Ghidra MEMCARD::801bfd9c */
@@ -407,14 +434,16 @@ static int Mess_width(int Msg)
 /* ------------------------------------------------------------------ */
 /* Card_access — main memory card menu state machine                    */
 /* ------------------------------------------------------------------ */
-/* DS 0x801bff10 (Card_access). Retail frame is 0x2a0 (672), 640 here. Callees
- * and call counts match retail. The array area (File_info, msg_buf, item_bak,
- * title_bak) ends at the same offset (0x238); the difference is the spill area
+/* DS 0x801bff10 (Card_access). The frame is 640 bytes here against 672 in retail. Callees
+ * and call counts are the same as in retail. The array area (File_info, msg_buf, item_bak,
+ * title_bak) ends at 0x238 in both builds; the frame difference is in the spill area
  * after it: retail keeps six byte-wide locals (lbu/sb at 0x238..0x260) and the
  * item_bak pointer (0x270) in 8-byte spaced slots, this compiler spills them
  * as 4-byte words. */
 void Card_access(void)
 {
+	/* retail reserves 40 more bytes of locals (Card_access frame 672); never read */
+	volatile int Rsv[10];
 	MWORK *pMc;
 	UCHAR sel_bak;
 	UCHAR item_num;
@@ -543,7 +572,7 @@ cursor_step:
 		cur_u8 = (UCHAR)cursor;
 		cursor_prev = cur_u8;
 		switch (Rno) {
-		case 0:
+		case SLOT_CHECK:
 			res = Wslot_check();
 			if (res - 1 < 2) {
 				pMc->Port = (UCHAR)res & 1;
@@ -583,7 +612,7 @@ cancel_ck:
 				pMc->Pad_stop = cursor_max;
 			}
 			break;
-		case 2:
+		case SEL_SLOT:
 			cursor_max = 2;
 			if (((G.Key_trg & 0x1000) == 0) && ((G.Padd_trg & 0x800) == 0))
 				goto cancel_ck;
@@ -594,7 +623,7 @@ cancel_ck:
 			if (pMc->Win_show_flg != 0) goto enter_state18;
 			Rno = 5;
 			break;
-		case 3:
+		case ERR_MESS:
 			cursor_max = 0;
 			cursor = 0;
 			if (((err_code - 2) & 0xff) < 2) {
@@ -615,11 +644,9 @@ cancel_ck:
 		case 5:
 			i_tmp = Mess_center_x(0x4b, 1);
 			Rno = 6;
-			Mess_print((int)(short)i_tmp, 0xb2,
-					   Mess_text + Mess_offs[7], 0x4002);
+			Mess_print((int)(short)i_tmp, 0xb2, Mess_text + Mess_offs[7], 0x4002);
 			i_tmp = Mess_center_x(0x4b, 1);
-			Mess_print((int)(short)i_tmp, 0xc0,
-					   Mess_text + Mess_offs[75], 0x4002);
+			Mess_print((int)(short)i_tmp, 0xc0, Mess_text + Mess_offs[75], 0x4002);
 			Task_sleep(1);
 			break;
 		case 6:
@@ -640,9 +667,7 @@ cancel_ck:
 						if (res == 0) {
 							if ((Mode == 1) && (Rno = 3, pMc->File_info.num == 0)) {
 								err_code = 3;
-							} else if ((Mode == 0) &&
-									   ((pMc->File_info.num == 0 && (Rno = 3,
-										pMc->Card_total_size == 0x1e000)))) {
+							} else if ((Mode == 0) && ((pMc->File_info.num == 0 && (Rno = 3, pMc->Card_total_size == 0x1e000)))) {
 								err_code = 2;
 							} else {
 								blink_cnt = 0;
@@ -772,9 +797,7 @@ slot_err_show:
 				break;
 			}
 			if ((G.System_flg & SYS_EX_BATTLE) == 0) {
-				if ((((((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + Rno))->Status_bak & 0x4000) == 0) &&
-					 (1 < (UINT)(((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + Rno))->Pl_id - 0xc))) &&
-					((((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + Rno))->Pl_id & 1) != 0)) {
+				if ((((((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + Rno))->Status_bak & 0x4000) == 0) && (1 < (UINT)(((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + Rno))->Pl_id - 0xc))) && ((((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + Rno))->Pl_id & 1) != 0)) {
 					err_code = 7;
 					goto slot_err_show;
 				}
@@ -784,8 +807,7 @@ slot_err_show:
 			}
 			i_tmp = Mess_center_x(0x4b, 1);
 			Rno = 0xd;
-			Mess_print((int)(short)i_tmp, 0xba,
-					   Mess_text + Mess_offs[16], 0x4002);
+			Mess_print((int)(short)i_tmp, 0xba, Mess_text + Mess_offs[16], 0x4002);
 			i_tmp = Mess_center_x(0x4b, 1);
 			pos = (short)i_tmp;
 			u_tmp = 0xca;
@@ -800,14 +822,12 @@ slot_err_show:
 			pos = (short)Rno;
 			Rno = 0xb;
 msg_pair_print:
-			Mess_print((int)pos, 0xb2,
-					   Mess_text + Mess_offs[74], 0x4002);
+			Mess_print((int)pos, 0xb2, Mess_text + Mess_offs[74], 0x4002);
 			i_tmp = Mess_center_x(0x4b, 1);
 			pos = (short)i_tmp;
 			u_tmp = 0xc0;
 msg_line2_print:
-			Mess_print((int)pos, u_tmp,
-					   Mess_text + Mess_offs[75], 0x4002);
+			Mess_print((int)pos, u_tmp, Mess_text + Mess_offs[75], 0x4002);
 			break;
 		case 0xb:
 			pItem_bak = item_bak;
@@ -825,12 +845,9 @@ msg_line2_print:
 			}
 			G.SaveData.Save_cnt++;
 			Save_push();
-			Memcpy(&pMc->Save_info[cursor + (UCHAR)pMc->Scrl_ofs],
-				   &G.SaveData.Game_play_time, 0x80);
+			Memcpy(&pMc->Save_info[cursor + (UCHAR)pMc->Scrl_ofs], &G.SaveData.Game_play_time, 0x80);
 			Card_mess_make(msg_buf, (ULONG)&G.SaveData,sel_bak + pMc->Scrl_ofs);
-			err_code = Card_write(&G.SaveData, pMc->Port,
-								  Title_buf + (cursor + (UCHAR)pMc->Scrl_ofs) * 0x16,
-								  msg_buf, 0x800);
+			err_code = Card_write(&G.SaveData, pMc->Port, Title_buf + (cursor + (UCHAR)pMc->Scrl_ofs) * 0x16, msg_buf, 0x800);
 			if ((err_code & 0xff) == 0) {
 				pMc->F_num[cursor + (UCHAR)pMc->Scrl_ofs] = 0;
 				pMc->Msg_idx    = 0xff;
@@ -863,11 +880,9 @@ save_wait_tick:
 		case 0xd:
 			Rno = 0xe;
 			break;
-		case 0xe:
+		case LOAD:
 			cursor = (UINT)sel_cursor;
-			res = Card_read(&pMc->Card_save,
-							  pMc->File_info.title[(UINT)(UCHAR)pMc->F_num[cursor + (UCHAR)pMc->Scrl_ofs]],
-							  0x800, 0);
+			res = Card_read(&pMc->Card_save, pMc->File_info.title[(UINT)(UCHAR)pMc->F_num[cursor + (UCHAR)pMc->Scrl_ofs]], 0x800, 0);
 			err_code = 6;
 			if ((res & 0xff) == 0) {
 				memcpy16((ULONG *)&G.SaveData, (ULONG *)&pMc->Card_save, 0x798);
@@ -937,7 +952,7 @@ exit_check:
 				Rno = 1;
 			}
 			break;
-		case 0x10:
+		case CARD_CHECK:
 			res = Card_check(pMc->Port);
 			if ((res & 0xff) == 0) {
 				err_code = Card_format_check(pMc->Port);
@@ -976,9 +991,7 @@ exit_check:
 				}
 			}
 			i_tmp = Mess_center_x((err_code & 0xff) + 0x14, 1);
-			Mess_print((int)(short)i_tmp, 0xc4,
-					   Mess_text +
-					   Mess_offs[20 + (err_code & 0xff)], 0x4012);
+			Mess_print((int)(short)i_tmp, 0xc4, Mess_text + Mess_offs[20 + (err_code & 0xff)], 0x4012);
 card_poll_wait:
 			ready = Card_poll(pMc->Port);
 			if (ready != 0) goto card_err_clear;
@@ -1007,7 +1020,7 @@ card_poll_wait:
 			cursor_max = pMc->Sel_row_bk;
 			cursor = (UINT)cursor_max;
 			break;
-		case 0x13:
+		case SCRL_UP:
 			pos = pMc->Scrl_slide_y;
 			pMc->Scrl_slide_y = pos + 0x14;
 			if (pos == -0x14) {
@@ -1016,7 +1029,7 @@ scroll_done:
 				blink_cnt = 0;
 			}
 			break;
-		case 0x14:
+		case SCRL_DOWN:
 			pos = pMc->Scrl_slide_y;
 			pMc->Scrl_slide_y = pos + -0x14;
 			if ((short)(pos + -0x14) == -0x14) {
@@ -1030,7 +1043,9 @@ scroll_done:
 			pMc->Pad_stop = 0;
 			break;
 		case 0x16:
-			res = Card_check(pMc->Port);
+			/* Retail checks the other slot (Port ^ 1): if a card answers there the
+			 * menu returns to the slot select (state 0), otherwise it leaves. */
+			res = Card_check(pMc->Port ^ 1);
 			cursor = 0;
 			if (res != 0) {
 				pMc->Card_err_flg = 1;
@@ -1207,8 +1222,8 @@ void Cardaccess_exit(int Param)
 /* ------------------------------------------------------------------ */
 /* Mess_disp — memory-card menu display dispatcher (overlay version)    */
 /* ------------------------------------------------------------------ */
-/* DS 0x801c1824 (Card_mess_disp). Retail frame is 0xb8 (184), 152 here. Callees
- * match retail (Card_blink_head in case 3, case 0xf and the 0x12/7..0x14 list);
+/* DS 0x801c1824 (Card_mess_disp). The frame is 152 bytes here against 184 in retail. Callees
+ * are the retail calls (Card_blink_head in case 3, case 0xf and the 0x12/7..0x14 list);
  * the compiler here merges one of retail's 35 Mess_center_x call sites. The
  * case bodies follow the retail layout (2, 0x18, 0x12, 7.., 0xf, 1, 3, 0x17).
  * Retail spills the copies of Rno, Cursor and Err_code, the row counter and
@@ -1216,6 +1231,8 @@ void Cardaccess_exit(int Param)
  * argument home slots and 4-byte slots used here. */
 void Card_mess_disp(int Rno, int Mode, UINT Cursor, int Err_code)
 {
+	/* retail reserves 32 more bytes of locals (Card_mess_disp frame 184); never read */
+	volatile int Rsv[8];
 	UCHAR ch;
 	USHORT msg_off;
 	BOOL flg;
@@ -1247,52 +1264,42 @@ void Card_mess_disp(int Rno, int Mode, UINT Cursor, int Err_code)
 	switch (Rno) {
 	case 0:
 		break;
-	case 2:
+	case SEL_SLOT:
 		if (Mode == 0) {
 			i_tmp = Mess_center_x(5, 1);
-			Mess_print((int)(short)i_tmp, 0x40,
-					   Mess_text + Mess_offs[5], 0x4002);
+			Mess_print((int)(short)i_tmp, 0x40, Mess_text + Mess_offs[5], 0x4002);
 			i_tmp = Mess_center_x(3, 1);
 			pos = (short)i_tmp;
 			msg_off = Mess_offs[0];
 		} else {
 			i_tmp = Mess_center_x(6, 1);
-			Mess_print((int)(short)i_tmp, 0x40,
-					   Mess_text + Mess_offs[6], 0x4002);
+			Mess_print((int)(short)i_tmp, 0x40, Mess_text + Mess_offs[6], 0x4002);
 			i_tmp = Mess_center_x(3, 1);
 			pos = (short)i_tmp;
 			msg_off = Mess_offs[1];
 		}
 		Mess_print((int)pos, 0x90, Mess_text + msg_off, 0x4002);
 		i_tmp = Mess_center_x(3, 1);
-		Mess_print((int)(short)i_tmp, 0x60,
-				   Mess_text + Mess_offs[2], 0x4002);
+		Mess_print((int)(short)i_tmp, 0x60, Mess_text + Mess_offs[2], 0x4002);
 		i_tmp = Mess_center_x(3, 1);
-		Mess_print((int)(short)i_tmp, 0x78,
-				   Mess_text + Mess_offs[3], 0x4002);
+		Mess_print((int)(short)i_tmp, 0x78, Mess_text + Mess_offs[3], 0x4002);
 		i_tmp = Mess_center_x(3, 1);
 		coord = (int)(short)i_tmp - 0x10;
 		curs_y = cur_row * 0x18 + 0x60;
 		goto draw_cursor;
 	case 0x18:
 		i_tmp = Mess_center_x(0x46, 1);
-		Mess_print((int)(short)i_tmp - 0x13, 0x2c,
-				   Mess_text + Mess_offs[68], 0x4002);
+		Mess_print((int)(short)i_tmp - 0x13, 0x2c, Mess_text + Mess_offs[68], 0x4002);
 		i_tmp = Mess_center_x(0x46, 1);
-		Mess_print((int)(short)i_tmp - 5, 0x40,
-				   Mess_text + Mess_offs[70], 0x4002);
+		Mess_print((int)(short)i_tmp - 5, 0x40, Mess_text + Mess_offs[70], 0x4002);
 		i_tmp = Mess_center_x(0x46, 1);
-		Mess_print((int)(short)i_tmp - 5, 0x54,
-				   Mess_text + Mess_offs[71], 0x4002);
+		Mess_print((int)(short)i_tmp - 5, 0x54, Mess_text + Mess_offs[71], 0x4002);
 		i_tmp = Mess_center_x(0x46, 1);
-		Mess_print((int)(short)i_tmp - 0x13, 0x78,
-				   Mess_text + Mess_offs[69], 0x4002);
+		Mess_print((int)(short)i_tmp - 0x13, 0x78, Mess_text + Mess_offs[69], 0x4002);
 		i_tmp = Mess_center_x(0x46, 1);
-		Mess_print((int)(short)i_tmp - 5, 0x8c,
-				   Mess_text + Mess_offs[72], 0x4002);
+		Mess_print((int)(short)i_tmp - 5, 0x8c, Mess_text + Mess_offs[72], 0x4002);
 		i_tmp = Mess_center_x(0x46, 1);
-		Mess_print((int)(short)i_tmp - 5, 0xa0,
-				   Mess_text + Mess_offs[73], 0x4002);
+		Mess_print((int)(short)i_tmp - 5, 0xa0, Mess_text + Mess_offs[73], 0x4002);
 		anim_flg = 1;
 		if (pMwork->Blink_phase == 0) {
 			if (cur_row == 0) {
@@ -1309,14 +1316,12 @@ void Card_mess_disp(int Rno, int Mode, UINT Cursor, int Err_code)
 		break;
 	case 0x12:
 		i_tmp = Mess_center_x(8, 1);
-		Mess_print((int)(short)i_tmp, 0xb2,
-				   Mess_text + Mess_offs[8], 0x4012);
+		Mess_print((int)(short)i_tmp, 0xb2, Mess_text + Mess_offs[8], 0x4012);
 		Mess_print(0x8b, 0xc4, Mess_text + Mess_offs[9], 0x4002);
 		Mess_print(0x8b, 0xd6, Mess_text + Mess_offs[10], 0x4002);
 		Cursor_disp(0x7b, cur_row * 0x12 + 0xc4);
 		i_tmp = Mess_width(0x22);
-		Print14((0x68 - (short)i_tmp) / 2 - 7,
-				(UINT)(UCHAR)pMc->Sel_row_bk * 0x14 + 0x38, 3, 0, Card_font);
+		Print14((0x68 - (short)i_tmp) / 2 - 7, (UINT)(UCHAR)pMc->Sel_row_bk * 0x14 + 0x38, 3, 0, Card_font);
 	case 7:
 	case 8:
 	case 9:
@@ -1325,8 +1330,8 @@ void Card_mess_disp(int Rno, int Mode, UINT Cursor, int Err_code)
 	case 0xc:
 	case 0xd:
 	case 0x11:
-	case 0x13:
-	case 0x14:
+	case SCRL_UP:
+	case SCRL_DOWN:
 		Card_blink_head();
 		row = 0;
 		if (pMc->Scrl_slide_y != 0) goto slot_row_loop;
@@ -1348,13 +1353,11 @@ slot_row_loop:
 				msg_buf[1] = (char)(idx + 1) + (char)((idx + 1) / 10) * -10 + 12;
 				i_tmp2 = Mess_width(0x22);
 				i_tmp3 = row * 0x14 + 0x38;
-				Mess_print((0x68 - (short)i_tmp2) / 2 + 2,
-						   pMc->Scrl_slide_y + i_tmp3, msg_buf, 0x4002);
+				Mess_print((0x68 - (short)i_tmp2) / 2 + 2, pMc->Scrl_slide_y + i_tmp3, msg_buf, 0x4002);
 				msg_buf[0] = 1;
 				msg_buf[1] = 0xfe;
 				i_tmp2 = Mess_width(0x22);
-				Mess_print((0x68 - (short)i_tmp2) / 2 + 0x19,
-						   pMc->Scrl_slide_y + i_tmp3, msg_buf, 2);
+				Mess_print((0x68 - (short)i_tmp2) / 2 + 0x19, pMc->Scrl_slide_y + i_tmp3, msg_buf, 2);
 				i_tmp2 = idx * 0x80;
 				if ((UCHAR)pMc->F_num[idx] < 0xf) {
 					if ((((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + i_tmp2))->Status_bak & 0x40000000) == 0) {
@@ -1426,10 +1429,7 @@ slot_row_loop:
 						msg_buf[len + 2] +
 						(char)((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + i_tmp2))->Save_cnt +
 						(char)(((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + i_tmp2))->Save_cnt / 10) * -10;
-					Memcpy(msg_buf + len + 4,
-						   Mess_text +
-						   Mess_offs[43 +
-									   (UINT)(UCHAR)((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + i_tmp2))->Save_area], 0x18);
+					Memcpy(msg_buf + len + 4, Mess_text + Mess_offs[43 + (UINT)(UCHAR)((SAVE_BLOCK *)((UCHAR *)pMc->Save_info + i_tmp2))->Save_area], 0x18);
 					if ((scr_no == 0xc) && (row == cur_row)) {
 						flg = 0;
 						if (pMc->Anim_wait == 1) {
@@ -1439,8 +1439,7 @@ slot_row_loop:
 						if (slot_type < 0) {
 							msg_buf[0] = 0xfe;
 						} else {
-							if (((UCHAR)(msg_buf[slot_type] + 0x12) < 2) ||
-								(msg_buf[slot_type] == 0xf0)) {
+							if (((UCHAR)(msg_buf[slot_type] + 0x12) < 2) || (msg_buf[slot_type] == 0xf0)) {
 								pMc->Msg_idx = slot_type + 1;
 							}
 							if ((UINT)Mc_prev_slot != (int)(signed char)pMc->Msg_idx) {
@@ -1456,9 +1455,7 @@ slot_row_loop:
 						if ((int)(idx & 0xff) <= (int)(signed char)pMc->Msg_idx) {
 							i_tmp2  = Mess_width(0x22);
 							i_tmp3 = Mess_width(0x22);
-							Mess_print((0x68 - (short)i_tmp2) / 2 + (short)i_tmp3 + 0x25,
-									   (int)pMc->Scrl_slide_y + row * 0x14 + 0x38,
-									   msg_buf + (idx & 0xff), 0x4002);
+							Mess_print((0x68 - (short)i_tmp2) / 2 + (short)i_tmp3 + 0x25, (int)pMc->Scrl_slide_y + row * 0x14 + 0x38, msg_buf + (idx & 0xff), 0x4002);
 						}
 						if (flg) {
 							pMc->Msg_idx = 0xfe;
@@ -1466,9 +1463,7 @@ slot_row_loop:
 					} else {
 						i_tmp2  = Mess_width(0x22);
 						i_tmp3 = Mess_width(0x22);
-						Mess_print((0x68 - (short)i_tmp2) / 2 + (short)i_tmp3 + 0x25,
-								   (int)pMc->Scrl_slide_y + row * 0x14 + 0x38,
-								   msg_buf + (idx & 0xff), 0x4002);
+						Mess_print((0x68 - (short)i_tmp2) / 2 + (short)i_tmp3 + 0x25, (int)pMc->Scrl_slide_y + row * 0x14 + 0x38, msg_buf + (idx & 0xff), 0x4002);
 					}
 					msg_buf[idx & 0xff]       = 0xfe;
 					msg_buf[(idx & 0xff) + 1] = 0;
@@ -1479,9 +1474,7 @@ slot_row_loop:
 					Memcpy(msg_buf, Mess_text + Mess_offs[17], 0xf);
 				}
 				i_tmp2 = Mess_width(0x22);
-				Mess_print((0x68 - (short)i_tmp2) / 2 + 0x25,
-						   (int)pMc->Scrl_slide_y + row * 0x14 + 0x38,
-						   msg_buf, i_tmp << 4 | 0x4002);
+				Mess_print((0x68 - (short)i_tmp2) / 2 + 0x25, (int)pMc->Scrl_slide_y + row * 0x14 + 0x38, msg_buf, i_tmp << 4 | 0x4002);
 				row++;
 				if (pMc->Scrl_slide_y == 0) break;
 				if (5 < row) goto slot_list_done;
@@ -1502,11 +1495,9 @@ slot_list_done:
 			i_tmp = Mess_width(0x22);
 			Cursor_disp((0x68 - (short)i_tmp) / 2 - 7, cur_row * 0x14 + 0x38);
 		}
-		if ((scr_no == 0x11) &&
-			((err_no - 2U < 2 || (err_no - 7U < 2)))) {
+		if ((scr_no == 0x11) && ((err_no - 2U < 2 || (err_no - 7U < 2)))) {
 			i_tmp = Mess_width(0x22);
-			Print14((0x68 - (short)i_tmp) / 2 - 7,
-					(UINT)(UCHAR)pMc->Sel_row_bk * 0x14 + 0x38, 3, 0, Card_font);
+			Print14((0x68 - (short)i_tmp) / 2 - 7, (UINT)(UCHAR)pMc->Sel_row_bk * 0x14 + 0x38, 3, 0, Card_font);
 		}
 		flg = 1;
 		if (scr_no != 0xc) {
@@ -1551,30 +1542,25 @@ slot_list_done:
 		}
 		Mess_print((int)pos, 0x14, Mess_text + msg_off, 0x4002);
 		i_tmp = Mess_center_x(0xb, 1);
-		Mess_print((int)(short)i_tmp, 0x40,
-				   Mess_text + Mess_offs[11], 0x4012);
+		Mess_print((int)(short)i_tmp, 0x40, Mess_text + Mess_offs[11], 0x4012);
 		i_tmp = Mess_center_x(0xd, 1);
-		Mess_print((int)(short)i_tmp, 0x60,
-				   Mess_text + Mess_offs[12], 0x4002);
+		Mess_print((int)(short)i_tmp, 0x60, Mess_text + Mess_offs[12], 0x4002);
 		i_tmp = Mess_center_x(0xd, 1);
-		Mess_print((int)(short)i_tmp, 0x78,
-				   Mess_text + Mess_offs[13], 0x4002);
+		Mess_print((int)(short)i_tmp, 0x78, Mess_text + Mess_offs[13], 0x4002);
 		i_tmp = Mess_center_x(0xd, 1);
 		Cursor_disp((int)(short)i_tmp - 0x10, cur_row * 0x18 + 0x60);
 		Card_blink_head();
 		break;
 	case 1:
 		i_tmp = Mess_center_x(0xf, 1);
-		Mess_print((int)(short)i_tmp, 0x60,
-				   Mess_text + Mess_offs[14], 0x4002);
+		Mess_print((int)(short)i_tmp, 0x60, Mess_text + Mess_offs[14], 0x4002);
 		i_tmp = Mess_center_x(0xf, 1);
-		Mess_print((int)(short)i_tmp, 0x78,
-				   Mess_text + Mess_offs[15], 0x4002);
+		Mess_print((int)(short)i_tmp, 0x78, Mess_text + Mess_offs[15], 0x4002);
 		i_tmp = Mess_center_x(0xf, 1);
 		coord = (int)(short)i_tmp - 0x10;
 		curs_y = cur_row * 0x18 + 0x60;
 		goto draw_cursor;
-	case 3:
+	case ERR_MESS:
 		if (Err_code != 4) {
 			if (pMwork->Port == 0) {
 				i_tmp = Mess_center_x(2, 1);
@@ -1589,23 +1575,17 @@ slot_list_done:
 		}
 		Card_blink_head();
 		i_tmp = Mess_center_x(err_no + 0x14, 1);
-		Mess_print((int)(short)i_tmp, 0x60,
-				   Mess_text +
-				   Mess_offs[20 + err_no], 0x4012);
+		Mess_print((int)(short)i_tmp, 0x60, Mess_text + Mess_offs[20 + err_no], 0x4012);
 		break;
 	case 0x17:
 		i_tmp = Mess_center_x(0x12, 1);
-		Mess_print((int)(short)i_tmp, 0x40,
-				   Mess_text + Mess_offs[18], 0x4012);
+		Mess_print((int)(short)i_tmp, 0x40, Mess_text + Mess_offs[18], 0x4012);
 		i_tmp = Mess_center_x(0x12, 1);
-		Mess_print((int)(short)i_tmp, 0x54,
-				   Mess_text + Mess_offs[19], 0x4012);
+		Mess_print((int)(short)i_tmp, 0x54, Mess_text + Mess_offs[19], 0x4012);
 		i_tmp = Mess_center_x(10, 1);
-		Mess_print((int)(short)i_tmp, 0x74,
-				   Mess_text + Mess_offs[9], 0x4002);
+		Mess_print((int)(short)i_tmp, 0x74, Mess_text + Mess_offs[9], 0x4002);
 		i_tmp = Mess_center_x(10, 1);
-		Mess_print((int)(short)i_tmp, 0x8c,
-				   Mess_text + Mess_offs[10], 0x4002);
+		Mess_print((int)(short)i_tmp, 0x8c, Mess_text + Mess_offs[10], 0x4002);
 		i_tmp = Mess_center_x(10, 1);
 		coord = (int)(short)i_tmp - 0x10;
 		curs_y = cur_row * 0x18 + 0x74;
@@ -1668,8 +1648,7 @@ void Search_f_num(UCHAR *F_num)
 		if (pMwork->File_info.num <= i) {
 			return;
 		}
-		Slot = (pMwork->File_info.title[i][12] - 48) * 10 +
-		       (pMwork->File_info.title[i][13] - 48);
+		Slot = (pMwork->File_info.title[i][12] - 48) * 10 + pMwork->File_info.title[i][13] - 48;
 		F_num[Slot] = (UCHAR)i;
 	}
 }
@@ -1698,8 +1677,7 @@ int Check_card(UCHAR *F_num)
 	Ok = (pMwork->File_info.num != 0);
 	for (i = 0; Ok && i < 15; i++) {
 		if (F_num[i] != 0xF) {
-			if (Card_read(&pMwork->Card_save.Game_play_time,
-			              pMwork->File_info.title[F_num[i]], 0x80, 0x200) != 0) {
+			if (Card_read(&pMwork->Card_save.Game_play_time, pMwork->File_info.title[F_num[i]], 0x80, 0x200) != 0) {
 				Ok = 0;
 			} else {
 				Memcpy(&pMwork->Save_info[i], &pMwork->Card_save.Game_play_time, 0x80);
@@ -1742,8 +1720,7 @@ void Card_blink_head(void)
 	} else {
 		Off = Mess_offs[67];
 	}
-	Mess_print(0x16, ((int)((UINT)pMw->Mark_pulse << 24) >> 27) + 0x24,
-	           &Mess_text[Off], 0x44002);
+	Mess_print(0x16, ((int)((UINT)pMw->Mark_pulse << 24) >> 27) + 0x24, &Mess_text[Off], 0x44002);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1771,15 +1748,15 @@ BOOL Card_poll(int Port)
 /* DS 0x801c2de8 (Wslot_check) */
 UINT Wslot_check(void)
 {
-	UINT Slot0;
+	UCHAR Slot0;
 	UINT Slot1;
 
 	Mess_print((short)Mess_center_x(0x4B, 1), 0xB2, MESS_STR(7), 0x4002);
 	Mess_print((short)Mess_center_x(0x4B, 1), 0xC0, MESS_STR(75), 0x4002);
 	Task_sleep(2);
-	Slot0 = Card_check(0);
+	Slot0 = Card_check(0) & 1;
 	Slot1 = Card_check(1);
-	return (Slot0 & 1) | ((Slot1 & 1) << 1);
+	return Slot0 | ((Slot1 & 1) << 1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1874,14 +1851,16 @@ icon_done:
 void Save_push(void)
 {
 	int Now;
+	ULONG *pSys_flg;
 
+	pSys_flg = &G.System_flg;
 	G.SaveData.Pl_id = G.Player.Id;
 	G.SaveData.Pl_pos_x = (short)G.Player.Pos_x;
 	G.SaveData.Pl_pos_y = (short)G.Player.Pos_y;
 	G.SaveData.Pl_pos_z = (short)G.Player.Pos_z;
 	G.SaveData.Dummy0 = G.Player.Cdir_y;
 
-	if ((G.System_flg & SYS_ENDING) == 0) {
+	if ((*pSys_flg & SYS_ENDING) == 0) {
 		Now = VSync(-1);
 		G.SaveData.Game_play_time += (Now - G.Game_time_offset);
 		G.Game_time_offset = VSync(-1);
@@ -1892,18 +1871,18 @@ void Save_push(void)
 	G.SaveData.Equip_id = St.Equip_item_id;
 	G.SaveData.Equip_no = St.Equip_item_no;
 
-	if ((G.System_flg & SYS_EX_BATTLE) != 0) {
+	if ((*pSys_flg & SYS_EX_BATTLE) != 0) {
 		G.Status_flg |= STAT_EX_SAVE;
 		G.SaveData.Dummy16 = G.SaveData.Sce_timer;
 		Memcpy((UCHAR *)G.SaveData.ExData3 + 8, G.ExData + 4, 0x3C);
 	}
-	if ((G.System_flg & SYS_EASY_MODE) != 0) {
+	if ((*pSys_flg & SYS_EASY_MODE) != 0) {
 		G.Status_flg |= STAT_EASY_MODE;
 	}
-	if ((G.System_flg & SYS_ARRANGE) != 0) {
+	if ((*pSys_flg & SYS_ARRANGE) != 0) {
 		G.Status_flg |= STAT_ARRANGE_SAVED;
 	}
-	if ((G.System_flg & 0x40) != 0) {
+	if ((*pSys_flg & 0x40) != 0) {
 		G.Status_flg |= STAT_QUAKE_RASTA;
 	}
 
@@ -2058,8 +2037,7 @@ ULONG Card_read(void *Head, char *Name, size_t Cap, off_t Offset)
 	strcpy(Fname + 5, Name);
 
 	Attempt = 0;
-	while ((Fd = open(Fname, 1)) == -1 || lseek(Fd, Offset, 0) == -1 ||
-	       read(Fd, Head, Cap) != Cap) {
+	while ((Fd = open(Fname, 1)) == -1 || lseek(Fd, Offset, 0) == -1 || read(Fd, Head, Cap) != Cap) {
 		Attempt++;
 		if (Attempt > 2) {
 			return 2;

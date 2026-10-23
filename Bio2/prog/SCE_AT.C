@@ -4,12 +4,10 @@
  * Source: D:\Bio2\prog\SCE_AT.C
  */
 #include "TYPES.H"
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <LIBSPU.H>
 #include <STRINGS.H>
 #include "GAME.H"
@@ -82,6 +80,8 @@ ULONG         Old_Uatari;
 /* DS 0x80051088 (Sce_at_check) */
 ULONG Sce_at_check(ENEMY_WORK *pEm, ULONG attribute, ULONG auto_flg)
 {
+	/* retail reserves 16 more bytes of locals (Sce_at_check frame 120); never read */
+	volatile int Rsv[4];
 	SVECTOR      Svec;
 	VECTOR       Vec;
 	ULONG        Hit_flg;
@@ -92,9 +92,7 @@ ULONG Sce_at_check(ENEMY_WORK *pEm, ULONG attribute, ULONG auto_flg)
 	SCE_AOT    **ppAot;
 	short        Aot_no;
 	USHORT      *pData;
-	ULONG        Frame_pad[4];	/* retail reserves 0x3c-0x3f and 0x44-0x4f (8-byte slots) and never reads them */
 
-	(void)Frame_pad;
 	Svec.vx = 0x26c;
 	Svec.vz = 0;
 	Rot_vector(pEm->Cdir_y, &Svec, &Svec);
@@ -235,13 +233,10 @@ ULONG Sce_Door(void *pAot)
 	if (G.Player.pOn_om != NULL) {
 		return 0;
 	}
-	if ((G.Status_flg & (STAT_PLAYER | STAT_SUB_PLAYER)) == (STAT_PLAYER | STAT_SUB_PLAYER) &&
-		(G.pEnemy[1]->Be_flg & 1) != 0 &&
-		(G.pEnemy[1]->Free[2] & 0x2000) != 0) {
+	if ((G.Status_flg & (STAT_PLAYER | STAT_SUB_PLAYER)) == (STAT_PLAYER | STAT_SUB_PLAYER) && (G.pEnemy[1]->Be_flg & 1) != 0 && (G.pEnemy[1]->Free[2] & 0x2000) != 0) {
 		Mess_no = 8;
 	} else {
-		if ((pDoor->Key_id & 0x80) == 0 ||
-			Flg_ck(G.SaveData.Key_flg, pDoor->Key_id & 0x3f) != 0) {
+		if ((pDoor->Key_id & 0x80) == 0 || Flg_ck(G.SaveData.Key_flg, pDoor->Key_id & 0x3f) != 0) {
 			/* unlocked: enter */
 			G.pSce_aot_on     = pDoor;
 			G.Stop_flg       |= 0xff000000;
@@ -289,28 +284,29 @@ void Key_lost(void)
 {
 	/* DS 0x800c3b98 */
 	static long Key_work;
+	tagGLOBAL *pG = &G;
 
-	if (G.Front_func_rtn == 0) {
+	if (pG->Front_func_rtn == 0) {
 		if ((Moji.Mess_flg & 0x80) == 0) {
 			if ((Moji.Mess_flg & 1) == 0) {
-				G.SaveData.Item_work[Key_work].Id   = 0;
-				G.SaveData.Item_work[Key_work].Size = 0;
+				pG->SaveData.Item_work[Key_work].Id   = 0;
+				pG->SaveData.Item_work[Key_work].Size = 0;
 				Sort_item();
 			} else {
-				G.SaveData.Item_work[Key_work].Num = 1;
+				pG->SaveData.Item_work[Key_work].Num = 1;
 			}
-			G.Front_func = NULL;
+			pG->Front_func = NULL;
 		}
 	} else {
-		Key_work = G.Front_func_rtn - 1;
+		Key_work = pG->Front_func_rtn - 1;
 		if ((Moji.Mess_flg & 0x80) == 0) {
-			if (--G.SaveData.Item_work[Key_work].Num == 0) {
+			if (--pG->SaveData.Item_work[Key_work].Num == 0) {
 				Mess_set(0, 0x100, 9, 0xff000000);
-				G.Stop_flg |= 0xff000000;
+				pG->Stop_flg |= 0xff000000;
 			} else {
-				G.Front_func = NULL;
+				pG->Front_func = NULL;
 			}
-			G.Front_func_rtn = 0;
+			pG->Front_func_rtn = 0;
 		}
 	}
 }
@@ -394,7 +390,10 @@ ULONG Sce_Flg_chg(void *pAot)
 
 	pDat = (USHORT *)pAot;
 	Bit  = pDat[1];
-	pFlg = Flg_addr[pDat[0]] + (Bit >> 5);
+	/* DS forms the word offset as srl 3 / andi 0x1c, which is the word index taken from the low byte of
+	   the bit number ((Bit & 0xff) >> 5): bit numbers above 255 wrap into the first eight words of the
+	   table. The bit inside the word still uses all of Bit (andi 0x1f). */
+	pFlg = Flg_addr[pDat[0]] + ((UCHAR)Bit >> 5);
 	if (pDat[2] != 0) {
 		*pFlg |= 0x80000000U >> (Bit & 0x1f);
 	} else {
@@ -445,9 +444,11 @@ ULONG Sce_Save(void *pAot)
 	pAot2 = pCAot;
 	G.Back_func          = Save_entrance;
 	G.Back_func_rtn      = 0;
+	/* DS reads the save-area number from the AOT data before it copies
+	 * Stop_flg to Game.Stop_bak, so the store is written ahead of that copy. */
+	G.SaveData.Save_area = (UCHAR)pAot2->Data;
 	Game.Stop_bak        = G.Stop_flg;
 	G.Stop_flg          |= 0xff000000;
-	G.SaveData.Save_area = (UCHAR)pAot2->Data;
 	return 0;
 }
 
@@ -458,25 +459,27 @@ ULONG Sce_Save(void *pAot)
 /* DS 0x80051b04 (Save_entrance) */
 void Save_entrance(void)
 {
-	if (G.Back_func_rtn == 0) {
+	tagGLOBAL *pG = &G;
+
+	if (pG->Back_func_rtn == 0) {
 		if (Search_item_id(0x1e) < 0) {
-			G.Stop_flg = Game.Stop_bak;
+			pG->Stop_flg = Game.Stop_bak;
 			Mess_set(0, 0x100, 0, 0xff000000);
-			G.Back_func     = NULL;
-			G.Back_func_rtn = 0;
+			pG->Back_func     = NULL;
+			pG->Back_func_rtn = 0;
 		} else {
 			Mess_set(0, 0x100, 1, 0xff000000);
-			G.Back_func_rtn = 1;
+			pG->Back_func_rtn = 1;
 		}
-	} else if (G.Back_func_rtn == 1 && (Moji.Mess_flg & 0x80) == 0) {
+	} else if (pG->Back_func_rtn == 1 && (Moji.Mess_flg & 0x80) == 0) {
 		if ((Moji.Mess_flg & 1) == 0) {
 			Game.Doordemo_flg = 1;
-			G.System_flg     |= SYS_SAVE_GAME;
+			pG->System_flg     |= SYS_SAVE_GAME;
 		} else {
-			G.Stop_flg = Game.Stop_bak;
+			pG->Stop_flg = Game.Stop_bak;
 		}
-		G.Back_func     = NULL;
-		G.Back_func_rtn = 0;
+		pG->Back_func     = NULL;
+		pG->Back_func_rtn = 0;
 	}
 }
 
@@ -493,9 +496,9 @@ ULONG Sce_Itembox(void *pAot)
 	pAot2 = pCAot;
 	pDat  = &pAot2->Data;
 	G.Ibox_Futa_no   = (UCHAR)pDat[0];
+	St.Itembox_tpage = (UCHAR)pDat[1];
 	G.Back_func      = Item_box_entrance;
 	G.Back_func_rtn  = 0;
-	St.Itembox_tpage = (UCHAR)pDat[1];
 	return 0;
 }
 
@@ -515,40 +518,42 @@ void Item_box_entrance(void)
 	 * the lid rotation is its Cdir_z (+0x78). */
 	static OBJ_MODEL_WORK *pOwork;
 	short                  Old_spd;
+	tagGLOBAL             *pG = &G;
 
-	switch (G.Back_func_rtn) {
+	switch (pG->Back_func_rtn) {
 	case 0:
 		Dir_spd       = 1;
 		Spd_add       = 3;
-		Game.Stop_bak = G.Stop_flg;
-		G.Stop_flg   |= 0x7f000000;
+		Game.Stop_bak = pG->Stop_flg;
+		pG->Stop_flg   |= 0x7f000000;
 		Snd_se_stad(0x2150000, NULL);
-		G.Back_func_rtn = 1;
-		pOwork          = &G.Ob_model[G.Ibox_Futa_no];
+		pG->Back_func_rtn = 1;
+		pOwork          = &pG->Ob_model[pG->Ibox_Futa_no];
 		/* fall through */
 	case 1:
 		/* lid opening: accelerate */
 		pOwork->Cdir_z -= Dir_spd;
 		Dir_spd        += Spd_add;
 		if (pOwork->Cdir_z < -399) {
-			G.Back_func_rtn = 2;
-			Spd_add         = -Spd_add;
+			pG->Back_func_rtn = 2;
+			/* reverse the acceleration; DS reloads Spd_add sign-extended (lh) before
+			 * negating it, which the multiply by -1 gives and a unary minus does not. */
+			Spd_add         *= -1;
 		}
 		break;
 
 	case 2:
 		/* lid opening: decelerate until the speed reaches 0 */
-		Old_spd         = Dir_spd;
+		pOwork->Cdir_z -= Dir_spd;
 		Dir_spd        += Spd_add;
-		pOwork->Cdir_z -= Old_spd;
 		if (Dir_spd > 0) {
 			break;
 		}
 		St.St_type        = 1;
 		Game.Doordemo_flg = 1;
 		Dir_spd           = 0;
-		G.Back_func_rtn   = 3;
-		G.Status_flg     |= STAT_STATUS_SCREEN;
+		pG->Back_func_rtn   = 3;
+		pG->Status_flg     |= STAT_STATUS_SCREEN;
 		/* fall through */
 	case 3:
 		/* wait a few frames, then close the lid */
@@ -557,8 +562,8 @@ void Item_box_entrance(void)
 			break;
 		}
 		pOwork->Cdir_z = 0;
-		G.Back_func_rtn = 0;
-		G.Back_func     = NULL;
+		pG->Back_func_rtn = 0;
+		pG->Back_func     = NULL;
 		break;
 
 	default:
@@ -599,10 +604,7 @@ ULONG Sce_Damage(void *pAot)
 		G.pEm->Routine_2 = 0;
 		G.pEm->Routine_3 = 0;
 		G.pEm->Spd_x     = 200;
-		Add_speedXZ(G.pEm,
-					Direction_ck(pCAot->X + (pCAot->W >> 1),
-								 pCAot->Z + (pCAot->D >> 1),
-								 G.pEm->Pos_x, G.pEm->Pos_z) - G.pEm->Cdir_y);
+		Add_speedXZ(G.pEm, Direction_ck(pCAot->X + (pCAot->W >> 1), pCAot->Z + (pCAot->D >> 1), G.pEm->Pos_x, G.pEm->Pos_z) - G.pEm->Cdir_y);
 		Pad_vib_set0(4, 0);
 		Pad_vib_set1(10, 0x96, 0);
 	}
@@ -790,8 +792,14 @@ void Hikidashi_entrance(void)
 /* DS 0x80052620 (Sce_Windows) */
 ULONG Sce_Windows(void *pAot)
 {
+	ULONG b2;
+	ULONG b0;
+
+	/* both script bytes are read before Doordemo_flg is set (DS order) */
+	b2 = ((UCHAR *)pAot)[2];
+	b0 = ((UCHAR *)pAot)[0];
 	Game.Doordemo_flg = 7;
-	G.Window_no       = ((UCHAR *)pAot)[2] * 16 + ((UCHAR *)pAot)[0];
+	G.Window_no       = b2 * 16 + b0;
 	return 0;
 }
 
@@ -801,6 +809,12 @@ ULONG Sce_Windows(void *pAot)
  * object models (SCE_04) and the partner (SCE_08).
  */
 /* DS 0x8005264c (Sce_at) */
+/*
+ * Sce_at  (per frame)
+ * Runs the action-object (AOT) checks for the player, every live enemy and every active object model.
+ * The player gets an extra manual check (action button) while the inspect status is on. Water is reset
+ * for each owner first, so a stale water flag cannot survive a frame in which the owner left the water.
+ */
 void Sce_at(void)
 {
 	ENEMY_WORK     *pEw;
@@ -848,6 +862,8 @@ void Sce_at(void)
 /* DS 0x800527b4 (Water_ck) */
 long Water_ck(long Pos_x, long Pos_z)
 {
+	/* retail reserves 8 more bytes of locals (Water_ck frame 88); never read */
+	volatile int Rsv[2];
 	VECTOR    Vec;
 	ULONG     i;
 	ULONG     D0;
@@ -855,9 +871,7 @@ long Water_ck(long Pos_x, long Pos_z)
 	SCE_AOT **ppAot;
 	short     Work[10];   /* [0..1] unused (uninitialised), [2..9] points */
 	short    *pData;
-	ULONG     Pad[2];	/* reserves sp+0x38..0x3f: retail Water_ck (800527b4) never touches these bytes; frame 0x58 */
 
-	(void)Pad;
 	D0     = G.nSce_aot;
 	i      = 0;
 	Vec.vx = Pos_x;
@@ -933,8 +947,7 @@ UCHAR Floor_check(long check_x, long check_z, ULONG nfloor)
 		pType -= 12;
 		A0 -= 6;              /* previous 12-byte record */
 		D1  = ((FLOOR_REC *)A0)->Floor;
-		if ((D1 & 0x80) == 0 && (D1 & 0x7f) == nfloor &&
-			Hit_ck_box(&Vec, (BOX *)A0) != 0) {
+		if ((D1 & 0x80) == 0 && (D1 & 0x7f) == nfloor && Hit_ck_box(&Vec, (BOX *)A0) != 0) {
 			return *pType;
 		}
 	}

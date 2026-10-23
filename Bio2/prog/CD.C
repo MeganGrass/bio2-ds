@@ -8,7 +8,6 @@
 
 #include "TYPES.H"
 #include "MAIN.H"
-#include <LIBAPI.H>
 #include <LIBCD.H>
 #include <LIBDS.H>
 #include <LIBETC.H>
@@ -26,7 +25,7 @@
 #include "flag.h"
 
 /* DS 0x80010818 */
-SHORT Xa_no[10] = {
+const SHORT Xa_no[10] = {
 	VOICE00_XAS, VOICE01_XAS, VOICE02_XAS, VOICE03_XAS, VOICE04_XAS, VOICE05_XAS, VOICE06_XAS, VOICE07_XAS, VOICE08_XAS, 0
 };
 
@@ -894,7 +893,7 @@ FLOC floc[859] = {
 };
 
 /* DS 0x8009a37c */
-unsigned short Xa_sector00[][3] = {
+unsigned short Xa_sector00[16][3] = {
 	{ 3, 40, 37 },
 	{ 2, 0, 54 },
 	{ 0, 0, 131 },
@@ -914,35 +913,40 @@ unsigned short Xa_sector00[][3] = {
 };
 
 /* ---------------------------------------------------------------------------
+ * Unreferenced word between Xa_sector00 and Serial_no          DS 0x8009a3dc
+ * Retail keeps the value 0x1d5 here. No code reads it, and no label names it; the
+ * name is a project choice. It is defined so Serial_no stays at 0x8009a3e0.
+ * ---------------------------------------------------------------------------*/
+ULONG Xa_sector_pad = 0x1d5;
+
+/* ---------------------------------------------------------------------------
  * Build stamp (unreferenced)                                  DS 0x8009a3e0
+ * 35 bytes: the beta map also lists Serial_no [35] directly before the next variable (cdmode)
  * ---------------------------------------------------------------------------*/
 UCHAR Serial_no[35] = "CAPCOM-Jul 21 1998-12:41:47-CAPCOM";
 
 /* ---------------------------------------------------------------------------
- * Cd_read timeout counters (retail-only; Ghidra DWORD_8009a40c / 410)
+ * Two unreferenced zero words between Serial_no and Cd_time_out_clr
+ * DS 0x8009a404 and DS 0x8009a408. No code reads them and no label names them; the names
+ * are project choices, in the same way as Xa_sector_pad. They keep Cd_time_out_clr at 0x8009a40c.
  * ---------------------------------------------------------------------------*/
-static ULONG Cd_time_out_clr;      /* DS 0x8009a40c  cleared on timeout (write-only) */
-static int   Cd_time_out;          /* DS 0x8009a410  polls with DsSystemStatus()!=1  */
+ULONG Cd_pad_a404 = 0;
+ULONG Cd_pad_a408 = 0;
 
 /* ---------------------------------------------------------------------------
- * CD mode bytes sent via DsCommand(DslSetmode)
+ * Cd_read timeout counters (retail-only; Ghidra DWORD_8009a40c / 410)
  * ---------------------------------------------------------------------------*/
-static UCHAR cdmode    = DslModeSpeed;                                   /* DS 0x8009a414 (0x80) */
-static UCHAR xa_cdmode = DslModeSpeed | DslModeRT | DslModeSF;  /* DS 0x8009a415 (0xc8) */
+static ULONG Cd_time_out_clr = 0; /* DS 0x8009a40c  cleared on timeout (write-only) */
+static int   Cd_time_out = 0;     /* DS 0x8009a410  polls with DsSystemStatus()!=1  */
 
+/* ---------------------------------------------------------------------------
+ * CD mode bytes sent via DsCommand(DslSetmode) are function-local statics, in the
+ * same order as retail's data: cdmode (Cd_init, DS 0x8009a414), xa_cdmode (Xa_play,
+ * DS 0x8009a415), xa_control_tbl (Xa_control, DS 0x8009a418), xacontrol_cdmode
+ * (Xa_control_play, DS 0x8009a428), cdread_cdmode (Cd_read, DS 0x8009a429) and
+ * cdread_s_cdmode (Cd_read_s, DS 0x8009a42a).
+ * ---------------------------------------------------------------------------*/
 typedef void (*XA_CTRL_FN)(void);
-
-/* DS 0x8009a418 */
-static XA_CTRL_FN xa_control_tbl[4] = {
-	Xa_control_stop,   /* Xa_rtn_no == 0 */
-	Xa_control_init,   /* Xa_rtn_no == 1 */
-	Xa_control_play,   /* Xa_rtn_no == 2 */
-	Xa_control_end,    /* Xa_rtn_no == 3 */
-};
-
-static UCHAR xacontrol_cdmode = 0;                       /* DS 0x8009a428 (GetlocP toggle) */
-static UCHAR cdread_cdmode    = DslModeSpeed | DslModeSize1; /* DS 0x8009a429 (0xa0) */
-static UCHAR cdread_s_cdmode  = DslModeSpeed | DslModeSize1; /* DS 0x8009a42a (0xa0) */
 
 
 /* ---------------------------------------------------------------------------
@@ -964,6 +968,7 @@ static ULONG UnkCdReadSFlg;
 void Cd_init(void)
 {
 	ULONG i;
+	static UCHAR cdmode = DslModeSpeed;	/* DS 0x8009a414 (0x80) */
 	struct tagCD *pCd = &CD;
 
 	for (i = CD_RING_BUFFERS; i != 0; ) {
@@ -1002,58 +1007,63 @@ void Cd_system_control(void)
 }
 
 /* Xa_no[0..8] copied on entry. Retail Xa_play (0x800129b4) copies these 18 bytes to sp+0x10..0x21 */
-/* (lwl/lwr 0x800129e8..0x80012a10, sh 0x80012a14) and reads them back with lhu, hence USHORT.     */
+/* (swl/swr 0x800129e8..0x80012a10, sh 0x80012a14) and reads them back with lhu, hence USHORT.     */
 typedef struct { USHORT no[9]; } XA_NO_COPY;
 
 /* ===========================================================================
  * Xa_play                                                   DS 0x800129b4
- * Begin XA audio playback.  mode == 0 selects the stage-relative XA file;
- * mode != 0 uses the base Xa_sector00 table.
+ * Begin XA audio playback.  mode == 0 takes XA file Xa_no[Stage_no + 1] and
+ * the stage table G.pXa_sector (stage 7: Xa_no[8] and Xa_sector00 from
+ * [13][1]); mode != 0 takes Xa_no[0] and the base Xa_sector00 table.
  * ===========================================================================*/
 /* DS 0x800129b4 (Xa_play) */
 void Xa_play(ULONG mode, ULONG no)
 {
-	ULONG     Sector;
 	ULONG     file_no;
-	USHORT  (*pXa_sector)[3];
 	USHORT   *pwd;
 	XA_NO_COPY Xa_file;
+	static UCHAR xa_cdmode = DslModeSpeed | DslModeRT | DslModeSF;	/* DS 0x8009a415 (0xc8) */
 	struct tagCD *pCd = &CD;
 
 	Xa_file = *(XA_NO_COPY *)Xa_no;
 
-	if (mode == 0)
+	if (mode != 0)
 	{
-		file_no    = Xa_file.no[G.SaveData.Stage_no + 1];
-		pXa_sector = (USHORT (*)[3])G.pXa_sector;
-		if (G.SaveData.Stage_no == 7)
-		{
-			/* DS 0x8009a3cc */
-			pXa_sector = (USHORT (*)[3])&Xa_sector00[13][1];
-			file_no    = Xa_file.no[8];
-		}
+		pwd        = Xa_sector00[0];
+		file_no    = Xa_file.no[0];
 	}
 	else
 	{
-		pXa_sector = Xa_sector00;
-		file_no    = Xa_file.no[0];
+		file_no    = Xa_file.no[G.SaveData.Stage_no + 1];
+		pwd        = G.pXa_sector;
+		if (G.SaveData.Stage_no == 7)
+		{
+			/* DS 0x8009a3cc */
+			pwd        = &Xa_sector00[13][1];
+			file_no    = Xa_file.no[8];
+		}
 	}
 
-	pwd = pXa_sector[no];
+	/* Select entry no of the table; each entry is three USHORTs (pwd[0..2]). */
+	pwd += no * 3;
 
 	pCd->Filter.file    = 1;
 	pCd->Filter.chan    = (UCHAR)pwd[0];
-	Sector              = (ULONG)floc[file_no].sec_high * 0x10000 + floc[file_no].sector;
-	pCd->Start_sector   = Sector + (ULONG)pwd[1] * 0x10 + pwd[0];
-	pCd->End_sector     = (Sector - 0x1e) + ((ULONG)pwd[1] + pwd[2]) * 0x10 + pwd[0];
-	pCd->Current_sector = pCd->Start_sector;
-	DsIntToPos(pCd->Start_sector, &pCd->Fpos);
+	/* File base sector: floc keeps the start sector as sec_high (bits 16..23) and sector (bits 0..15).
+	   The table offsets pwd[1] * 16 + pwd[0] are added on top. */
+	pCd->Start_sector   = (ULONG)floc[file_no].sec_high * 0x10000 + floc[file_no].sector;
+	pCd->End_sector     = pCd->Start_sector;
+	pCd->Start_sector  += (ULONG)pwd[1] * 0x10 + pwd[0];
+	/* End = file base + ((pwd[1] + pwd[2]) * 16 + pwd[0]) - 30 sectors; unsigned 32-bit arithmetic. */
+	pCd->End_sector    += ((ULONG)pwd[1] + pwd[2]) * 0x10 + pwd[0] - 0x1e;
+	CD.Current_sector   = pCd->Start_sector;
+	DsIntToPos(CD.Start_sector, &CD.Fpos);
 
 	SsSetSerialAttr(SS_SERIAL_A, SS_MIX, SS_SON);
 	pCd->Xa_rtn_no   = 1;
 	pCd->Limit_break = 0;
 	pCd->Type        = 0;
-	pCd->Status      = 0;
+	CD.Status        = 0;
 	pCd->Use_mode    = 1;
 	Change_volume(1);
 	G.Status_flg    |= STAT_XA_VOICE;
@@ -1062,7 +1072,7 @@ void Xa_play(ULONG mode, ULONG no)
 	DsSyncCallback(Xa_seek);
 
 	while (DsCommand(DslPause, NULL, NULL, -1) == 0);
-	while (DsCommand(DslSetfilter, &pCd->Filter.file, NULL, -1) == 0);
+	while (DsCommand(DslSetfilter, &CD.Filter.file, NULL, -1) == 0);
 	while (DsCommand(DslSetmode, &xa_cdmode, NULL, -1) == 0);
 	while (DsCommand(DslSeekL, &CD.Fpos.minute, NULL, -1) == 0);
 	while (DsCommand(DslReadS, &CD.Fpos.minute, NULL, -1) == 0);
@@ -1087,6 +1097,14 @@ void Xa_error(void)
 /* DS 0x80012c68 (Xa_control) */
 void Xa_control(void)
 {
+	/* DS 0x8009a418. Xa_rtn_no 0: stop, 1: init, 2: play, 3: end */
+	static XA_CTRL_FN xa_control_tbl[4] = {
+		Xa_control_stop,
+		Xa_control_init,
+		Xa_control_play,
+		Xa_control_end,
+	};
+
 	xa_control_tbl[CD.Xa_rtn_no]();
 }
 
@@ -1108,7 +1126,7 @@ void Xa_control_stop(void)
 /* DS 0x80012cd8 (Xa_control_init) */
 void Xa_control_init(void)
 {
-	UCHAR play_state = 2;
+	int play_state = 2;
 
 	do
 	{
@@ -1122,26 +1140,30 @@ void Xa_control_init(void)
 
 /* ===========================================================================
  * Xa_seek                                                   DS 0x80012d30
- * (retail-only) DsSyncCallback during the XA seek; once the seek completes
- * and the queue is empty, hands over to Xa_ready_cb.
+ * (retail-only) DsSyncCallback target installed by Xa_play. On DslComplete it
+ * counts the completion in CD.Status, clears Limit_break and, once the DS
+ * command queue is empty, hands over to Xa_ready_cb; otherwise clears Status.
  * ===========================================================================*/
 /* DS 0x80012d30 (Xa_seek) */
 void Xa_seek(UCHAR intr, UCHAR *result)
 {
-	int i;
+	ULONG i;
 
-	/* DS walks result backward with its own pointer; the loop runs for i = 7..0 (pre-decrement test) */
+	/* Copies result[7..0] into CD.Result[7..0], highest index first. The test
+	   uses i before it is decremented, so the body runs for i = 7..0
+	   (retail: move v0,a2; bne v0,zero; addiu a2,a2,-1). */
 	i = 7;
-	result += 7;
 	do
 	{
-		CD.Result[i] = *result--;
+		CD.Result[i] = result[i];
 	} while (i-- != 0);
 
 	if (intr == DslComplete)
 	{
-		CD.Limit_break = 0;
+		/* Retail loads CD.Status, clears Limit_break, then stores Status + 1
+		   in the delay slot of the DsQueueLen call. */
 		CD.Status++;
+		CD.Limit_break = 0;
 		if (DsQueueLen() == 0)
 		{
 			DsSyncCallback(Xa_ready_cb);
@@ -1160,14 +1182,13 @@ void Xa_seek(UCHAR intr, UCHAR *result)
 /* DS 0x80012dc8 (Xa_ready_cb) */
 void Xa_ready_cb(UCHAR intr, UCHAR *result)
 {
-	int i;
+	ULONG i;
 
-	/* DS walks result backward with its own pointer; the loop runs for i = 7..0 (pre-decrement test) */
+	/* Copies result[7..0] into CD.Result[7..0], highest index first (the same loop as Xa_seek). */
 	i = 7;
-	result += 7;
 	do
 	{
-		CD.Result[i] = *result--;
+		CD.Result[i] = result[i];
 	} while (i-- != 0);
 
 	if (intr == DslComplete)
@@ -1194,6 +1215,8 @@ void Xa_ready_cb(UCHAR intr, UCHAR *result)
 /* DS 0x80012e70 (Xa_control_play) */
 void Xa_control_play(void)
 {
+	static UCHAR xacontrol_cdmode = 0;	/* DS 0x8009a428 (GetlocP toggle) */
+
 	if (DsSystemStatus() == DslReady)
 	{
 		xacontrol_cdmode ^= 1;
@@ -1242,17 +1265,25 @@ void Xa_control_end(void)
  * Returns the number of bytes read.
  * ===========================================================================*/
 /* DS 0x80012fb8 (Cd_read) */
+/* CODEGEN: same operations as retail. Address and Mode are in s6 and s7 (retail: s7 and s6), and Old_mode and the &CD.Sum pointer are in s3 and s2 (retail: s2 and s3). The prologue order also differs. */
 ULONG Cd_read(ULONG File_no, ULONG *Address, ULONG Mode, UCHAR *Mess)
 {
+	static UCHAR cdread_cdmode = DslModeSpeed | DslModeSize1;	/* DS 0x8009a429 (0xa0) */
+
+	/* pCd is the CD block, held in a saved register for the whole function. CD.Fpos and CD.Sum keep their
+	   global names here, which gives the same code as retail. */
+	struct tagCD *pCd = &CD;
+	/* Ret: result of the last DsCommand or DsSystemStatus call */
+	int Ret;
 	ULONG Old_mode;
 
 retry:
+	Old_mode = Mode;
 	if (Mode < 2)
 	{
-		CD.Fsum    = floc[File_no].sum;
-		CD.Fsize   = floc[File_no].size;
-		CD.Fsector = (ULONG)floc[File_no].sec_high * 0x10000 + floc[File_no].sector;
-		Old_mode   = Mode;
+		pCd->Fsum    = floc[File_no].sum;
+		pCd->Fsize   = floc[File_no].size;
+		pCd->Fsector = (ULONG)floc[File_no].sec_high * 0x10000 + floc[File_no].sector;
 	}
 	else
 	{
@@ -1260,77 +1291,80 @@ retry:
 	}
 
 	Cd_time_out       = 0;
-	CD.Cd_rtn_no      = 1;
-	CD.Type           = 1;
-	CD.Fno            = (USHORT)File_no;
-	CD.Fsector_read   = 0;
-	CD.Fsize_read     = 0;
-	CD.Limit_break    = 0;
-	CD.Sum_cnt        = 0;
-	CD.Sum            = 0;
-	CD.Time_ctr       = 0;
-	CD.Fsector_num    = (USHORT)((CD.Fsize + 0x7ff) >> 11);
-	CD.Current_sector = CD.Fsector;
-	CD.Fsize_now      = CD.Fsize;
-	CD.Read_adr       = Address;
+	pCd->Cd_rtn_no      = 1;
+	pCd->Type           = 1;
+	pCd->Fno            = (USHORT)File_no;
+	pCd->Read_adr       = Address;
+	pCd->Fsector_read   = 0;
+	pCd->Fsize_read     = 0;
+	pCd->Limit_break    = 0;
+	pCd->Sum_cnt        = 0;
+	pCd->Sum            = 0;
+	pCd->Time_ctr       = 0;
+	/* sectors still to read, rounded up to whole 2048-byte CD sectors */
+	pCd->Fsector_num    = (USHORT)((pCd->Fsize + 0x7ff) >> 11);
+	pCd->Current_sector = pCd->Fsector;
+	pCd->Fsize_now      = pCd->Fsize;
 
 	DsFlush();
-	DsIntToPos(CD.Current_sector, &CD.Fpos);
-	DsSyncCallback(Cd_seek);
+	DsIntToPos(pCd->Current_sector, &CD.Fpos);
+	DsSyncCallback(Cd_cdsync_cb);
 
-	while (DsCommand(DslPause, NULL, NULL, -1) == 0);
-	while (DsCommand(DslSetmode, &cdread_cdmode, NULL, -1) == 0);
-	while (DsCommand(DslSeekL, &CD.Fpos.minute, NULL, -1) == 0);
+	do { Ret = DsCommand(DslPause, NULL, NULL, -1); } while (Ret == 0);
+	do { Ret = DsCommand(DslSetmode, &cdread_cdmode, NULL, -1); } while (Ret == 0);
+	do { Ret = DsCommand(DslSeekL, &CD.Fpos.minute, NULL, -1); } while (Ret == 0);
 
 	DsReadyCallback(Cd_ready_cb);
 
-	while (DsCommand(DslReadN, &CD.Fpos.minute, NULL, -1) == 0);
+	do { Ret = DsCommand(DslReadN, &CD.Fpos.minute, NULL, -1); } while (Ret == 0);
 
 	while (1)
 	{
-		if (DsSystemStatus() == DslReady)
+		Ret = DsSystemStatus();
+		if (Ret == DslReady)
 		{
 			if ((DsStatus() & DslStatRead) == 0)
 			{
-				CD.Cd_rtn_no = 6;
+				pCd->Cd_rtn_no = 6;
 			}
-			else if (CD.Fsize_now == 0 && CD.Fsector_num == 0)
+			else if (pCd->Fsize_now == 0 && pCd->Fsector_num == 0)
 			{
 				if (CD.Sum == CD.Fsum || CD.Check_sum_flg == 1)
 				{
-					CD.Cd_rtn_no = 0;
+					pCd->Cd_rtn_no = 0;
 				}
 				else
 				{
-					CD.Cd_rtn_no = 4;
+					pCd->Cd_rtn_no = 4;
 				}
-				CD.Limit_break = 0;
-				while (DsCommand(DslPause, NULL, NULL, -1) == 0);
+				pCd->Limit_break = 0;
+				do { Ret = DsCommand(DslPause, NULL, NULL, -1); } while (Ret == 0);
 			}
 		}
 		else
 		{
+			/* drive not ready: count polls; 600 polls with no status change gives up on this read and restarts it */
 			Cd_time_out++;
 			if (Cd_time_out > 600)
 			{
 				Cd_time_out_clr = 0;
-				CD.Cd_rtn_no    = 6;
+				pCd->Cd_rtn_no    = 6;
 			}
 		}
 
-		if (Old_mode == 0)
-		{
-			VSync(0);
-		}
-		else
+		if (Old_mode != 0)
 		{
 			Task_sleep(1);
 		}
+		else
+		{
+			VSync(0);
+		}
 
-		if (CD.Cd_rtn_no > 1)
+		if (pCd->Cd_rtn_no > 1)
 			goto retry;
-		if (CD.Cd_rtn_no == 0)
-			return CD.Fsize_read;
+		if (pCd->Cd_rtn_no == 0)
+			return pCd->Fsize_read;
 	}
 }
 
@@ -1341,47 +1375,53 @@ retry:
  * Returns CD.Fsize_read on success, 0xFFFFFFFF on SPU transfer failure.
  * ===========================================================================*/
 /* DS 0x800132b0 (Cd_read_s) */
+/* CODEGEN: same operations as retail. The prologue sets up the CD base after the Mode copy and its save; retail sets up the CD base first. */
 ULONG Cd_read_s(ULONG File_no, ULONG Mode, ULONG *Address, ULONG Vab_id, UCHAR *Mess)
 {
-	ULONG i;
-	short Ret;
+	static UCHAR cdread_s_cdmode = DslModeSpeed | DslModeSize1;	/* DS 0x8009a42a (0xa0) */
 
-	while (1)
+	/* i is the ring slot index while the ring is cleared, then holds the 16-bit result of
+	   SsVabTransBodyPartly. One variable serves both uses. */
+	int i;
+	struct tagCD *pCd = &CD;
+
+	/* Restart point: Cd_rtn_no above 1 (no data, drive timeout or checksum error) starts the read again from here */
+retry:
 	{
 		if (Mode == 0)
 		{
-			CD.Fsum    = floc[File_no].sum;
-			CD.Fsize   = floc[File_no].size;
-			CD.Fsector = (ULONG)floc[File_no].sec_high * 0x10000 + floc[File_no].sector;
+			pCd->Fsum    = floc[File_no].sum;
+			pCd->Fsize   = floc[File_no].size;
+			pCd->Fsector = (ULONG)floc[File_no].sec_high * 0x10000 + floc[File_no].sector;
 		}
 
 		for (i = 0; i < CD_RING_BUFFERS; i++)
 		{
-			CD.Ring_status[i] = 0;
-			CD.Ring_size[i]   = 0;
+			pCd->Ring_status[i] = 0;
+			pCd->Ring_size[i]   = 0;
 		}
 
 		UnkCdReadSFlg     = 0;
-		CD.Cd_rtn_no      = 1;
-		CD.Type           = 2;
-		CD.Fno            = (USHORT)File_no;
-		CD.Fsector_read   = 0;
-		CD.Fsize_read     = 0;
-		CD.Limit_break    = 0;
-		CD.Sum_cnt        = 0;
-		CD.Sum            = 0;
-		CD.Write_ctr      = 0;
-		CD.Read_ctr       = 0;
-		CD.First_flg      = 0;
-		CD.Time_ctr       = 0;
-		CD.Fsector_num    = (USHORT)((CD.Fsize + 0x7ff) >> 11);
-		CD.Current_sector = CD.Fsector;
-		CD.Fsize_now      = CD.Fsize;
-		CD.Buff_adr       = Address;
+		pCd->Cd_rtn_no      = 1;
+		pCd->Type           = 2;
+		pCd->Fno            = (USHORT)File_no;
+		pCd->Buff_adr       = Address;
+		pCd->Fsector_read   = 0;
+		pCd->Fsize_read     = 0;
+		pCd->Limit_break    = 0;
+		pCd->Sum_cnt        = 0;
+		pCd->Sum            = 0;
+		pCd->Write_ctr      = 0;
+		pCd->Read_ctr       = 0;
+		pCd->First_flg      = 0;
+		pCd->Time_ctr       = 0;
+		pCd->Fsector_num    = (USHORT)((pCd->Fsize + 0x7ff) >> 11);
+		pCd->Current_sector = pCd->Fsector;
+		pCd->Fsize_now      = pCd->Fsize;
 
 		DsFlush();
-		DsIntToPos(CD.Current_sector, &CD.Fpos);
-		DsSyncCallback(Cd_seek);
+		DsIntToPos(pCd->Current_sector, &CD.Fpos);
+		DsSyncCallback(Cd_cdsync_cb);
 
 		while (DsCommand(DslPause, NULL, NULL, -1) == 0);
 		while (DsCommand(DslSetmode, &cdread_s_cdmode, NULL, -1) == 0);
@@ -1397,48 +1437,47 @@ ULONG Cd_read_s(ULONG File_no, ULONG Mode, ULONG *Address, ULONG Vab_id, UCHAR *
 			{
 				if ((DsStatus() & DslStatRead) == 0)
 				{
-					CD.Cd_rtn_no = 6;
+					pCd->Cd_rtn_no = 6;
 				}
-				else if (CD.Fsize_now == 0 && CD.Fsector_num == 0)
+				else if (pCd->Fsize_now == 0 && pCd->Fsector_num == 0)
 				{
 					if (CD.Sum == CD.Fsum)
 					{
-						CD.Cd_rtn_no = 0;
+						pCd->Cd_rtn_no = 0;
 					}
 					else
 					{
-						CD.Cd_rtn_no = 4;
+						pCd->Cd_rtn_no = 4;
 					}
-					CD.Limit_break = 0;
+					pCd->Limit_break = 0;
 					while (DsCommand(DslPause, NULL, NULL, -1) == 0);
 				}
 			}
 
 			/* push every filled ring slot to the SPU */
-			while (CD.Ring_status[CD.Write_ctr] != 0)
+			while (pCd->Ring_status[pCd->Write_ctr] != 0)
 			{
-				if (CD.First_flg == 0)
+				if (pCd->First_flg != 0)
 				{
-					CD.First_flg = 1;
+					UnkCdReadSFlg = 0;
+					while (SsVabTransCompleted(SS_IMEDIATE) == 0)
+					{
+						if (UnkCdReadSFlg++ > 3000)
+						{
+							EnterCriticalSection();
+							DeliverEvent(0xf0000009, 0x20);
+							ExitCriticalSection();
+						}
+					}
 				}
 				else
 				{
-					UnkCdReadSFlg = 0;
-					while (SsVabTransCompleted(SS_IMEDIATE) == 0)
-					{
-						if (UnkCdReadSFlg++ > 3000)
-						{
-							EnterCriticalSection();
-							DeliverEvent(0xf0000009, 0x20);
-							ExitCriticalSection();
-						}
-					}
+					pCd->First_flg = 1;
 				}
 
-				Ret = SsVabTransBodyPartly((UCHAR *)(CD.Buff_adr + CD.Write_ctr * 0x200),
-										   CD.Ring_size[CD.Write_ctr], (short)Vab_id);
+				i = (short)SsVabTransBodyPartly((UCHAR *)(pCd->Buff_adr + pCd->Write_ctr * 0x200), pCd->Ring_size[pCd->Write_ctr], (short)Vab_id);
 
-				if (Ret == (long)Vab_id)
+				if (i == (long)Vab_id)
 				{
 					UnkCdReadSFlg = 0;
 					while (SsVabTransCompleted(SS_IMEDIATE) == 0)
@@ -1452,53 +1491,53 @@ ULONG Cd_read_s(ULONG File_no, ULONG Mode, ULONG *Address, ULONG Vab_id, UCHAR *
 					}
 				}
 
-				if (Ret == -1)
-				{
-					DsSyncCallback(NULL);
-					DsReadyCallback(NULL);
-					while (SsVabTransCompleted(SS_IMEDIATE) == 0);
-					Task_sleep(0x1e);
-					CD.Cd_rtn_no = 0;
-					return 0xffffffff;
-				}
+				if (i == -1)
+					goto spu_error;
 
-				CD.Ring_status[CD.Write_ctr] = 0;
-				CD.Write_ctr++;
-				if (CD.Write_ctr == CD_RING_BUFFERS)
+				pCd->Ring_status[pCd->Write_ctr] = 0;
+				pCd->Write_ctr++;
+				if (pCd->Write_ctr == CD_RING_BUFFERS)
 				{
-					CD.Write_ctr = 0;
+					pCd->Write_ctr = 0;
 				}
 			}
 
 			Task_sleep(1);
 
-			if (CD.Cd_rtn_no > 1)
-				break;                  /* retry */
-			if (CD.Cd_rtn_no == 0)
-				return CD.Fsize_read;
+			if (pCd->Cd_rtn_no > 1)
+				goto retry;
+			if (pCd->Cd_rtn_no == 0)
+				return pCd->Fsize_read;
 		}
 	}
+
+spu_error:
+	DsSyncCallback(NULL);
+	DsReadyCallback(NULL);
+	while (SsVabTransCompleted(SS_IMEDIATE) == 0);
+	Task_sleep(0x1e);
+	pCd->Cd_rtn_no = 0;
+	return 0xffffffff;
 }
 
 /* ===========================================================================
- * Cd_seek                                                   DS 0x80013714
+ * Cd_cdsync_cb                                              DS 0x80013714
  * DsSyncCallback target during a data read (seek/pause completion).
- * Copies the 8 result bytes into CD.Result and sets CD.Status when intr is
- * DslComplete. Ghidra's auto-prototype (File_no, Mode, Mess) is wrong; the
- * body reads (intr, result).
+ * Copies the 8 result bytes into CD.Result and sets CD.Status to 1 when intr
+ * is DslComplete, or to 0 otherwise. Takes the sync code and the result
+ * bytes as arguments.
  * ===========================================================================*/
-/* DS 0x80013714 (Cd_seek) */
-/* DS walks result backward with its own pointer, tests the pre-decrement counter (loop runs for i = 7..0)
-   and sets Status with an if/else, not a comparison value. */
-void Cd_seek(UCHAR intr, UCHAR *result)
+/* DS 0x80013714 (Cd_cdsync_cb) */
+/* DS sets Status with an if/else (store 1 or 0), not a comparison value. */
+void Cd_cdsync_cb(UCHAR intr, UCHAR *result)
 {
-	int i;
+	ULONG i;
 
+	/* Copies result[7..0] into CD.Result[7..0], highest index first (the same loop as Xa_seek). */
 	i = 7;
-	result += 7;
 	do
 	{
-		CD.Result[i] = *result--;
+		CD.Result[i] = result[i];
 	} while (i-- != 0);
 
 	if (intr == DslComplete)
@@ -1520,115 +1559,117 @@ void Cd_seek(UCHAR intr, UCHAR *result)
 /* DS 0x8001376c (Cd_ready_cb) */
 void Cd_ready_cb(UCHAR intr, UCHAR *result)
 {
+	struct tagCD *pCd = &CD;
 	ULONG  read_num;
 	ULONG *sum_ck;
 	ULONG  i;
 	ULONG  Size;
 
 	i        = 4;
-	read_num = CD.Read_ctr;
+	read_num = pCd->Read_ctr;
 
 	if (intr == DslDiskError)
 	{
 		DsSyncCallback(NULL);
 		DsReadyCallback(NULL);
-		CD.Cd_rtn_no = 2;
+		pCd->Cd_rtn_no = 2;
 		return;
 	}
 	if (intr != DslDataReady)
 		return;
 
-	while (DsGetSector(CD.Work_buf, 3) == 0);
+	while (DsGetSector(pCd->Work_buf, 3) == 0);
 
-	if (CD.Current_sector != DsPosToInt((DslLOC *)CD.Work_buf))
+	if (pCd->Current_sector != DsPosToInt((DslLOC *)pCd->Work_buf))
 	{
-		CD.Cd_rtn_no = 3;
+		pCd->Cd_rtn_no = 3;
 		return;
 	}
 
-	CD.Current_sector++;
-	CD.Limit_break = 0;
-	CD.Fsector_num--;
-	CD.Fsector_read++;
+	pCd->Current_sector++;
+	pCd->Limit_break = 0;
+	pCd->Fsector_num--;
+	pCd->Fsector_read++;
 
 	if (CD.Type == 1)
 	{
-		if (CD.Fsize_now <= 0x800)
+		if (pCd->Fsize_now > 0x800)
 		{
-			/* last (partial) sector: read into Work_buf, copy remainder */
-			while (DsGetSector(CD.Work_buf, 0x200) == 0);
-			sum_ck = (ULONG *)CD.Work_buf;
-			Memcpy(CD.Read_adr, CD.Work_buf, CD.Fsize_now);
-			Size           = CD.Fsize_now;
-			CD.Fsize_now   = 0;
-			CD.Fsize_read += Size;
+			/* full sector: 0x200 words (2048 bytes) go straight into the caller's buffer */
+			while (DsGetSector(pCd->Read_adr, 0x200) == 0);
+			pCd->Fsize_now  -= 0x800;
+			pCd->Fsize_read += 0x800;
+			sum_ck = pCd->Read_adr;
 			do
 			{
-				CD.Sum     ^= (UCHAR)*sum_ck;
+				pCd->Sum     ^= (UCHAR)*sum_ck;
 				sum_ck     += 0x80;
-				CD.Sum_cnt += 0x200;
-			} while (CD.Sum_cnt < CD.Fsize_read);
-			DsReadyCallback(NULL);
+				pCd->Sum_cnt += 0x200;
+			} while (--i != 0);
+			pCd->Read_adr += 0x200;
 		}
 		else
 		{
-			while (DsGetSector(CD.Read_adr, 0x200) == 0);
-			CD.Fsize_now  -= 0x800;
-			CD.Fsize_read += 0x800;
-			sum_ck = CD.Read_adr;
+			/* last (partial) sector: read into Work_buf, copy remainder */
+			while (DsGetSector(pCd->Work_buf, 0x200) == 0);
+			sum_ck = (ULONG *)pCd->Work_buf;
+			Memcpy(pCd->Read_adr, pCd->Work_buf, pCd->Fsize_now);
+			pCd->Fsize_read += pCd->Fsize_now;
+			pCd->Fsize_now   = 0;
 			do
 			{
-				CD.Sum     ^= (UCHAR)*sum_ck;
+				pCd->Sum     ^= (UCHAR)*sum_ck;
 				sum_ck     += 0x80;
-				CD.Sum_cnt += 0x200;
-			} while (--i != 0);
-			CD.Read_adr += 0x200;
+				pCd->Sum_cnt += 0x200;
+			} while (pCd->Sum_cnt < pCd->Fsize_read);
+			DsReadyCallback(NULL);
 		}
 	}
 	else if (CD.Type == 2)
 	{
-		if (CD.Ring_status[read_num] != 0)
+		if (pCd->Ring_status[read_num] != 0)
 		{
-			CD.Cd_rtn_no = 5;              /* ring overflow */
+			pCd->Cd_rtn_no = 5;              /* ring overflow */
 			return;
 		}
 
-		while (DsGetSector(CD.Buff_adr + read_num * 0x200, 0x200) == 0);
-		CD.Ring_status[read_num] = 1;
+		while (DsGetSector(pCd->Buff_adr + read_num * 0x200, 0x200) == 0);
+		/* read_num holds Read_ctr from function entry; Read_ctr is advanced only at the end of this block */
+		pCd->Ring_status[read_num] = 1;
 
-		if (CD.Fsize_now <= 0x800)
+		if (pCd->Fsize_now > 0x800)
 		{
-			CD.Ring_size[read_num] = (USHORT)CD.Fsize_now;
-			Size           = CD.Fsize_now;
-			CD.Fsize_now   = 0;
-			sum_ck         = CD.Buff_adr + read_num * 0x200;
-			CD.Fsize_read += Size;
+			pCd->Fsize_now          -= 0x800;
+			pCd->Ring_size[read_num] = 0x800;
+			sum_ck                 = pCd->Buff_adr + read_num * 0x200;
+			pCd->Fsize_read         += 0x800;
 			do
 			{
-				CD.Sum     ^= (UCHAR)*sum_ck;
+				pCd->Sum     ^= (UCHAR)*sum_ck;
 				sum_ck     += 0x80;
-				CD.Sum_cnt += 0x200;
-			} while (CD.Sum_cnt < CD.Fsize_read);
-			DsReadyCallback(NULL);
+				pCd->Sum_cnt += 0x200;
+			} while (--i != 0);
 		}
 		else
 		{
-			CD.Fsize_now          -= 0x800;
-			CD.Ring_size[read_num] = 0x800;
-			sum_ck                 = CD.Buff_adr + read_num * 0x200;
-			CD.Fsize_read         += 0x800;
+			pCd->Ring_size[read_num] = (USHORT)pCd->Fsize_now;
+			Size           = pCd->Fsize_now;
+			sum_ck         = pCd->Buff_adr + read_num * 0x200;
+			pCd->Fsize_read += Size;
+			pCd->Fsize_now   = 0;
 			do
 			{
-				CD.Sum     ^= (UCHAR)*sum_ck;
+				pCd->Sum     ^= (UCHAR)*sum_ck;
 				sum_ck     += 0x80;
-				CD.Sum_cnt += 0x200;
-			} while (--i != 0);
+				pCd->Sum_cnt += 0x200;
+			} while (pCd->Sum_cnt < pCd->Fsize_read);
+			DsReadyCallback(NULL);
 		}
 
-		CD.Read_ctr++;
-		if (CD.Read_ctr == CD_RING_BUFFERS)
+		pCd->Read_ctr++;
+		if (pCd->Read_ctr == CD_RING_BUFFERS)
 		{
-			CD.Read_ctr = 0;
+			pCd->Read_ctr = 0;
 		}
 	}
 }

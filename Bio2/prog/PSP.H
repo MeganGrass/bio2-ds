@@ -106,6 +106,8 @@ extern PSP   *pPsp_work;
 extern TSPRT *pPsp_prim[2];
 
 /* Function prototypes */
+/* Sprite (PSP) controller: Psp_init0 and Psp_init1 reset the sprite tables, Psp_set activates a sprite,
+ * Psp_ctr updates the state of one group (matched by psp_id), and Psp_trans draws the active sprites. */
 void    Psp_init0(void);
 void    Psp_init1(void);
 void    Psp_set(void);

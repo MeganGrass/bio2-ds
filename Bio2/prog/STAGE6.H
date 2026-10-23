@@ -13,6 +13,7 @@
 #endif
 
 
+/* Stage 6 setup routine and its data tables (defined in STAGE6.C). Sizes in the trailing comments are bytes. */
 extern VOID Stage6(VOID);
 extern USHORT Bs_size6[24][16];		// 8011B650		// 768 bytes
 extern UCHAR Bs_check_sum6[24][16];		// 8011B950		// 384 bytes

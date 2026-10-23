@@ -6,7 +6,7 @@
  * Sprite work (Die_spr_*, Die_blood_*, Die_spr_load, Die_snd_trans) lives in DIESPR.C.
  * Die_demo and the Die_move_* state handlers are defined in Ghidra (DIEDEMO::
  * segment). Their DS addresses are read from Die_move_tbl (DS 0x801936d4) and from
- * MONITOR.C and checked against the overlay bytes.
+ * MONITOR.C, which match the overlay bytes.
  */
 
 #include "TYPES.H"
@@ -17,7 +17,6 @@
 #include <LIBGPU.H>
 #include <LIBGS.H>
 #include <LIBGTE.H>
-#include <LIBHMD.H>
 #include <STRINGS.H>
 #include "DIEDEMO.H"
 #include "DIESPR.H"
@@ -34,7 +33,7 @@
 /* Die_move_tbl: state handlers, DS 0x801936d4 (7 entries, read from   */
 /* DIEDEMO.BIN); Diedemo.Rno indexes it                                */
 /* ------------------------------------------------------------------ */
-static void (*Die_move_tbl[])(void) = {
+static void (*Die_move_tbl[7])(void) = {
 	Die_move_fade_out,      /* 0x80190118 state 0 */
 	Die_move_delay,         /* 0x80190344 state 1 */
 	Die_move_wait,          /* 0x80190388 state 2 */
@@ -44,18 +43,18 @@ static void (*Die_move_tbl[])(void) = {
 	Die_move_end,           /* 0x801912cc state 6 */
 };
 
-/* Critical attack ID table (DS address not verified) */
+/* Critical attack ID table  */
 UCHAR Critical_id[16];
 
 /* ------------------------------------------------------------------ */
 /* Static data                                                         */
 /* ------------------------------------------------------------------ */
 
-/* Cut info table: 14 entries, DS 0x80193520 */
-CUTINFO Cutinfo[14];
+/* Cut info table: 15 entries (retail reserves 15; Cutinfo[Id_ctr] reaches index 14), DS 0x80193520 */
+CUTINFO Cutinfo[15];
 
 /* Enemy-type to Cutinfo lookup table, DS 0x801936c4 (15 bytes; index 14 searched first) */
-static char Cutinfo_id[15];
+static UCHAR Cutinfo_id[15];
 
 /* Wait count table, DS 0x80193500 (USHORT, read from DIEDEMO.BIN). Index is the Cutinfo_id
  * index found by Die_move_fade_out (0..14), or 15 for the enemy '4' case with Type bit 0 clear.
@@ -78,17 +77,14 @@ static USHORT Die_wait_tbl[16];
  *   Prad      Cam_theta_add     0x8019389e
  *   P_radius  Cam_radius_add    0x801938a0
  *   Daddpos   Cam_step_add      0x801938a6
- * Die_phase (0x801938a4) is the phase counter below, kept as its own symbol because
- * DIEDEMO.H declares it extern for DIESPR.C. +0x38 (0x801938a8) is the SHORT member Wait_ctr, a
+ * Phase (0x801938a4, +0x34) is the three-frame phase counter; DIESPR.C sets it through Diedemo.
+ * +0x38 (0x801938a8) is the SHORT member Wait_ctr, a
  * signed wait counter (Die_move_delay); the Cutinfo pointer is pCam_cutinfo, 0x801938ac. */
-static DIEDEMO Diedemo;
+DIEDEMO Diedemo;
 
 /* Active cutinfo pointer, DS 0x801938ac */
 static CUTINFO *pCam_cutinfo;
 
-/* Phase counter, DS 0x801938a4 (extern in DIEDEMO.H). Die_move_wait steps it 0, 1, 2 and wraps;
- * state handlers test bit 0 (& 1) to alternate every frame. */
-UCHAR Die_phase;
 
 /* ------------------------------------------------------------------ */
 /* Die_demo  DS 0x8019009c..0x801900d8 (16 instructions, frame 24 bytes) */
@@ -138,7 +134,7 @@ void Die_move_fade_out(void)
 	Diedemo.Free    = 0x400;
 	Diedemo.Addpos  = 0;
 	Diedemo.Ctr     = 0;
-	Die_phase    = 0;
+	Diedemo.Phase    = 0;
 	Diedemo.Daddpos = 0;
 	Diedemo.S_trans_flg = 0;
 
@@ -195,7 +191,7 @@ void Die_move_fade_out(void)
 /* Leaf, no frame (17 instructions, 0x80190344..0x80190384, ends at jr  */
 /* ra). Counts Diedemo.Wait_ctr down by one; when the 16-bit value is   */
 /* negative afterwards, advances Diedemo.Rno to the next state. The     */
-/* name is not in the beta list, so it is not verified.                 */
+/* name is not in the beta log, so the name is the port's own choice.                 */
 /* ------------------------------------------------------------------ */
 void Die_move_delay(void)
 {
@@ -224,12 +220,12 @@ void Die_move_wait(void)
 		Diedemo.Ctr = (SHORT)(Diedemo.Ctr + Diedemo.Addpos);
 		Diedemo.Addpos = (SHORT)(Diedemo.Addpos + ((G.System_flg & SYS_DIE_BLOOD) ? 24 : 2));
 
-		/* Three-frame phase counter in Die_phase (DIEDEMO.H: 0x801938a4) */
-		Die_phase++;
-		if (Die_phase < 3) {
+		/* Three-frame phase counter in Diedemo.Phase (0x801938a4) */
+		Diedemo.Phase++;
+		if (Diedemo.Phase < 3) {
 			G.Stop_flg |= 0xff000000;
 		} else {
-			Die_phase = 0;
+			Diedemo.Phase = 0;
 			G.Stop_flg ^= 0xfc000000;
 			Snd_bgm_ctr(0x02000000);
 			Snd_bgm_ctr(0x12000000);
@@ -256,7 +252,7 @@ void Die_move_wait(void)
 	}
 
 	/* Fade finished: load the death sprites, then set the cut */
-	Die_phase = 0;
+	Diedemo.Phase = 0;
 	G.Dummy8_3[0] = 1;
 	Die_spr_load();
 	G.Dummy8_3[0] = 0;
@@ -284,8 +280,7 @@ void Die_move_wait(void)
 
 	/* Be_flg 0x00080000 on Ob_model[1] is cleared when the enemy Id is '#' and
 	 * Ob_model[1].pSuper is not &GsIDMATRIX (DS 0x800adb44) */
-	if (((char)((ENEMY_WORK *)G.Player.pEnemy_ptr)->Id == 35) &&
-	    ((MATRIX *)G.Ob_model[1].pSuper != &GsIDMATRIX)) {
+	if (((char)((ENEMY_WORK *)G.Player.pEnemy_ptr)->Id == 35) && ((MATRIX *)G.Ob_model[1].pSuper != &GsIDMATRIX)) {
 		G.Ob_model[1].Be_flg &= 0xfff7ffff;
 	}
 
@@ -299,7 +294,7 @@ void Die_move_wait(void)
 	Diedemo.Ctr = 0;
 	Diedemo.Rno = (USHORT)(Diedemo.Rno + ((G.System_flg & SYS_DIE_BLOOD) ? 1 : 2));
 
-	G.Stop_flg = (G.Stop_flg & 0x03ffffff) | ((Die_phase & 1) ? 0x80000000 : 0x40000000);
+	G.Stop_flg = (G.Stop_flg & 0x03ffffff) | ((Diedemo.Phase & 1) ? 0x80000000 : 0x40000000);
 	Fade_set(0x100, -0xbbc, 7, 3);
 }
 
@@ -358,7 +353,7 @@ void Die_move_set_cut(void)
 	Diedemo.Theta += Theta_step;
 
 	if (pCut->R_obj == 0) {
-		if ((Die_phase & 1) == 0) {
+		if ((Diedemo.Phase & 1) == 0) {
 			pMx = &G.Player.pSin_parts_ptr[pCut->R_ptr].Workm;
 			goto set_campos;
 		}
@@ -433,7 +428,7 @@ void Die_enemy_set(void)
 				if ((pEm->Be_flg & 1) != 0) {
 					Be_flg_new = pEm->Be_flg | 0x80000;
 					if ((pEm->Type & 0xc400) == 0) {
-						if ((Die_phase & 1) == 0) {
+						if ((Diedemo.Phase & 1) == 0) {
 							Dx = G.Player.Pos_x - pEm->Pos_x;
 							Dz = G.Player.Pos_z - pEm->Pos_z;
 							Dist = SquareRoot0(Dx * Dx + Dz * Dz);
@@ -461,7 +456,7 @@ next_enemy:
 				ppEm++;
 			} while (ppEm != G.ppEnemy_end);
 		}
-		if ((Die_phase & 1) == 0) {
+		if ((Diedemo.Phase & 1) == 0) {
 			*G.Player.pEnemy_ptr = *G.Player.pEnemy_ptr & 0xfff7ffff;
 			*G.Player.pEnemy_ptr = *G.Player.pEnemy_ptr | 8;
 		} else {
@@ -593,13 +588,13 @@ void Die_move_main(void)
 	Cut_idx = G.SaveData.Cut_no;
 	pCut = &G.pRoom->pLight[Cut_idx];
 	if ((G.System_flg & SYS_DIE_BLOOD) != 0) {
-		if (Diedemo.Ctr - 6 < 4) {
+		if ((USHORT)Diedemo.Ctr - 6U < 4U) {
 			pCut->Col[2][0] = 0xff;
 			pCut->Col[2][1] = 0;
 			pCut->Col[2][2] = 0;
 			pCut->L[2] = 20000;
-		} else if (Diedemo.Ctr - 10 < 0xb) {
-			pCut->Col[2][0] += 0xf4;
+		} else if ((USHORT)Diedemo.Ctr - 10U < 0xbU) {
+			pCut->Col[2][0] -= 12;
 			pCut->Col[2][1] += 0x0d;
 			pCut->Col[2][2] += 0x0d;
 			pCut->L[2] -= 0x4b0;
@@ -700,7 +695,7 @@ void Spiral_move(void)
 	pRcut = &pDiedemo->Rcut;
 	pDiedemo->Radius -= pDiedemo->P_radius;
 	if (pCam_cutinfo->R_obj == 0) {
-		if ((Die_phase & 1) == 0) {
+		if ((Diedemo.Phase & 1) == 0) {
 			pMx = &G.Player.pSin_parts_ptr[pCam_cutinfo->R_ptr].Workm;
 			goto set_view;
 		}
